@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Clock, MessageSquare, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText } from "lucide-react";
@@ -487,25 +487,16 @@ export default function HomePage() {
   // Track if voice config is loading
   const [isVoiceConfigLoading, setIsVoiceConfigLoading] = useState(false);
 
-  // Get current step record ID for timer tracking
-  // Note: In legacy format, s.id IS the step_identifier (e.g., "step_1")
-  const currentStepRecordId = useMemo(() => {
-    if (!sessionData.conversationPlan?.current_step_id) {
-      return null;
-    }
-    const steps = sessionData.conversationPlan.plan_data?.steps ?? [];
-    const currentStep = steps.find(
-      (s) => s.id === sessionData.conversationPlan?.current_step_id
-    );
-    return currentStep?.id ?? null;
-  }, [sessionData.conversationPlan]);
+  // Get current step ID for timer tracking
+  // The timer endpoint uses step_identifier (e.g., "step_1"), which is what current_step_id contains
+  const currentStepId = sessionData.conversationPlan?.current_step_id ?? null;
 
   // Session timer with intelligent pause/resume logic and persistence
   const sessionTimer = useSessionTimer({
     inactivityTimeout: 30000, // 30 seconds before pause
     askKey: sessionData.askKey || undefined, // Enable persistence when askKey is available
     inviteToken: sessionData.inviteToken,
-    currentStepId: currentStepRecordId, // Track time per step
+    currentStepId, // Track time per step (uses step_identifier directly)
   });
 
   // Toggle timer pause - switches between pause and start
