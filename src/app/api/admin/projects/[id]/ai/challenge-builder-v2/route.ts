@@ -998,6 +998,25 @@ export async function POST(
     const options = requestSchema?.parse(await request.json().catch(() => ({}))) ?? {};
 
     const supabase = getAdminSupabaseClient();
+
+    // Mark as running immediately so UI can show spinner even after page reload
+    const runId = options?.runId ?? `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    await supabase
+      .from("projects")
+      .update({
+        ai_challenge_builder_results: {
+          status: "running",
+          runId,
+          startedAt: new Date().toISOString(),
+          projectId,
+          suggestions: [],
+          newChallenges: [],
+          errors: null,
+          lastRunAt: null,
+        },
+      })
+      .eq("id", projectId);
+
     const context = await fetchProjectJourneyContext(supabase, projectId);
     const { boardData } = context;
 
@@ -1317,9 +1336,10 @@ export async function POST(
         .from("projects")
         .update({ ai_challenge_builder_results: {
           ...persistedResults,
+          status: "completed",
           lastRunAt: new Date().toISOString(),
           projectId,
-          ...(options?.runId ? { runId: options.runId } : {}),
+          runId, // Use the runId from the beginning of the request
         } })
         .eq("id", projectId);
 

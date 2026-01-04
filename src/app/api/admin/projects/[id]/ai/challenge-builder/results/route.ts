@@ -9,9 +9,11 @@ interface PersistedChallengeBuilderResults {
   suggestions: AiChallengeBuilderResponse["challengeSuggestions"];
   newChallenges: AiChallengeBuilderResponse["newChallengeSuggestions"];
   errors: AiChallengeBuilderResponse["errors"] | null;
-  lastRunAt: string; // ISO timestamp
+  lastRunAt: string | null; // ISO timestamp
   projectId: string;
   runId?: string; // Unique identifier for each execution
+  status?: "running" | "completed"; // Track if analysis is in progress
+  startedAt?: string; // When the analysis started
 }
 
 /**

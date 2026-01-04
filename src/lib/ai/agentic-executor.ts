@@ -99,7 +99,16 @@ async function callAnthropicWithMessages(
   const url = `${baseUrl}/messages`;
 
   // Determine max tokens (default 4096 if not specified)
-  const maxTokens = maxOutputTokens ?? 4096;
+  let maxTokens = maxOutputTokens ?? 4096;
+
+  // If thinking mode is enabled, max_tokens must be greater than budget_tokens
+  // max_tokens is the TOTAL limit (thinking + output), so we need:
+  // max_tokens > thinkingBudgetTokens to leave room for actual output
+  const thinkingBudget = config.thinkingBudgetTokens ?? 0;
+  if (thinkingBudget > 0 && maxTokens <= thinkingBudget) {
+    // Ensure at least 1024 tokens for actual output
+    maxTokens = thinkingBudget + 1024;
+  }
 
   const body: Record<string, unknown> = {
     model: config.model,
@@ -117,10 +126,10 @@ async function callAnthropicWithMessages(
   }
 
   // Add thinking mode if configured
-  if (config.thinkingBudgetTokens) {
+  if (thinkingBudget > 0) {
     body.thinking = {
       type: "enabled",
-      budget_tokens: config.thinkingBudgetTokens,
+      budget_tokens: thinkingBudget,
     };
   }
 

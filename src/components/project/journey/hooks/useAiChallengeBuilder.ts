@@ -21,8 +21,10 @@ export type AiBuilderResultsData = {
   suggestions: AiChallengeUpdateSuggestion[];
   newChallenges: AiNewChallengeSuggestion[];
   errors: Array<{ challengeId: string | null; message: string }> | null;
-  lastRunAt: string;
+  lastRunAt: string | null;
   runId?: string; // Unique identifier for each execution
+  status?: "running" | "completed"; // Track if analysis is in progress
+  startedAt?: string; // When the analysis started
 };
 
 export interface UseAiChallengeBuilderOptions {
@@ -183,7 +185,7 @@ export function useAiChallengeBuilder({
   );
 
   // Load AI builder results from API
-  const loadAiBuilderResults = useCallback(async (): Promise<AiBuilderResultsData | null> => {
+  const loadAiBuilderResults = useCallback(async (options?: { restoreRunningState?: boolean }): Promise<AiBuilderResultsData | null> => {
     try {
       const response = await fetch(`/api/admin/projects/${projectId}/ai/challenge-builder/results`, {
         cache: "no-store",
@@ -198,6 +200,13 @@ export function useAiChallengeBuilder({
         setAiBuilderErrors(data.errors);
         setAiBuilderLastRunAt(data.lastRunAt);
         setHasAiBuilderResults(true);
+
+        // Restore running state if analysis is in progress (e.g., after page reload)
+        if (options?.restoreRunningState && data.status === "running" && data.runId) {
+          setIsAiBuilderRunning(true);
+          setCurrentRunId(data.runId);
+        }
+
         return data;
       }
       return null;
@@ -207,9 +216,9 @@ export function useAiChallengeBuilder({
     }
   }, [projectId]);
 
-  // Load AI results on mount
+  // Load AI results on mount (restore running state if analysis is in progress)
   useEffect(() => {
-    loadAiBuilderResults();
+    loadAiBuilderResults({ restoreRunningState: true });
   }, [loadAiBuilderResults]);
 
   // Poll for AI results when builder is running
@@ -219,8 +228,9 @@ export function useAiChallengeBuilder({
     const pollInterval = setInterval(async () => {
       const data = await loadAiBuilderResults();
       if (data) {
-        // Use runId matching instead of date comparison to avoid clock sync issues
-        if (data.runId === currentRunId) {
+        // Check if the analysis has completed (status changed from "running" to "completed")
+        // Also verify runId matches to ensure we're checking the same run
+        if (data.status === "completed" && data.runId === currentRunId) {
           setIsAiBuilderRunning(false);
           setCurrentRunId(null);
 
