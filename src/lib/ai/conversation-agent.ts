@@ -274,6 +274,9 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
   let stepMessagesFormatted = '';
   let stepMessagesJson = '[]';
   let planSteps: Array<{ id: string; step_identifier: string }> | null = null;
+  // Last step and completion flags
+  let isLastStep = false;
+  let allStepsCompleted = false;
 
   if (context.conversationPlan) {
     const {
@@ -322,6 +325,16 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     const stepsCount = 'steps' in context.conversationPlan && Array.isArray(context.conversationPlan.steps)
       ? context.conversationPlan.steps.length
       : context.conversationPlan.plan_data?.steps.length || 0;
+
+    // Determine if this is the last step and if all steps are completed
+    const currentStepOrder = currentStep && 'step_order' in currentStep
+      ? (currentStep as any).step_order
+      : availableSteps.findIndex((s: any) => {
+          const stepId = 'step_identifier' in s ? s.step_identifier : s.id;
+          return stepId === currentStepId;
+        }) + 1;
+    isLastStep = currentStepOrder === stepsCount;
+    allStepsCompleted = availableSteps.every((s: any) => s.status === 'completed' || s.status === 'skipped');
 
     // Get plan steps for step_messages filtering
     if ('steps' in context.conversationPlan && Array.isArray(context.conversationPlan.steps)) {
@@ -437,6 +450,9 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     current_step_id: currentStepId,
     completed_steps_summary: completedStepsSummaryFormatted,
     plan_progress: planProgressFormatted,
+    // Last step and completion flags
+    is_last_step: isLastStep ? 'true' : 'false',
+    all_steps_completed: allStepsCompleted ? 'true' : 'false',
     // Step-specific messages (filtered by current step's plan_step_id)
     step_messages: stepMessagesFormatted,
     step_messages_json: stepMessagesJson,

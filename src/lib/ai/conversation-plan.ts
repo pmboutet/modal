@@ -554,6 +554,29 @@ export async function generateStepSummary(
 
   const typedStep = step as ConversationPlanStep;
 
+  // Fetch ALL previous completed steps from the same plan for context
+  const { data: previousSteps, error: prevStepsError } = await supabase
+    .from('ask_conversation_plan_steps')
+    .select('step_identifier, title, summary, step_order')
+    .eq('plan_id', typedStep.plan_id)
+    .eq('status', 'completed')
+    .lt('step_order', typedStep.step_order)
+    .order('step_order', { ascending: true });
+
+  if (prevStepsError) {
+    console.warn('Failed to fetch previous steps for context:', prevStepsError);
+    // Continue without previous context rather than failing
+  }
+
+  // Format previous steps summaries for context
+  let completedStepsSummary = '';
+  if (previousSteps && previousSteps.length > 0) {
+    completedStepsSummary = previousSteps
+      .filter(s => s.summary && s.summary.trim().length > 0)
+      .map(s => `**${s.step_identifier} - ${s.title}:**\n${s.summary}`)
+      .join('\n\n');
+  }
+
   // Fetch messages linked to this step
   const { data: messages, error: messagesError } = await supabase
     .from('messages')
@@ -595,6 +618,8 @@ export async function generateStepSummary(
     step_duration: durationFormatted,
     message_count: String(messages.length),
     step_messages: formattedMessages,
+    // Add previous steps context to prevent hallucinations
+    completed_steps_summary: completedStepsSummary,
   };
 
   // Call the summarizer agent - throw errors instead of returning fallback
