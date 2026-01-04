@@ -14,6 +14,8 @@ export interface AiToolDefinition {
 export interface AiProviderRequest {
   systemPrompt: string;
   userPrompt: string;
+  /** Optional messages array for multi-turn conversations (used by agentic executor) */
+  messages?: Array<{ role: string; content: unknown }>;
   maxOutputTokens?: number;
   temperature?: number;
   tools?: AiToolDefinition[];

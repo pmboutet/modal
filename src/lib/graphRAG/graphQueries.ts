@@ -23,12 +23,18 @@ export interface InsightCluster {
 
 /**
  * Find related insights by traversing the graph (BFS)
+ * @param supabase Supabase client
+ * @param insightId Source insight ID
+ * @param depth Number of hops to traverse (default 2)
+ * @param relationshipTypes Types of relationships to follow
+ * @param projectId Optional project ID to filter results (security isolation)
  */
 export async function findRelatedInsights(
   supabase: SupabaseClient,
   insightId: string,
   depth: number = 2,
-  relationshipTypes: string[] = ["SIMILAR_TO", "RELATED_TO"]
+  relationshipTypes: string[] = ["SIMILAR_TO", "RELATED_TO"],
+  projectId?: string
 ): Promise<RelatedInsight[]> {
   const results: RelatedInsight[] = [];
   const visited = new Set<string>();
@@ -37,6 +43,32 @@ export async function findRelatedInsights(
   ];
 
   visited.add(insightId);
+
+  // Get valid insight IDs for the project (for security filtering)
+  let validInsightIds: Set<string> | null = null;
+  if (projectId) {
+    const { data: askSessions } = await supabase
+      .from("ask_sessions")
+      .select("id")
+      .eq("project_id", projectId);
+
+    if (askSessions && askSessions.length > 0) {
+      const askSessionIds = askSessions.map((s) => s.id);
+      const { data: projectInsights } = await supabase
+        .from("insights")
+        .select("id")
+        .in("ask_session_id", askSessionIds);
+
+      if (projectInsights) {
+        validInsightIds = new Set(projectInsights.map((i) => i.id));
+      }
+    }
+
+    // If no valid insights found for project, return empty
+    if (!validInsightIds || validInsightIds.size === 0) {
+      return [];
+    }
+  }
 
   let currentDepth = 0;
 
@@ -60,6 +92,11 @@ export async function findRelatedInsights(
 
       for (const edge of edges) {
         if (edge.target_type !== "insight") {
+          continue;
+        }
+
+        // SECURITY: Skip if insight is not in the project scope
+        if (validInsightIds && !validInsightIds.has(edge.target_id)) {
           continue;
         }
 

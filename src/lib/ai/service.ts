@@ -27,6 +27,13 @@ export interface ExecuteAgentOptions {
     system?: PromptOverride;
     user?: PromptOverride;
   };
+  /** Enable tool use for agentic execution. Default: true if agent has tools configured */
+  enableTools?: boolean;
+  /** Context for tool execution (project, challenge, etc.) */
+  toolContext?: {
+    projectId?: string | null;
+    challengeId?: string | null;
+  };
 }
 
 export interface AgentExecutionResult {
@@ -35,6 +42,18 @@ export interface AgentExecutionResult {
   logId: string;
   agent: AiAgentRecord;
   modelConfig: AiModelConfig;
+  /** Captured thinking content (if extended thinking was enabled and agentic mode used) */
+  thinking?: string;
+  /** Tool calls made during agentic execution */
+  toolCalls?: Array<{
+    name: string;
+    input: unknown;
+    result: unknown;
+    latencyMs: number;
+    error?: string;
+  }>;
+  /** Number of API iterations (1 = no tool use, 2+ = tool use involved) */
+  iterations?: number;
 }
 
 export interface VoiceAgentExecutionResult {
@@ -231,6 +250,66 @@ export async function executeAgent(options: ExecuteAgentOptions): Promise<AgentE
   }
 
   const maxTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+
+  // Check if agent has tools enabled for agentic execution
+  const agentMetadata = agent.metadata as Record<string, unknown> | null;
+  const enabledTools = Array.isArray(agentMetadata?.enabled_tools)
+    ? agentMetadata.enabled_tools as string[]
+    : [];
+  const shouldUseAgenticMode = enabledTools.length > 0 && options.enableTools !== false;
+
+  if (shouldUseAgenticMode && !isVoiceAgent) {
+    const primaryConfig = configs[0];
+    await markAgentLogProcessing(options.supabase, log.id, { modelConfigId: primaryConfig.id });
+
+    try {
+      const { executeAgenticLoop } = await import('./agentic-executor');
+      const started = Date.now();
+
+      const agenticResult = await executeAgenticLoop({
+        supabase: options.supabase,
+        agent,
+        modelConfig: primaryConfig,
+        systemPrompt: prompts.system,
+        userPrompt: prompts.user,
+        toolContext: {
+          supabase: options.supabase,
+          projectId: options.toolContext?.projectId ?? null,
+          challengeId: options.toolContext?.challengeId ?? null,
+          askSessionId: options.askSessionId ?? null,
+        },
+        maxOutputTokens: maxTokens,
+        temperature: options.temperature,
+      });
+
+      const latency = Date.now() - started;
+
+      await completeAgentLog(options.supabase, log.id, {
+        responsePayload: {
+          ...agenticResult.raw,
+          toolCalls: agenticResult.toolCalls,
+          iterations: agenticResult.iterations,
+          thinking: agenticResult.thinking,
+        },
+        latencyMs: latency,
+      });
+
+      return {
+        content: agenticResult.content,
+        raw: agenticResult.raw,
+        logId: log.id,
+        agent,
+        modelConfig: primaryConfig,
+        thinking: agenticResult.thinking,
+        toolCalls: agenticResult.toolCalls,
+        iterations: agenticResult.iterations,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error during agentic execution";
+      await failAgentLog(options.supabase, log.id, message);
+      throw error;
+    }
+  }
 
   let lastError: unknown = null;
 

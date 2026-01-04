@@ -10,7 +10,7 @@ import { getConversationPlanWithSteps } from '@/lib/ai/conversation-plan';
 import { fetchInsightTypesForPrompt, fetchInsightsForSession } from '@/lib/insightQueries';
 import { mapInsightRowToInsight } from '@/lib/insights';
 import { buildEntityExtractionVariables } from '@/lib/graphRAG/extractEntities';
-import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries } from '@/lib/projectJourneyLoader';
+import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries, buildAskGeneratorVariables } from '@/lib/projectJourneyLoader';
 import {
   buildMessageSummary,
   fetchElapsedTime,
@@ -339,68 +339,20 @@ export async function POST(
         throw new Error(`Failed to fetch challenge: ${challengeError.message}`);
       }
 
-      if (challenge) {
-        const project = Array.isArray(challenge.projects) ? challenge.projects[0] : challenge.projects;
+      if (challenge && challenge.project_id) {
+        // Use shared buildAskGeneratorVariables for consistency with production (DRY)
+        const context = await fetchProjectJourneyContext(supabase, challenge.project_id);
+        const { boardData } = context;
 
-        // Fetch REAL project context with insights and ASKs (same as production route)
-        let insightSummaries: Record<string, unknown>[] = [];
-        let existingAsks: Record<string, unknown>[] = [];
-        let targetChallenge: any = null;
-        let boardData: any = null;
+        const allChallenges = flattenChallengeTree(boardData.challenges);
+        const targetChallenge = allChallenges.find(c => c.id === body.challengeId);
 
-        if (challenge.project_id) {
-          const context = await fetchProjectJourneyContext(supabase, challenge.project_id);
-          boardData = context.boardData;
-
-          // Find the challenge in the flat list (same as production route)
-          const allChallenges = flattenChallengeTree(boardData.challenges);
-          targetChallenge = allChallenges.find((c: any) => c.id === body.challengeId);
-
-          insightSummaries = buildInsightSummaries(boardData, body.challengeId);
-          existingAsks = buildExistingAskSummaries(boardData, body.challengeId, context.askRows);
+        if (targetChallenge) {
+          const insightSummaries = buildInsightSummaries(boardData, body.challengeId);
+          const existingAsks = buildExistingAskSummaries(boardData, body.challengeId, context.askRows);
+          const generatorVars = buildAskGeneratorVariables(boardData, targetChallenge, insightSummaries, existingAsks);
+          Object.assign(variables, generatorVars);
         }
-
-        // Use boardData values when available (richer data), fallback to challenge query
-        variables.challenge_id = challenge.id;
-        variables.challenge_title = targetChallenge?.title ?? challenge.name ?? '';
-        variables.challenge_description = targetChallenge?.description ?? challenge.description ?? '';
-        variables.challenge_status = targetChallenge?.status ?? challenge.status ?? '';
-        variables.challenge_impact = targetChallenge?.impact ?? '';
-        variables.project_name = boardData?.projectName ?? project?.name ?? '';
-        variables.project_goal = boardData?.projectGoal ?? '';
-        variables.project_status = boardData?.projectStatus ?? '';
-        variables.project_description = boardData?.projectDescription ?? '';
-        variables.system_prompt_project = boardData?.projectSystemPrompt ?? project?.system_prompt ?? '';
-        variables.system_prompt_challenge = '';
-
-        // Build challenge context with real data (same structure as production)
-        const challengeContext = {
-          project: {
-            id: challenge.project_id,
-            name: boardData?.projectName ?? project?.name,
-            goal: boardData?.projectGoal ?? null,
-            status: boardData?.projectStatus ?? null,
-            timeframe: boardData?.timeframe ?? null,
-            description: boardData?.projectDescription ?? null,
-          },
-          challenge: {
-            id: challenge.id,
-            title: targetChallenge?.title ?? challenge.name,
-            description: targetChallenge?.description ?? challenge.description,
-            status: targetChallenge?.status ?? challenge.status,
-            impact: targetChallenge?.impact ?? null,
-            owners: targetChallenge?.owners ?? [],
-            relatedInsightCount: insightSummaries.length,
-            existingAskCount: existingAsks.length,
-          },
-          insights: insightSummaries,
-          existingAsks,
-        };
-
-        variables.challenge_context_json = JSON.stringify(challengeContext);
-        variables.insights_json = JSON.stringify(insightSummaries);
-        variables.existing_asks_json = JSON.stringify(existingAsks);
-        variables.current_date = new Date().toISOString();
       }
     } else if (body.projectId) {
       // Build variables for project context

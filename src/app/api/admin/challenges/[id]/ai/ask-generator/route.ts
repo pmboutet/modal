@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
-import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries } from "@/lib/projectJourneyLoader";
+import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries, buildAskGeneratorVariables } from "@/lib/projectJourneyLoader";
 import { executeAgent } from "@/lib/ai/service";
 import { parseErrorMessage } from "@/lib/utils";
 import {
@@ -406,28 +406,8 @@ export async function POST(
     const insightSummaries = buildInsightSummaries(boardData, challengeId);
     const existingAsks = buildExistingAskSummaries(boardData, challengeId, context.askRows);
 
-    const challengeContext = {
-      project: {
-        id: boardData.projectId,
-        name: boardData.projectName,
-        goal: boardData.projectGoal,
-        status: boardData.projectStatus,
-        timeframe: boardData.timeframe,
-        description: boardData.projectDescription,
-      },
-      challenge: {
-        id: targetChallenge.id,
-        title: targetChallenge.title,
-        description: targetChallenge.description,
-        status: targetChallenge.status,
-        impact: targetChallenge.impact,
-        owners: targetChallenge.owners ?? [],
-        relatedInsightCount: insightSummaries.length,
-        existingAskCount: existingAsks.length,
-      },
-      insights: insightSummaries,
-      existingAsks,
-    } satisfies Record<string, unknown>;
+    // Use shared function for variable building (DRY)
+    const variables = buildAskGeneratorVariables(boardData, targetChallenge, insightSummaries, existingAsks);
 
     const aiResult = await executeAgent({
       supabase,
@@ -435,20 +415,7 @@ export async function POST(
       askSessionId: null,
       messageId: null,
       interactionType: INTERACTION_TYPE,
-      variables: {
-        project_name: boardData.projectName,
-        project_goal: boardData.projectGoal ?? "",
-        project_status: boardData.projectStatus ?? "",
-        challenge_id: targetChallenge.id,
-        challenge_title: targetChallenge.title,
-        challenge_description: targetChallenge.description ?? "",
-        challenge_status: targetChallenge.status ?? "",
-        challenge_impact: targetChallenge.impact,
-        challenge_context_json: JSON.stringify(challengeContext),
-        insights_json: JSON.stringify(insightSummaries),
-        existing_asks_json: JSON.stringify(existingAsks),
-        current_date: new Date().toISOString(),
-      },
+      variables,
       maxOutputTokens: options.maxOutputTokens,
       temperature: options.temperature,
     });

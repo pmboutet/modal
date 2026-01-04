@@ -926,6 +926,70 @@ export function buildInsightSummaries(boardData: ProjectJourneyBoardData, challe
 }
 
 /**
+ * Build all variables needed for ask-generator agent.
+ * Used by both production route and test mode to ensure consistency (DRY).
+ */
+export function buildAskGeneratorVariables(
+  boardData: ProjectJourneyBoardData,
+  targetChallenge: ProjectChallengeNode,
+  insightSummaries: Record<string, unknown>[],
+  existingAsks: Record<string, unknown>[],
+) {
+  const challengeContext = {
+    project: {
+      id: boardData.projectId,
+      name: boardData.projectName,
+      goal: boardData.projectGoal,
+      status: boardData.projectStatus,
+      timeframe: boardData.timeframe,
+      description: boardData.projectDescription,
+    },
+    challenge: {
+      id: targetChallenge.id,
+      title: targetChallenge.title,
+      description: targetChallenge.description,
+      status: targetChallenge.status,
+      impact: targetChallenge.impact,
+      owners: targetChallenge.owners ?? [],
+      relatedInsightCount: insightSummaries.length,
+      existingAskCount: existingAsks.length,
+    },
+    insights: insightSummaries,
+    existingAsks,
+  };
+
+  return {
+    // Project variables
+    project_name: boardData.projectName,
+    project_goal: boardData.projectGoal ?? "",
+    project_status: boardData.projectStatus ?? "",
+    project_description: boardData.projectDescription ?? "",
+    system_prompt_project: boardData.projectSystemPrompt ?? "",
+    // Challenge variables (both naming conventions for template compatibility)
+    challenge_id: targetChallenge.id,
+    challenge_title: targetChallenge.title,
+    challenge_name: targetChallenge.title, // Alias for templates using challenge_name
+    challenge_description: targetChallenge.description ?? "",
+    challenge_status: targetChallenge.status ?? "",
+    challenge_impact: targetChallenge.impact ?? "",
+    system_prompt_challenge: "",
+    // Context JSON
+    challenge_context_json: JSON.stringify(challengeContext),
+    insights_json: JSON.stringify(insightSummaries),
+    existing_asks_json: JSON.stringify(existingAsks),
+    // Project members for participant recommendations
+    project_members_json: JSON.stringify(boardData.projectMembers.map(m => ({
+      id: m.id,
+      name: m.fullName ?? m.email ?? 'Inconnu',
+      role: m.role,
+      jobTitle: m.jobTitle,
+      description: m.description,
+    }))),
+    current_date: new Date().toISOString(),
+  };
+}
+
+/**
  * Build existing ASK summaries for a specific challenge from the project board data.
  * Used by ask-generator to understand what ASKs already exist for this challenge.
  */
