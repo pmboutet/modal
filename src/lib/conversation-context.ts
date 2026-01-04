@@ -15,7 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { normaliseMessageMetadata } from './messages';
 import { getOrCreateConversationThread, getMessagesForThread, type AskSessionConfig } from './asks';
 import { getConversationPlanWithSteps, type ConversationPlan, type ConversationPlanWithSteps } from './ai/conversation-plan';
-import type { ConversationMessageSummary, ConversationParticipantSummary, ConversationAgentContext } from './ai/conversation-agent';
+import type { ConversationMessageSummary, ConversationParticipantSummary } from './ai/conversation-agent';
 
 // ============================================================================
 // DEBUG MODE - Toggle to throw errors for production visibility
@@ -1031,25 +1031,32 @@ export async function fetchMessagesBySession(
 
 /**
  * Insert an AI message via RPC.
+ *
+ * IMPORTANT: Always pass planStepId to ensure AI messages are properly linked
+ * to conversation plan steps. Without this, step_messages_json will only contain
+ * user messages, causing the AI to lose context of its own questions.
  */
 export async function insertAiMessage(
   supabase: SupabaseClient,
   askSessionId: string,
   conversationThreadId: string | null,
   content: string,
-  senderName: string = 'Agent'
+  senderName: string = 'Agent',
+  planStepId: string | null = null
 ): Promise<MessageRow | null> {
   const params = {
     p_ask_session_id: askSessionId,
     p_conversation_thread_id: conversationThreadId,
     p_content: content.substring(0, 100) + (content.length > 100 ? '...' : ''), // Truncate for debug
     p_sender_name: senderName,
+    p_plan_step_id: planStepId,
   };
   const { data, error } = await supabase.rpc('insert_ai_message', {
     p_ask_session_id: askSessionId,
     p_conversation_thread_id: conversationThreadId,
     p_content: content,
     p_sender_name: senderName,
+    p_plan_step_id: planStepId,
   });
 
   if (error) {

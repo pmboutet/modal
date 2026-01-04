@@ -32,6 +32,10 @@ interface SentryIssuesResponse {
   total: number;
 }
 
+// Valid statsPeriod values for Sentry API
+const VALID_STATS_PERIODS = ['', '24h', '14d'] as const;
+type StatsPeriod = typeof VALID_STATS_PERIODS[number];
+
 /**
  * GET /api/admin/sentry/issues
  * Fetches issues from Sentry API
@@ -39,7 +43,7 @@ interface SentryIssuesResponse {
  * Query params:
  * - limit: number of issues to fetch (default: 25)
  * - query: Sentry search query (e.g., "is:unresolved", "level:error")
- * - statsPeriod: time period (e.g., "24h", "14d")
+ * - statsPeriod: time period - valid values: '', '24h', '14d' (default: '14d')
  */
 export async function GET(request: NextRequest) {
   try {
@@ -64,7 +68,11 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const limit = url.searchParams.get('limit') || '25';
     const query = url.searchParams.get('query') || 'is:unresolved';
-    const statsPeriod = url.searchParams.get('statsPeriod') || '14d';
+    const requestedPeriod = url.searchParams.get('statsPeriod') || '14d';
+    // Validate statsPeriod - fall back to '14d' if invalid
+    const statsPeriod: StatsPeriod = VALID_STATS_PERIODS.includes(requestedPeriod as StatsPeriod)
+      ? (requestedPeriod as StatsPeriod)
+      : '14d';
 
     const sentryUrl = `https://sentry.io/api/0/projects/${org}/${project}/issues/?limit=${limit}&query=${encodeURIComponent(query)}&statsPeriod=${statsPeriod}`;
 

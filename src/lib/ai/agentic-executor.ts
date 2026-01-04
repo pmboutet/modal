@@ -189,6 +189,13 @@ export async function executeAgenticLoop(
   const tools = getToolsForAgent(options.agent.metadata as Record<string, unknown> | null);
   const aiTools = convertToAiToolDefinitions(tools);
 
+  console.log(`🔧 Agentic execution for ${options.agent.slug}:`, {
+    enabledTools: (options.agent.metadata as Record<string, unknown> | null)?.enabled_tools,
+    toolsResolved: tools.map(t => t.name),
+    aiToolsCount: aiTools.length,
+    hasToolContext: !!options.toolContext?.projectId,
+  });
+
   // Build initial message
   const messages: Message[] = [
     {

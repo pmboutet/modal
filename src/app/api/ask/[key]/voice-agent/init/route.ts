@@ -236,12 +236,14 @@ export async function POST(
           }
 
           // Insert the initial AI message via RPC wrapper
+          // Pass initialPlanStepId to link message to current step
           const insertedMessage = await insertAiMessage(
             adminClient,
             askRow.id,
             conversationThread?.id ?? null,
             aiResponse,
-            'Agent'
+            'Agent',
+            initialPlanStepId
           );
 
           if (!insertedMessage) {

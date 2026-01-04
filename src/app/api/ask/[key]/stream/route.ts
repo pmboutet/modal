@@ -516,12 +516,14 @@ export async function POST(
                 }
 
                 // Insert AI message via RPC wrapper to bypass RLS
+                // Pass planStepId to link message to current step (fixes context loss bug)
                 const inserted = await insertAiMessage(
                   insertClient,
                   askRow.id,
                   conversationThread?.id ?? null,
                   fullContent.trim(),
-                  'Agent'
+                  'Agent',
+                  planStepId
                 );
 
                 if (!inserted) {

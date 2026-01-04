@@ -68,6 +68,11 @@ function delay(ms: number) {
 }
 
 function buildRequestPayload(agent: AiAgentRecord, prompts: { system: string; user: string }) {
+  const agentMetadata = agent.metadata as Record<string, unknown> | null;
+  const enabledTools = Array.isArray(agentMetadata?.enabled_tools)
+    ? agentMetadata.enabled_tools as string[]
+    : [];
+
   return {
     agentSlug: agent.slug,
     modelConfigId: agent.modelConfigId,
@@ -77,6 +82,8 @@ function buildRequestPayload(agent: AiAgentRecord, prompts: { system: string; us
     // Store original templates for variable highlighting in logs
     systemPromptTemplate: agent.systemPrompt,
     userPromptTemplate: agent.userPrompt,
+    // Store enabled tools for debugging
+    enabledTools: enabledTools.length > 0 ? enabledTools : undefined,
   } satisfies Record<string, unknown>;
 }
 

@@ -1759,12 +1759,14 @@ export async function POST(
         }
 
         // Insert AI message via RPC wrapper to bypass RLS
+        // Pass voicePlanStepId to link message to current step
         const inserted = await insertAiMessage(
           supabase,
           askRow.id,
           conversationThread?.id ?? null,
           messageContent,
-          'Agent'
+          'Agent',
+          voicePlanStepId
         );
 
         if (inserted) {
@@ -1897,12 +1899,14 @@ export async function POST(
         }
 
         // Insert AI message via RPC wrapper to bypass RLS
+        // Pass planStepId to link message to current step
         const inserted = await insertAiMessage(
           supabase,
           askRow.id,
           conversationThread?.id ?? null,
           latestAiResponse,
-          'Agent'
+          'Agent',
+          planStepId
         );
 
         if (!inserted) {

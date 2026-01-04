@@ -578,12 +578,14 @@ export async function GET(
           }
 
           // Insert the initial AI message via RPC wrapper to bypass RLS
+          // Pass initialPlanStepId to link message to current step
           const inserted = await insertAiMessage(
             dataClient,
             askSessionId,
             conversationThread?.id ?? null,
             aiResponse,
-            'Agent'
+            'Agent',
+            initialPlanStepId
           );
 
           if (inserted) {
