@@ -278,7 +278,8 @@ function MobileLayout({
       )}
 
       {/* Panels Container - navigation via buttons only, no swipe */}
-      <div className="flex-1 relative overflow-hidden min-w-0 max-w-full overflow-x-hidden" ref={containerRef}>
+      {/* h-0 is required with flex-1 to ensure h-full works correctly on children */}
+      <div className="flex-1 h-0 relative overflow-hidden min-w-0 max-w-full overflow-x-hidden" ref={containerRef}>
         <motion.div
           className="flex h-full min-w-0 max-w-full"
           animate={{
