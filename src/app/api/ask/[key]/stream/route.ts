@@ -418,13 +418,17 @@ export async function POST(
       user: resolvedUserPrompt,
     };
 
-    // Vibe Coding: Les variables sont déjà compilées dans les prompts via Handlebars
+    /// Vibe Coding: Les variables sont déjà compilées dans les prompts via Handlebars
     // Le payload ne contient que les prompts finaux (system et user)
+    // Also store step_messages_json for debugging context issues
     const agentRequestPayload = {
       agentSlug: CHAT_AGENT_SLUG,
       modelConfigId: agentConfig.modelConfig.id,
       systemPrompt: prompts.system,
       userPrompt: prompts.user,
+      // Debug: store step messages to verify context is properly populated
+      stepMessagesJson: agentVariables.step_messages_json ?? null,
+      currentStepId: agentVariables.current_step_id ?? null,
     } satisfies Record<string, unknown>;
 
     // Create a log entry for tracking

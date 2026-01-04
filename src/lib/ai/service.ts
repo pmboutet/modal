@@ -299,6 +299,8 @@ export async function executeAgent(options: ExecuteAgentOptions): Promise<AgentE
           thinking: agenticResult.thinking,
         },
         latencyMs: latency,
+        // Store tool_calls in dedicated column for easy querying
+        toolCalls: agenticResult.toolCalls,
       });
 
       return {

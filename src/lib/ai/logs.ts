@@ -83,12 +83,22 @@ export async function markAgentLogProcessing(
   }
 }
 
+export interface ToolCallLogEntry {
+  name: string;
+  input: unknown;
+  result: unknown;
+  latencyMs: number;
+  error?: string;
+}
+
 export async function completeAgentLog(
   supabase: SupabaseClient,
   logId: string,
   payload: {
     responsePayload: Record<string, unknown>;
     latencyMs?: number;
+    /** Tool calls to store in dedicated column for easy querying */
+    toolCalls?: ToolCallLogEntry[];
   }
 ): Promise<void> {
   const { error } = await supabase
@@ -97,6 +107,10 @@ export async function completeAgentLog(
       status: "completed",
       response_payload: payload.responsePayload,
       latency_ms: payload.latencyMs ?? null,
+      // Store tool_calls in dedicated JSONB column if provided
+      tool_calls: payload.toolCalls && payload.toolCalls.length > 0
+        ? payload.toolCalls
+        : null,
     })
     .eq("id", logId);
 

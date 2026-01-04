@@ -107,6 +107,10 @@ interface MobileLayoutProps {
   isConsultantAnalyzing?: boolean;
   /** Current user's profile ID for message alignment */
   currentUserId?: string | null;
+  /** Whether the header is hidden due to scroll */
+  isHeaderHidden: boolean;
+  /** Handler for chat scroll events */
+  onChatScroll: (scrollTop: number, scrollDelta: number) => void;
 }
 
 /**
@@ -145,14 +149,11 @@ function MobileLayout({
   consultantQuestions,
   isConsultantAnalyzing,
   currentUserId,
+  isHeaderHidden,
+  onChatScroll,
 }: MobileLayoutProps) {
   const [panelWidth, setPanelWidth] = useState(0);
-  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrollUpAccumulator = useRef(0);
-
-  // Threshold for showing header after scrolling up (in pixels)
-  const SCROLL_UP_THRESHOLD = 100;
 
   useEffect(() => {
     const updateWidth = () => {
@@ -165,42 +166,8 @@ function MobileLayout({
     return () => window.removeEventListener('resize', updateWidth);
   }, []);
 
-  // Handle scroll events from ChatComponent to hide/show header
-  const handleChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
-    // Ignore tiny scroll changes (less than 2px) to avoid jitter
-    if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
-      return;
-    }
-
-    // Initial load: hide header if already scrolled down
-    if (scrollDelta === 0 && scrollTop > 50) {
-      setIsHeaderHidden(true);
-      return;
-    }
-
-    if (scrollDelta > 0) {
-      // Scrolling down - hide header immediately
-      setIsHeaderHidden(true);
-      scrollUpAccumulator.current = 0;
-    } else if (scrollDelta < 0) {
-      // Scrolling up - accumulate scroll distance
-      scrollUpAccumulator.current += Math.abs(scrollDelta);
-
-      // Show header only after scrolling up significantly
-      if (scrollUpAccumulator.current >= SCROLL_UP_THRESHOLD) {
-        setIsHeaderHidden(false);
-      }
-    }
-
-    // If at the very top, always show header
-    if (scrollTop <= 10) {
-      setIsHeaderHidden(false);
-      scrollUpAccumulator.current = 0;
-    }
-  }, []);
-
   return (
-    <div className="flex flex-col h-[calc(100dvh-44px)] overflow-hidden min-w-0 w-full max-w-full overflow-x-hidden touch-pan-y">
+    <div className={`flex flex-col overflow-hidden min-w-0 w-full max-w-full overflow-x-hidden touch-pan-y transition-[height] duration-200 ${isHeaderHidden ? 'h-[100dvh]' : 'h-[calc(100dvh-44px)]'}`}>
       {/* Collapsible Header - Compact - hides on scroll down */}
       {askDetails && (
         <motion.div
@@ -380,7 +347,7 @@ function MobileLayout({
                   elapsedMinutes={sessionElapsedMinutes}
                   isTimerPaused={isSessionTimerPaused}
                   onTogglePause={onToggleTimerPause}
-                  onChatScroll={handleChatScroll}
+                  onChatScroll={onChatScroll}
                 />
               </div>
             </div>
@@ -415,8 +382,20 @@ function MobileLayout({
         </motion.div>
       </div>
 
-      {/* Panel Indicator - with safe area for mobile browsers */}
-      <div className="flex items-center justify-center gap-2 py-2 bg-white/50 backdrop-blur border-t border-white/50" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
+      {/* Panel Indicator - with safe area for mobile browsers, hides on scroll down */}
+      <motion.div
+        initial={false}
+        animate={{
+          height: isHeaderHidden ? 0 : 'auto',
+          opacity: isHeaderHidden ? 0 : 1,
+        }}
+        transition={{ duration: 0.2 }}
+        className="flex items-center justify-center gap-2 bg-white/50 backdrop-blur border-t border-white/50 overflow-hidden"
+        style={{
+          paddingTop: isHeaderHidden ? 0 : 8,
+          paddingBottom: isHeaderHidden ? 0 : 'max(8px, env(safe-area-inset-bottom))',
+        }}
+      >
         <button
           onClick={() => setMobileActivePanel('chat')}
           className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
@@ -439,7 +418,7 @@ function MobileLayout({
           <Lightbulb className="h-4 w-4" />
           <span className="text-sm font-medium">Insights</span>
         </button>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -508,6 +487,40 @@ export default function HomePage() {
     }
   }, [sessionTimer]);
 
+  // Handle scroll events from mobile ChatComponent to hide/show header, logo bar, and panel indicator
+  const handleMobileChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
+    // Ignore tiny scroll changes (less than 2px) to avoid jitter
+    if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
+      return;
+    }
+
+    // Initial load: hide header if already scrolled down
+    if (scrollDelta === 0 && scrollTop > 50) {
+      setIsMobileHeaderHidden(true);
+      return;
+    }
+
+    if (scrollDelta > 0) {
+      // Scrolling down - hide header immediately
+      setIsMobileHeaderHidden(true);
+      mobileScrollUpAccumulator.current = 0;
+    } else if (scrollDelta < 0) {
+      // Scrolling up - accumulate scroll distance
+      mobileScrollUpAccumulator.current += Math.abs(scrollDelta);
+
+      // Show header only after scrolling up significantly
+      if (mobileScrollUpAccumulator.current >= MOBILE_SCROLL_UP_THRESHOLD) {
+        setIsMobileHeaderHidden(false);
+      }
+    }
+
+    // If at the very top, always show header
+    if (scrollTop <= 10) {
+      setIsMobileHeaderHidden(false);
+      mobileScrollUpAccumulator.current = 0;
+    }
+  }, []);
+
   // Consultant analysis for AI-assisted question suggestions
   const isConsultantMode = sessionData.ask?.conversationMode === 'consultant';
   const isSpokesperson = isCurrentParticipantSpokesperson;
@@ -571,6 +584,9 @@ export default function HomePage() {
   const [mobileActivePanel, setMobileActivePanel] = useState<'chat' | 'insights'>('chat');
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isMobileHeaderHidden, setIsMobileHeaderHidden] = useState(false);
+  const mobileScrollUpAccumulator = useRef(0);
+  const MOBILE_SCROLL_UP_THRESHOLD = 100;
   // Desktop compact mode states (tabbed layout when content is minimal)
   const [desktopRightPanelTab, setDesktopRightPanelTab] = useState<'questions' | 'details' | 'insights'>('insights');
   const [useCompactMode, setUseCompactMode] = useState(false);
@@ -2451,11 +2467,16 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* Beautiful Header - Compact on mobile */}
+      {/* Beautiful Header - Compact on mobile, hides on scroll down */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm"
+        animate={{
+          opacity: isMobile && isMobileHeaderHidden ? 0 : 1,
+          y: 0,
+          height: isMobile && isMobileHeaderHidden ? 0 : 'auto',
+        }}
+        transition={{ duration: 0.2 }}
+        className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm overflow-hidden"
       >
         <div className="container mx-auto px-3 sm:px-6 py-1.5 sm:py-3">
           <div className="flex items-center justify-between gap-2">
@@ -2534,6 +2555,8 @@ export default function HomePage() {
           consultantQuestions={consultantAnalysis.questions}
           isConsultantAnalyzing={consultantAnalysis.isAnalyzing}
           currentUserId={currentUserId}
+          isHeaderHidden={isMobileHeaderHidden}
+          onChatScroll={handleMobileChatScroll}
         />
       ) : (
         <main className="flex h-[calc(100dvh-88px)] overflow-hidden gap-6 p-6 min-w-0">
