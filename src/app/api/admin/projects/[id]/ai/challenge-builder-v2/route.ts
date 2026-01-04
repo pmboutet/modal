@@ -16,7 +16,7 @@ import { jsonrepair } from "jsonrepair";
 import { z } from "zod";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
 import { parseErrorMessage } from "@/lib/utils";
-import { fetchProjectJourneyContext } from "@/lib/projectJourneyLoader";
+import { fetchProjectJourneyContext, flattenChallengeTree } from "@/lib/projectJourneyLoader";
 import { executeAgent } from "@/lib/ai/service";
 import { enrichInsightsWithGraphRAG, filterDuplicateInsights } from "@/lib/graphRAG/challengeIntegration";
 import {
@@ -165,10 +165,6 @@ const CHALLENGE_IMPACT_VALUES = new Set<ProjectChallengeNode["impact"]>(["low", 
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
-
-function flattenChallengeTree(nodes: ProjectChallengeNode[]): ProjectChallengeNode[] {
-  return nodes.flatMap(node => [node, ...(node.children ? flattenChallengeTree(node.children) : [])]);
-}
 
 /**
  * Find a challenge by ID in a tree structure

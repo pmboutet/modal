@@ -864,3 +864,122 @@ export async function fetchProjectJourneyContext(
     availableUsers,
   };
 }
+
+/**
+ * Flatten a nested challenge tree into a single array.
+ * Used by ask-generator and challenge-builder to find specific challenges.
+ */
+export function flattenChallengeTree(nodes: ProjectChallengeNode[]): ProjectChallengeNode[] {
+  return nodes.flatMap(node => [node, ...(node.children ? flattenChallengeTree(node.children) : [])]);
+}
+
+/**
+ * Build insight summaries for a specific challenge from the project board data.
+ * Used by ask-generator to provide context about existing insights.
+ */
+export function buildInsightSummaries(boardData: ProjectJourneyBoardData, challengeId: string) {
+  const summaries = new Map<string, Record<string, unknown>>();
+
+  boardData.asks.forEach(ask => {
+    ask.insights.forEach(insight => {
+      if (!insight.relatedChallengeIds.includes(challengeId)) {
+        return;
+      }
+
+      const existing = summaries.get(insight.id);
+      const baseContributors = (insight.contributors ?? []).map(contributor => ({
+        id: contributor.id,
+        name: contributor.name,
+        role: contributor.role ?? null,
+      }));
+
+      if (existing) {
+        const seen = new Set((existing.contributors as Array<{ id?: string; name?: string }>)?.map(item => item.id ?? item.name));
+        const mergedContributors = [...(existing.contributors as Array<{ id?: string; name?: string; role?: string | null }> ?? [])];
+        baseContributors.forEach(contributor => {
+          const key = contributor.id ?? contributor.name;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            mergedContributors.push(contributor);
+          }
+        });
+        existing.contributors = mergedContributors;
+        summaries.set(insight.id, existing);
+        return;
+      }
+
+      summaries.set(insight.id, {
+        id: insight.id,
+        title: insight.title,
+        type: insight.type,
+        description: insight.description,
+        isCompleted: insight.isCompleted,
+        askId: ask.id,
+        askKey: ask.askKey,
+        askTitle: ask.title,
+        contributors: baseContributors,
+      });
+    });
+  });
+
+  return Array.from(summaries.values());
+}
+
+/**
+ * Build existing ASK summaries for a specific challenge from the project board data.
+ * Used by ask-generator to understand what ASKs already exist for this challenge.
+ */
+export function buildExistingAskSummaries(
+  boardData: ProjectJourneyBoardData,
+  challengeId: string,
+  askRows: any[],
+) {
+  const askRowById = new Map<string, any>();
+  askRows.forEach(row => {
+    if (row?.id) {
+      askRowById.set(row.id, row);
+    }
+  });
+
+  return boardData.asks
+    .filter(ask => {
+      const directIds = new Set<string>();
+      if (ask.primaryChallengeId) {
+        directIds.add(ask.primaryChallengeId);
+      }
+      ask.originatingChallengeIds?.forEach(id => {
+        if (id) {
+          directIds.add(id);
+        }
+      });
+      return directIds.has(challengeId);
+    })
+    .map(ask => {
+      const raw = askRowById.get(ask.id) ?? {};
+      return {
+        id: ask.id,
+        askKey: ask.askKey,
+        title: ask.title,
+        status: ask.status,
+        summary: ask.summary,
+        question: raw.question ?? null,
+        description: raw.description ?? null,
+        startDate: raw.start_date ?? null,
+        endDate: raw.end_date ?? null,
+        participants: ask.participants.map(participant => ({
+          id: participant.id,
+          name: participant.name,
+          role: participant.role,
+          isSpokesperson: participant.role?.toLowerCase() === "spokesperson",
+        })),
+        insights: ask.insights
+          .filter(insight => insight.relatedChallengeIds.includes(challengeId))
+          .map(insight => ({
+            id: insight.id,
+            title: insight.title,
+            type: insight.type,
+            isCompleted: insight.isCompleted,
+          })),
+      } satisfies Record<string, unknown>;
+    });
+}

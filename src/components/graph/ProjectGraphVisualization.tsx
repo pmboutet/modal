@@ -851,8 +851,9 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
   // ========================================================================
 
   const loadGraph = useCallback(async () => {
-    // Use selectedProjectId (which can be set from prop or user selection)
-    const effectiveProjectId = selectedProjectId || projectId;
+    // projectId prop takes priority (when on a specific project page like synthesis)
+    // Fall back to selectedProjectId for cases where user can select via dropdown
+    const effectiveProjectId = projectId || selectedProjectId;
     // Use selectedClientId (which can be set from prop or user selection)
     const effectiveClientId = selectedClientId;
 
@@ -1466,16 +1467,17 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
             </select>
           </div>
 
-          {/* Project filter */}
+          {/* Project filter - disabled when projectId prop is provided */}
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-400">Projet:</label>
             <select
-              value={selectedProjectId || ""}
+              value={projectId || selectedProjectId || ""}
               onChange={(e) => {
                 setSelectedProjectId(e.target.value || null);
                 setSelectedChallengeId(null);
               }}
-              className="h-7 rounded border border-slate-600/50 bg-slate-800 px-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
+              disabled={!!projectId}
+              className={`h-7 rounded border border-slate-600/50 bg-slate-800 px-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none ${projectId ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <option value="">Tous</option>
               {filters.projects
