@@ -1136,6 +1136,7 @@ async function triggerInsightDetection(
     variables: Record<string, string | null | undefined>;
     conversationThreadId?: string | null;
     challengeId?: string | null;
+    projectId?: string | null;
   },
   existingInsights: InsightRow[],
   currentUserId?: string | null,
@@ -1187,6 +1188,10 @@ async function triggerInsightDetection(
       messageId: options.messageId ?? null,
       interactionType: INSIGHT_INTERACTION_TYPE,
       variables: options.variables,
+      toolContext: {
+        projectId: options.projectId,
+        challengeId: options.challengeId,
+      },
     });
 
     // Check if this is a voice agent response (which shouldn't happen for insight detection)
@@ -1708,6 +1713,7 @@ export async function POST(
             variables: detectionVariables,
             conversationThreadId: conversationThread?.id ?? null,
             challengeId: askRow.challenge_id ?? null,
+            projectId: askRow.project_id ?? null,
           },
           insightRows,
           currentUserId,
@@ -1859,6 +1865,10 @@ export async function POST(
           askSessionId: askRow.id,
           interactionType: CHAT_INTERACTION_TYPE,
           variables: agentVariables,
+          toolContext: {
+            projectId: askRow.project_id,
+            challengeId: askRow.challenge_id,
+          },
         });
 
         if (typeof aiResult.content === 'string' && aiResult.content.trim().length > 0) {
@@ -2000,6 +2010,7 @@ export async function POST(
             variables: detectionVariables,
             conversationThreadId: conversationThread?.id ?? null,
             challengeId: askRow.challenge_id ?? null,
+            projectId: askRow.project_id ?? null,
           },
           insightRows,
           currentUserId,

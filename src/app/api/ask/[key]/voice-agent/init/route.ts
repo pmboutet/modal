@@ -212,6 +212,10 @@ export async function POST(
           askSessionId: askRow.id,
           interactionType: 'ask.chat.response',
           variables: agentVariables,
+          toolContext: {
+            projectId: askRow.project_id,
+            challengeId: askRow.challenge_id,
+          },
         });
 
         if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
@@ -258,6 +262,10 @@ export async function POST(
       askSessionId: askRow.id,
       interactionType: CHAT_INTERACTION_TYPE,
       variables: agentVariables,
+      toolContext: {
+        projectId: askRow.project_id,
+        challengeId: askRow.challenge_id,
+      },
     });
 
     // Check if result is a voice agent response

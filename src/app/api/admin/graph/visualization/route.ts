@@ -583,7 +583,7 @@ export async function GET(request: NextRequest) {
   const projectId = searchParams.get("projectId");
   const clientId = searchParams.get("clientId");
   const challengeId = searchParams.get("challengeId");
-  const limit = Math.min(parseInt(searchParams.get("limit") || "200", 10), 500);
+  const limit = Math.min(parseInt(searchParams.get("limit") || "500", 10), 1000);
   const includeAnalytics = searchParams.get("includeAnalytics") === "true";
   const mode = searchParams.get("mode") || "full"; // "full" | "concepts"
 
@@ -985,23 +985,184 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Ensure every node touched by a deduplicated edge exists
+    // Collect orphan node IDs (nodes referenced by edges but not yet loaded)
+    const orphanInsightIds = new Set<string>();
+    const orphanEntityIds = new Set<string>();
+    const orphanChallengeIds = new Set<string>();
+    const orphanSynthesisIds = new Set<string>();
+    const orphanClaimIds = new Set<string>();
+
     for (const edge of deduplicatedEdges) {
-      if (!nodes.has(edge.source)) {
-        const type = nodeTypes.get(edge.source) || "entity";
-        nodes.set(edge.source, {
-          id: edge.source,
-          type,
-          label: `${type} ${edge.source.slice(0, 6)}…`,
-        });
+      for (const nodeId of [edge.source, edge.target]) {
+        if (!nodes.has(nodeId)) {
+          const type = nodeTypes.get(nodeId) || "entity";
+          switch (type) {
+            case "insight":
+              orphanInsightIds.add(nodeId);
+              break;
+            case "entity":
+              orphanEntityIds.add(nodeId);
+              break;
+            case "challenge":
+              orphanChallengeIds.add(nodeId);
+              break;
+            case "synthesis":
+              orphanSynthesisIds.add(nodeId);
+              break;
+            case "claim":
+              orphanClaimIds.add(nodeId);
+              break;
+          }
+        }
       }
-      if (!nodes.has(edge.target)) {
-        const type = nodeTypes.get(edge.target) || "entity";
-        nodes.set(edge.target, {
-          id: edge.target,
-          type,
-          label: `${type} ${edge.target.slice(0, 6)}…`,
+    }
+
+    // Fetch orphan insights
+    if (orphanInsightIds.size > 0) {
+      const { data: orphanInsights } = await supabase
+        .from("insights")
+        .select("id, summary, content, created_at, challenge_id, insight_type_id, insight_types(name)")
+        .in("id", Array.from(orphanInsightIds));
+
+      for (const insight of orphanInsights ?? []) {
+        const insightTypesData = insight.insight_types as unknown as { name: string } | { name: string }[] | null;
+        const typeName = Array.isArray(insightTypesData)
+          ? insightTypesData[0]?.name
+          : insightTypesData?.name;
+        const insightType = typeName?.toLowerCase() || "idea";
+        const validTypes = ["pain", "gain", "opportunity", "risk", "signal", "idea"];
+        const resolvedType = validTypes.includes(insightType) ? insightType : "idea";
+
+        nodes.set(insight.id, {
+          id: insight.id,
+          type: "insight",
+          label: formatInsightLabel(insight),
+          subtitle: INSIGHT_TYPE_LABELS[resolvedType] || resolvedType,
+          meta: {
+            createdAt: insight.created_at,
+            challengeId: insight.challenge_id,
+            insightType: resolvedType,
+            isOrphan: true, // Mark as loaded from edge reference
+          },
         });
+        nodeTypes.set(insight.id, "insight");
+      }
+    }
+
+    // Fetch orphan entities
+    if (orphanEntityIds.size > 0) {
+      const { data: orphanEntities } = await supabase
+        .from("knowledge_entities")
+        .select("id, name, type, description, frequency")
+        .in("id", Array.from(orphanEntityIds));
+
+      for (const entity of orphanEntities ?? []) {
+        // Check if this entity should be mapped to a canonical one
+        const canonicalId = entityIdMapping.get(entity.id);
+        if (canonicalId && nodes.has(canonicalId)) {
+          continue; // Already have canonical version
+        }
+
+        nodes.set(entity.id, {
+          id: entity.id,
+          type: "entity",
+          label: entity.name || "Entité",
+          subtitle: entity.type || undefined,
+          meta: {
+            description: entity.description,
+            frequency: entity.frequency,
+            isOrphan: true,
+          },
+        });
+        nodeTypes.set(entity.id, "entity");
+      }
+    }
+
+    // Fetch orphan challenges
+    if (orphanChallengeIds.size > 0) {
+      const { data: orphanChallenges } = await supabase
+        .from("challenges")
+        .select("id, name, status, priority")
+        .in("id", Array.from(orphanChallengeIds));
+
+      for (const challenge of orphanChallenges ?? []) {
+        nodes.set(challenge.id, {
+          id: challenge.id,
+          type: "challenge",
+          label: challenge.name || "Challenge",
+          subtitle: challenge.status || undefined,
+          meta: {
+            priority: challenge.priority,
+            isOrphan: true,
+          },
+        });
+        nodeTypes.set(challenge.id, "challenge");
+      }
+    }
+
+    // Fetch orphan syntheses
+    if (orphanSynthesisIds.size > 0) {
+      const { data: orphanSyntheses } = await supabase
+        .from("insight_syntheses")
+        .select("id, synthesized_text, project_id")
+        .in("id", Array.from(orphanSynthesisIds));
+
+      for (const synthesis of orphanSyntheses ?? []) {
+        const label = synthesis.synthesized_text?.trim() || "Synthèse";
+        nodes.set(synthesis.id, {
+          id: synthesis.id,
+          type: "synthesis",
+          label: label.length > 120 ? `${label.slice(0, 117)}...` : label,
+          subtitle: synthesis.project_id ? `Projet ${synthesis.project_id.slice(0, 4)}…` : undefined,
+          meta: { isOrphan: true },
+        });
+        nodeTypes.set(synthesis.id, "synthesis");
+      }
+    }
+
+    // Fetch orphan claims
+    if (orphanClaimIds.size > 0) {
+      const { data: orphanClaims } = await supabase
+        .from("claims")
+        .select("id, statement, claim_type, evidence_strength")
+        .in("id", Array.from(orphanClaimIds));
+
+      const CLAIM_TYPE_LABELS_ORPHAN: Record<string, string> = {
+        finding: "Constat",
+        hypothesis: "Hypothèse",
+        recommendation: "Recommandation",
+        observation: "Observation",
+      };
+
+      for (const claim of orphanClaims ?? []) {
+        const label = claim.statement?.trim() || "Claim";
+        nodes.set(claim.id, {
+          id: claim.id,
+          type: "claim",
+          label: label.length > 120 ? `${label.slice(0, 117)}...` : label,
+          subtitle: CLAIM_TYPE_LABELS_ORPHAN[claim.claim_type] || claim.claim_type,
+          meta: {
+            claimType: claim.claim_type,
+            evidenceStrength: claim.evidence_strength,
+            isOrphan: true,
+          },
+        });
+        nodeTypes.set(claim.id, "claim");
+      }
+    }
+
+    // Final fallback: create placeholder for any still-missing nodes (shouldn't happen but safety net)
+    for (const edge of deduplicatedEdges) {
+      for (const nodeId of [edge.source, edge.target]) {
+        if (!nodes.has(nodeId)) {
+          const type = nodeTypes.get(nodeId) || "entity";
+          nodes.set(nodeId, {
+            id: nodeId,
+            type,
+            label: `${type} ${nodeId.slice(0, 6)}…`,
+            meta: { isMissing: true },
+          });
+        }
       }
     }
 

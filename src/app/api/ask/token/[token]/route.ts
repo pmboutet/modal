@@ -617,6 +617,10 @@ export async function GET(
                 askSessionId: askRow.ask_session_id,
                 interactionType: 'ask.chat.response',
                 variables: agentVariables,
+                toolContext: {
+                  projectId: askRow.project_id,
+                  challengeId: askRow.challenge_id,
+                },
               });
 
               if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
