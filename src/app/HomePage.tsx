@@ -1866,7 +1866,15 @@ export default function HomePage() {
       }
 
       return insightsUpdatedDuringStream;
-    } catch {
+    } catch (streamingError) {
+      console.error('[handleStreamingResponse] Error during AI streaming:', streamingError);
+      // Report to Sentry for production debugging
+      if (typeof window !== 'undefined' && (window as any).Sentry) {
+        (window as any).Sentry.captureException(streamingError, {
+          tags: { component: 'handleStreamingResponse' },
+          extra: { askKey: sessionData.askKey },
+        });
+      }
       stopAwaitingAiResponse();
       return false;
     }
@@ -2002,6 +2010,14 @@ export default function HomePage() {
       }
 
     } catch (error) {
+      console.error('[handleSendMessage] Error sending message:', error);
+      // Report to Sentry for production debugging
+      if (typeof window !== 'undefined' && (window as any).Sentry) {
+        (window as any).Sentry.captureException(error, {
+          tags: { component: 'handleSendMessage' },
+          extra: { askKey: sessionData.askKey, content },
+        });
+      }
       stopAwaitingAiResponse();
       setSessionData(prev => ({
         ...prev,
