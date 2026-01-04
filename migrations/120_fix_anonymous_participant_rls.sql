@@ -9,6 +9,7 @@
 -- as participants to anonymous ASK sessions.
 
 -- Create a policy for self-registration in anonymous sessions
+DROP POLICY IF EXISTS "Users can join anonymous sessions" ON ask_participants;
 CREATE POLICY "Users can join anonymous sessions"
 ON ask_participants
 FOR INSERT

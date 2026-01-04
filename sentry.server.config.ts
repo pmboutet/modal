@@ -12,12 +12,12 @@ Sentry.init({
   // Environment tag
   environment: process.env.NODE_ENV,
 
-  // Before sending, add context
-  beforeSend(event, hint) {
-    // Don't send in development unless explicitly enabled
-    if (process.env.NODE_ENV === "development" && !process.env.SENTRY_DEBUG) {
-      console.log("[Sentry Server] Would send event:", event.message || event.exception);
-      return null;
+  // Before sending - filter out noise
+  beforeSend(event) {
+    // Filter out Node.js deprecation warnings from dependencies
+    const message = event.message || event.exception?.values?.[0]?.value || "";
+    if (message.includes("DeprecationWarning") && message.includes("url.parse")) {
+      return null; // Don't send this event
     }
     return event;
   },

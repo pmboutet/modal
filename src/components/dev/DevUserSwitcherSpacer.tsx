@@ -34,5 +34,5 @@ export function DevUserSwitcherSpacer() {
     return null;
   }
 
-  return <div className="pt-14" aria-hidden />;
+  return <div className="hidden md:block pt-14" aria-hidden />;
 }

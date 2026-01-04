@@ -63,6 +63,7 @@ export function ChatComponent({
   isTimerPaused,
   onTogglePause,
   expectedDurationMinutes,
+  onChatScroll,
 }: ChatComponentProps) {
   // Temporarily disabled to reduce log spam
   // console.log('[ChatComponent] 🔄 Rendering', {
@@ -84,10 +85,39 @@ export function ChatComponent({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lastScrollTopRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const previousVoiceModeRef = useRef(false);
+
+  // Handle scroll events for mobile header hide/show
+  const handleMessagesScroll = useCallback(() => {
+    if (!onChatScroll || !messagesContainerRef.current) return;
+
+    const currentScrollTop = messagesContainerRef.current.scrollTop;
+    const scrollDelta = currentScrollTop - lastScrollTopRef.current;
+    lastScrollTopRef.current = currentScrollTop;
+
+    onChatScroll(currentScrollTop, scrollDelta);
+  }, [onChatScroll]);
+
+  // Initialize scroll position for parent (on mount with existing messages)
+  useEffect(() => {
+    if (onChatScroll && messagesContainerRef.current) {
+      const initialScrollTop = messagesContainerRef.current.scrollTop;
+      lastScrollTopRef.current = initialScrollTop;
+      // Notify parent of initial position after a short delay (let auto-scroll happen)
+      const timeoutId = setTimeout(() => {
+        if (messagesContainerRef.current) {
+          const scrollTop = messagesContainerRef.current.scrollTop;
+          onChatScroll(scrollTop, 0);
+        }
+      }, 150);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [onChatScroll]);
 
   // Check if all steps are completed
   const allStepsCompleted = conversationPlan && conversationPlan.plan_data.steps.length > 0 
@@ -434,7 +464,11 @@ export function ChatComponent({
 
       {/* Messages area */}
       <CardContent className="flex-1 flex flex-col overflow-hidden min-w-0 max-w-full">
-        <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 min-w-0 max-w-full">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+          className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 min-w-0 max-w-full"
+        >
           <AnimatePresence>
             {messages.map((message, index) => {
               const previous = index > 0 ? messages[index - 1] : null;

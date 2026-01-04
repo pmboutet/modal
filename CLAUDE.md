@@ -5,7 +5,26 @@
 ### Before Each Commit
 1. **Run all unit tests**: `npm test`
 2. **Verify build**: `npm run build`
-3. Only commit if both pass
+3. **Check Sentry for errors**: `curl -s 'http://localhost:3000/api/admin/sentry/issues?statsPeriod=24h&limit=10' | jq '.data.issues[] | {title, level, count, lastSeen}'`
+4. Only commit if tests pass, build succeeds, and no new critical errors in Sentry
+
+### Bug Investigation Protocol
+
+**IMPORTANT: When a user reports a bug, ALWAYS check Sentry first:**
+
+```bash
+# Check recent errors (last 24h)
+curl -s 'http://localhost:3000/api/admin/sentry/issues?statsPeriod=24h' | jq '.data.issues[] | {id, title, level, count, culprit, lastSeen}'
+
+# Check all unresolved errors
+curl -s 'http://localhost:3000/api/admin/sentry/issues?query=is:unresolved' | jq '.data.issues[] | {id, title, level, count, culprit}'
+```
+
+This helps identify:
+- Silent database errors that weren't visible to the user
+- Stack traces and error context
+- How many times the error occurred
+- Which endpoint/function caused the issue
 
 ### Feature Development Guidelines
 
@@ -14,6 +33,7 @@ When developing new features or modifying existing code:
 1. **Update or create unit tests** for any changed functionality
 2. **Maintain test coverage** - every new function/module should have corresponding tests
 3. **Run tests frequently** during development to catch issues early
+4. **Check Sentry after testing** - verify no new errors were introduced
 
 ### Test Structure
 
@@ -263,3 +283,67 @@ else
   echo "❌ SUPABASE_SERVICE_ROLE_KEY is NOT set"
 fi
 ```
+
+## Sentry Error Monitoring
+
+### Configuration
+
+Sentry est configuré pour capturer automatiquement:
+- Les erreurs JavaScript (client et serveur)
+- Les erreurs de requêtes DB via `safeQuery` wrapper (`src/lib/supabaseQuery.ts`)
+- Les console.error
+
+Variables d'environnement requises:
+- `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` - DSN du projet
+- `SENTRY_ORG` - Organisation Sentry (flowdesign)
+- `SENTRY_PROJECT` - Projet Sentry (javascript-nextjs)
+- `SENTRY_AUTH_TOKEN` - Token API pour accéder aux issues (créer sur https://sentry.io/settings/account/api/auth-tokens/)
+
+### Accès aux erreurs Sentry via API
+
+Claude peut consulter les erreurs Sentry via ces endpoints:
+
+```bash
+# Lister les issues non résolues (derniers 14 jours)
+curl -s 'http://localhost:3000/api/admin/sentry/issues' | jq
+
+# Filtrer par query Sentry
+curl -s 'http://localhost:3000/api/admin/sentry/issues?query=is:unresolved+level:error' | jq
+
+# Limiter le nombre de résultats
+curl -s 'http://localhost:3000/api/admin/sentry/issues?limit=10' | jq
+
+# Changer la période (24h, 7d, 14d, 30d)
+curl -s 'http://localhost:3000/api/admin/sentry/issues?statsPeriod=24h' | jq
+
+# Détails d'une issue spécifique (avec dernier event)
+curl -s 'http://localhost:3000/api/admin/sentry/issues/ISSUE_ID' | jq
+```
+
+### Utilisation du wrapper safeQuery
+
+Toutes les requêtes Supabase critiques doivent utiliser `safeQuery` pour garantir le tracking des erreurs:
+
+```typescript
+import { safeQuery, addDbBreadcrumb } from "@/lib/supabaseQuery";
+
+// Ajouter un breadcrumb pour le contexte
+addDbBreadcrumb("Fetching user profile", { userId });
+
+// Utiliser safeQuery - les erreurs sont automatiquement envoyées à Sentry
+const profile = await safeQuery<Profile>(
+  () => supabase.from("profiles").select("*").eq("id", userId).single(),
+  {
+    table: "profiles",
+    operation: "select",
+    expectData: true,  // Alerte si aucune donnée retournée
+    filters: { id: userId },
+    description: "Fetch user profile by ID",
+  }
+);
+```
+
+### Notes
+
+- Les warnings de dépréciation Node.js (comme `url.parse`) sont automatiquement filtrés car ils viennent des dépendances
+- Pour tester Sentry manuellement, utiliser `Sentry.captureException(new Error("test"))` dans une route

@@ -373,6 +373,8 @@ export interface ChatComponentProps {
   isTimerPaused?: boolean;
   onTogglePause?: () => void;
   expectedDurationMinutes?: number | null;
+  // Scroll callback for mobile header hide/show
+  onChatScroll?: (scrollTop: number, scrollDelta: number) => void;
 }
 
 export interface ChallengeComponentProps {

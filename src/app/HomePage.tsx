@@ -149,8 +149,6 @@ function MobileLayout({
   const [panelWidth, setPanelWidth] = useState(0);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const lastScrollTop = useRef(0);
   const scrollUpAccumulator = useRef(0);
 
   // Threshold for showing header after scrolling up (in pixels)
@@ -167,13 +165,18 @@ function MobileLayout({
     return () => window.removeEventListener('resize', updateWidth);
   }, []);
 
-  // Handle scroll to hide/show header
-  const handleScroll = useCallback(() => {
-    const scrollElement = chatScrollRef.current;
-    if (!scrollElement) return;
+  // Handle scroll events from ChatComponent to hide/show header
+  const handleChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
+    // Ignore tiny scroll changes (less than 2px) to avoid jitter
+    if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
+      return;
+    }
 
-    const currentScrollTop = scrollElement.scrollTop;
-    const scrollDelta = currentScrollTop - lastScrollTop.current;
+    // Initial load: hide header if already scrolled down
+    if (scrollDelta === 0 && scrollTop > 50) {
+      setIsHeaderHidden(true);
+      return;
+    }
 
     if (scrollDelta > 0) {
       // Scrolling down - hide header immediately
@@ -190,12 +193,10 @@ function MobileLayout({
     }
 
     // If at the very top, always show header
-    if (currentScrollTop <= 10) {
+    if (scrollTop <= 10) {
       setIsHeaderHidden(false);
       scrollUpAccumulator.current = 0;
     }
-
-    lastScrollTop.current = currentScrollTop;
   }, []);
 
   return (
@@ -351,11 +352,7 @@ function MobileLayout({
                   />
                 </motion.div>
               )}
-              <div
-                ref={chatScrollRef}
-                onScroll={handleScroll}
-                className="flex-1 p-1.5 overflow-y-auto min-w-0 max-w-full overflow-x-hidden"
-              >
+              <div className="flex-1 p-1.5 min-w-0 max-w-full overflow-x-hidden">
                 <ChatComponent
                   key={`chat-${sessionDataAskKey}`}
                   askKey={sessionDataAskKey}
@@ -383,6 +380,7 @@ function MobileLayout({
                   elapsedMinutes={sessionElapsedMinutes}
                   isTimerPaused={isSessionTimerPaused}
                   onTogglePause={onToggleTimerPause}
+                  onChatScroll={handleChatScroll}
                 />
               </div>
             </div>
