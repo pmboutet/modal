@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ApiResponse } from "@/types";
 import { useRouter } from "next/navigation";
 import { ProjectGraphVisualization } from "@/components/graph/ProjectGraphVisualization";
+import { NarrativeSynthesisPanel } from "@/components/synthesis/NarrativeSynthesisPanel";
 
 interface Synthesis {
   id: string;
@@ -15,6 +16,11 @@ interface Synthesis {
   source_insight_ids: string[];
   key_concepts: string[];
   created_at: string;
+}
+
+interface Challenge {
+  id: string;
+  name: string;
 }
 
 interface SynthesisPageProps {
@@ -26,6 +32,7 @@ interface SynthesisPageProps {
 export default function SynthesisPage({ params }: SynthesisPageProps) {
   const router = useRouter();
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [syntheses, setSyntheses] = useState<Synthesis[]>([]);
   const [filteredSyntheses, setFilteredSyntheses] = useState<Synthesis[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,6 +49,26 @@ export default function SynthesisPage({ params }: SynthesisPageProps) {
       setProjectId(projectId);
     });
   }, [params]);
+
+  // Fetch challenges for the project
+  const loadChallenges = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const response = await fetch(`/api/admin/projects/${projectId}/challenges`);
+      const data: ApiResponse<Challenge[]> = await response.json();
+      if (data.success && data.data) {
+        setChallenges(data.data.map(c => ({ id: c.id, name: c.name })));
+      }
+    } catch (err) {
+      console.error("Failed to load challenges:", err);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (projectId) {
+      loadChallenges();
+    }
+  }, [projectId, loadChallenges]);
 
   const loadSyntheses = useCallback(async (showSuccessIndicator = false) => {
     if (!projectId) return;
@@ -227,6 +254,16 @@ export default function SynthesisPage({ params }: SynthesisPageProps) {
               <Check className="h-5 w-5 flex-shrink-0" />
             )}
             <p className="text-sm">{generateMessage.text}</p>
+          </div>
+        )}
+
+        {/* Narrative Synthesis Panel */}
+        {projectId && (
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur">
+            <NarrativeSynthesisPanel
+              projectId={projectId}
+              challenges={challenges}
+            />
           </div>
         )}
 

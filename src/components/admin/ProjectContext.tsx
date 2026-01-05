@@ -39,22 +39,31 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Load projects from API
-  const fetchProjects = useCallback(async () => {
+  // Load projects from API with retry for transient failures (HMR/Turbopack)
+  const fetchProjects = useCallback(async (retries = 2) => {
     setIsLoading(true);
     setError(null);
-    try {
-      const response = await fetch("/api/admin/projects", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Unable to load projects");
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch("/api/admin/projects", { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Unable to load projects");
+        }
+        setAllProjects(payload.data ?? []);
+        setIsLoading(false);
+        return;
+      } catch (err) {
+        if (attempt < retries) {
+          // Wait before retrying (200ms, then 400ms)
+          await new Promise(resolve => setTimeout(resolve, 200 * (attempt + 1)));
+          continue;
+        }
+        console.error("Failed to load projects", err);
+        setError(err instanceof Error ? err.message : "Unable to load projects");
+        setIsLoading(false);
       }
-      setAllProjects(payload.data ?? []);
-    } catch (err) {
-      console.error("Failed to load projects", err);
-      setError(err instanceof Error ? err.message : "Unable to load projects");
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 

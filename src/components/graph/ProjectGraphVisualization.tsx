@@ -1311,6 +1311,12 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
               <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-indigo-300">
                 {stats.challenges} challenges
               </span>
+              <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-emerald-300">
+                {stats.claims} claims
+              </span>
+              <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-purple-300">
+                {stats.syntheses} synthèses
+              </span>
               <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-rose-300">
                 {stats.insightTypes} types
               </span>
@@ -1588,7 +1594,7 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
       {/* Filter panel */}
       {showFilters && filters && (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-700/50 bg-slate-800/30 px-4 py-3">
-          {/* Client filter */}
+          {/* Client filter - disabled when projectId prop is provided (project already determines client) */}
           <div className="flex items-center gap-2">
             <label className="text-xs text-slate-400">Client:</label>
             <select
@@ -1598,7 +1604,8 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
                 setSelectedProjectId(null);
                 setSelectedChallengeId(null);
               }}
-              className="h-7 rounded border border-slate-600/50 bg-slate-800 px-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none"
+              disabled={!!projectId}
+              className={`h-7 rounded border border-slate-600/50 bg-slate-800 px-2 text-xs text-white focus:border-yellow-500/50 focus:outline-none ${projectId ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <option value="">Tous</option>
               {filters.clients.map((c) => (
@@ -1642,7 +1649,11 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
             >
               <option value="">Tous</option>
               {filters.challenges
-                .filter((c) => !selectedProjectId || c.parentId === selectedProjectId)
+                .filter((c) => {
+                  // Use projectId prop OR selectedProjectId to filter challenges
+                  const effectiveProjectId = projectId || selectedProjectId;
+                  return !effectiveProjectId || c.parentId === effectiveProjectId;
+                })
                 .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

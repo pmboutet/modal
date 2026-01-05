@@ -322,8 +322,8 @@ export async function extractClaimsFromInsight(
     // Call AI agent
     const result = await executeAgent({
       supabase,
-      agentSlug: "insight-claim-extraction",
-      interactionType: "insight.claim.extraction",
+      agentSlug: "rapport-claim-extraction",
+      interactionType: "rapport.claim.extraction",
       variables: variables as unknown as Record<string, string | null | undefined>,
     });
 

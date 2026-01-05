@@ -965,3 +965,71 @@ export type GraphRelationshipType =
   | 'CONTRADICTS'
   | 'ADDRESSES'
   | 'EVIDENCE_FOR';
+
+// === PROJECT SYNTHESIS (Narrative Reports) ===
+
+export interface ProjectSynthesis {
+  id: string;
+  projectId: string;
+  challengeId: string | null;
+  markdownContent: string;
+  metadata: SynthesisMetadata;
+  version: number;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SynthesisMetadata {
+  stats: {
+    totalClaims: number;
+    totalInsights: number;
+    totalParticipants: number;
+    communitiesDetected: number;
+    consensusRate: number;    // 0-1
+    tensionRate: number;      // 0-1
+  };
+  sections: {
+    problemSpace: number;     // count of items
+    findings: number;
+    solutions: number;
+    tensions: number;
+    risks: number;
+  };
+  thematicGroups: Array<{
+    id: string;
+    name: string;
+    claimCount: number;
+  }>;
+}
+
+export interface SynthesisGenerationInput {
+  projectId: string;
+  challengeId?: string;
+}
+
+export interface SynthesisSection {
+  title: string;
+  overview: string;
+  items: SynthesisItem[];
+}
+
+export interface SynthesisItem {
+  id: string;
+  type: 'pain' | 'risk' | 'finding' | 'recommendation' | 'tension';
+  content: string;
+  evidenceStrength?: number;
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  sources: string[];
+  relatedIds?: string[];
+}
+
+export interface ThematicGroup {
+  id: string;
+  name: string;
+  description: string;
+  claimIds: string[];
+  communityId?: number;
+  importanceScore: number;
+  dominantClaimType: ClaimType;
+}

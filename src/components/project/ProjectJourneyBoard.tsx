@@ -34,6 +34,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { DurationSlider } from "@/components/ui/duration-slider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -3579,24 +3580,22 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                   </div>
                   <div className="md:col-span-2 flex flex-col gap-2">
                     <Label htmlFor="project-description" className="text-slate-200">Description</Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="project-description"
-                      rows={3}
                       value={editValues.description}
                       onChange={handleInputChange("description")}
                       placeholder="What is the goal of this project?"
-                      className="border-white/20 bg-slate-800/80 text-white placeholder:text-slate-500 focus-visible:ring-indigo-400"
+                      className="min-h-[80px] border-white/20 bg-slate-800/80 text-white placeholder:text-slate-500 focus-visible:ring-indigo-400"
                     />
                   </div>
                   <div className="md:col-span-2 flex flex-col gap-2">
                     <Label htmlFor="project-prompt" className="text-slate-200">System prompt</Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="project-prompt"
-                      rows={6}
                       value={editValues.systemPrompt}
                       onChange={handleInputChange("systemPrompt")}
                       placeholder="Provide the system prompt used by the AI for this project"
-                      className="border-white/20 bg-slate-800/80 text-white placeholder:text-slate-500 focus-visible:ring-indigo-400"
+                      className="min-h-[80px] border-white/20 bg-slate-800/80 text-white placeholder:text-slate-500 focus-visible:ring-indigo-400"
                     />
                   </div>
                 </div>

@@ -8,6 +8,7 @@
  * - ASK Generator: Emerald
  * - Challenge Builder: Indigo
  * - Models Config: Purple
+ * - Rapport & Synthesis: Violet
  * - Security: Red
  */
 
@@ -55,6 +56,13 @@ export const agentGroupColors: Record<string, ModuleColorScheme> = {
     text: "text-purple-700 dark:text-purple-200",
     badge: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
     icon: "text-purple-400",
+  },
+  rapport: {
+    border: "border-violet-400/40",
+    bg: "bg-violet-500/10",
+    text: "text-violet-700 dark:text-violet-200",
+    badge: "bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200",
+    icon: "text-violet-400",
   },
 };
 
@@ -117,6 +125,16 @@ export function getModuleColorByInteractionType(interactionType: string): LogMod
       bg: "bg-red-500/10",
       text: "text-red-400",
       icon: "text-red-400",
+    };
+  }
+
+  // Rapport & Synthesis: Violet
+  if (interactionType.includes("rapport") || interactionType.includes("synthesis") || interactionType.includes("comparison")) {
+    return {
+      border: "border-violet-400/40",
+      bg: "bg-violet-500/10",
+      text: "text-violet-400",
+      icon: "text-violet-400",
     };
   }
 

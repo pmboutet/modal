@@ -218,8 +218,8 @@ async function extractClaimsFromAllInsights(
   // Execute extraction agent with global view
   const result = await executeAgent({
     supabase: client,
-    agentSlug: "participant-claims-extraction",
-    interactionType: "participant.claims.extraction",
+    agentSlug: "rapport-participant-claims",
+    interactionType: "rapport.participant.claims",
     variables,
   });
 

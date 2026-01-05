@@ -1,20 +1,23 @@
 -- Migration: Create claim-comparison agent
 -- This agent compares two claims and determines if they SUPPORT, CONTRADICT, or are NEUTRAL.
+-- Uses model_config_id instead of deprecated model/temperature/max_tokens columns
+
+-- First, ensure we have a suitable model config for Sonnet 4.5
+-- The ID will be resolved at runtime
 
 INSERT INTO public.ai_agents (
   slug,
   name,
   description,
+  model_config_id,
   system_prompt,
-  user_prompt,
-  model,
-  temperature,
-  max_tokens,
-  is_active
-) VALUES (
+  user_prompt
+)
+SELECT
   'claim-comparison',
   'Claim Comparison',
   'Compare deux claims et détermine leur relation : support, contradiction ou neutre.',
+  (SELECT id FROM ai_model_configs WHERE code = 'anthropic-claude-sonnet-4-5' LIMIT 1),
   '# Comparateur de Claims
 
 Tu es un expert en analyse d''arguments. On te donne deux claims (affirmations) provenant de différents participants et tu dois déterminer leur relation.
@@ -41,13 +44,11 @@ Tu es un expert en analyse d''arguments. On te donne deux claims (affirmations) 
 - Si tu doutes, préfère NEUTRAL
 
 ## Format de sortie (JSON strict)
-```json
 {
   "relation": "SUPPORTS|CONTRADICTS|NEUTRAL",
   "confidence": 0.0-1.0,
   "reasoning": "Explication courte de la relation"
-}
-```',
+}',
 
   'Compare ces deux claims et détermine leur relation :
 
@@ -55,22 +56,13 @@ Claim 1 : {{claim1}}
 
 Claim 2 : {{claim2}}
 
-Retourne UNIQUEMENT le JSON sans texte avant ou après.',
-
-  'anthropic',
-  0.2,
-  512,
-  true
-)
+Retourne UNIQUEMENT le JSON sans texte avant ou après.'
 ON CONFLICT (slug) DO UPDATE SET
   name = EXCLUDED.name,
   description = EXCLUDED.description,
   system_prompt = EXCLUDED.system_prompt,
   user_prompt = EXCLUDED.user_prompt,
-  model = EXCLUDED.model,
-  temperature = EXCLUDED.temperature,
-  max_tokens = EXCLUDED.max_tokens,
-  is_active = EXCLUDED.is_active,
+  model_config_id = EXCLUDED.model_config_id,
   updated_at = now();
 
 -- Notify PostgREST to reload schema

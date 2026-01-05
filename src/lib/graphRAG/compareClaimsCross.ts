@@ -206,8 +206,8 @@ async function analyzeClaimPair(
   try {
     const result = await executeAgent({
       supabase: client,
-      agentSlug: "claim-comparison",
-      interactionType: "claim.comparison",
+      agentSlug: "rapport-claim-comparison",
+      interactionType: "rapport.claim.comparison",
       variables: {
         claim1: claim1Statement,
         claim2: claim2Statement,
@@ -218,7 +218,14 @@ async function analyzeClaimPair(
       return { relation: "NEUTRAL", confidence: 0, reasoning: "No response from agent" };
     }
 
-    const parsed = JSON.parse(result.content);
+    // Extract JSON from markdown code blocks if present
+    let jsonContent = result.content.trim();
+    const jsonMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1].trim();
+    }
+
+    const parsed = JSON.parse(jsonContent);
 
     const relation = parsed.relation?.toUpperCase();
     if (relation === "SUPPORTS" || relation === "CONTRADICTS") {

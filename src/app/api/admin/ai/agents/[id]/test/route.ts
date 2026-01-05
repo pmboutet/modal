@@ -269,7 +269,7 @@ export async function POST(
         },
       });
     } else if (body.insightId) {
-      // Build variables for claim extraction agent (insight-claim-extraction)
+      // Build variables for claim extraction agent (rapport-claim-extraction)
       // Uses THE SAME buildClaimExtractionVariables function as production code
       const { data: insight, error: insightError } = await supabase
         .from('insights')

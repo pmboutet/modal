@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { Input } from "@/components/ui/input";
 import { Loader2, Network, Sparkles, ChevronDown, ChevronUp, TestTube2, Settings, Pencil, Trash2, Plus, Download } from "lucide-react";
 import type { AiAgentRecord, AiModelConfig, PromptVariableDefinition, ApiResponse, AskPromptTemplate, AiAgentLog } from "@/types";
@@ -121,49 +122,6 @@ function extractFilenameFromDisposition(disposition?: string | null): string | n
   return null;
 }
 
-// Auto-resize textarea component
-const AutoResizeTextarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ value, onChange, ...props }, ref) => {
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null) as React.MutableRefObject<HTMLTextAreaElement | null>;
-    const combinedRef = (node: HTMLTextAreaElement | null) => {
-      if (typeof ref === "function") {
-        ref(node);
-      } else if (ref && typeof ref === "object" && "current" in ref) {
-        (ref as React.MutableRefObject<HTMLTextAreaElement | null>).current = node;
-      }
-      textareaRef.current = node;
-    };
-
-    useEffect(() => {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.style.height = "auto";
-        textarea.style.height = `${textarea.scrollHeight}px`;
-      }
-    }, [value]);
-
-    // Also resize on mount
-    useEffect(() => {
-      const textarea = textareaRef.current;
-      if (textarea) {
-        textarea.style.height = "auto";
-        textarea.style.height = `${textarea.scrollHeight}px`;
-      }
-    }, []);
-
-    return (
-      <Textarea
-        ref={combinedRef}
-        value={value}
-        onChange={onChange}
-        {...props}
-        style={{ overflow: "hidden", resize: "none", ...props.style }}
-      />
-    );
-  }
-);
-AutoResizeTextarea.displayName = "AutoResizeTextarea";
-
 // Group agents by category
 type AgentGroup = {
   key: string;
@@ -220,6 +178,13 @@ function groupAgents(agents: AgentDraft[]): AgentGroup[] {
       color: groupColors["challenge-builder"],
     },
     {
+      key: "rapport",
+      title: "Rapport & Synthèse",
+      description: "Agents de génération de rapports, synthèses et comparaisons",
+      agents: [],
+      color: groupColors.rapport,
+    },
+    {
       key: "security",
       title: "Sécurité",
       description: "Agents de surveillance et de sécurité des messages",
@@ -244,6 +209,9 @@ function groupAgents(agents: AgentDraft[]): AgentGroup[] {
     const slug = agent.slug.toLowerCase();
     if (slug.includes("conversation") || slug.includes("chat")) {
       groups[0].agents.push(agent);
+    } else if (slug.includes("rapport") || slug.includes("synthesis") || slug.includes("comparison")) {
+      // Rapport & Synthesis agents (before insight-detection to catch rapport-claim-* agents)
+      groups[4].agents.push(agent);
     } else if (slug.includes("insight-detection") || slug.includes("insight") || slug.includes("detection")) {
       groups[1].agents.push(agent);
     } else if (slug.includes("ask-generator") || slug.includes("generator")) {
@@ -251,9 +219,9 @@ function groupAgents(agents: AgentDraft[]): AgentGroup[] {
     } else if (slug.includes("challenge") || slug.includes("builder")) {
       groups[3].agents.push(agent);
     } else if (slug.includes("security") || slug.includes("monitoring") || slug.includes("surveillance")) {
-      groups[4].agents.push(agent);
-    } else {
       groups[5].agents.push(agent);
+    } else {
+      groups[6].agents.push(agent);
     }
   });
 

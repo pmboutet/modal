@@ -31,7 +31,7 @@ export function normalizeTextForEmbedding(text: string): string {
  */
 async function generateVoyageEmbedding(
   text: string,
-  model: string = 'voyage-large-2'
+  model: string = 'voyage-3'
 ): Promise<number[]> {
   const apiKey = process.env.VOYAGE_API_KEY;
   
@@ -277,7 +277,7 @@ export function getEmbeddingDimensions(
   model?: string
 ): number {
   if (provider === 'voyage') {
-    return 1024; // voyage-large-2 produces 1024-dimensional embeddings
+    return 1024; // voyage-3 produces 1024-dimensional embeddings
   }
   
   if (provider === 'mistral') {
