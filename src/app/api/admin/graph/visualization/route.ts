@@ -577,6 +577,163 @@ async function handleConceptsMode(
   });
 }
 
+/**
+ * Handle claims-only mode: returns only claim nodes with SUPPORTS/CONTRADICTS edges
+ */
+async function handleClaimsMode(
+  supabase: ReturnType<typeof getAdminSupabaseClient>,
+  options: {
+    projectId: string | null;
+    clientId: string | null;
+    challengeId: string | null;
+    limit: number;
+    includeAnalytics: boolean;
+  }
+): Promise<NextResponse> {
+  const { projectId, clientId, challengeId, limit, includeAnalytics } = options;
+
+  // Build project filter
+  let projectIds: string[] = [];
+  if (projectId) {
+    projectIds = [projectId];
+  } else if (clientId) {
+    const { data: projects } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("client_id", clientId);
+    projectIds = (projects || []).map((p) => p.id);
+  }
+
+  if (projectIds.length === 0 && (projectId || clientId)) {
+    return NextResponse.json<ApiResponse<GraphVisualizationResponse>>({
+      success: true,
+      data: { nodes: [], edges: [], stats: { insights: 0, entities: 0, challenges: 0, syntheses: 0, claims: 0, insightTypes: 0, edges: 0 } },
+      message: "Aucun projet trouvé",
+    });
+  }
+
+  // Fetch claims for the project(s)
+  let claimsQuery = supabase
+    .from("claims")
+    .select("id, statement, claim_type, evidence_strength, source_insight_ids")
+    .limit(limit);
+
+  if (projectIds.length > 0) {
+    claimsQuery = claimsQuery.in("project_id", projectIds);
+  }
+  if (challengeId) {
+    claimsQuery = claimsQuery.eq("challenge_id", challengeId);
+  }
+
+  const { data: claims, error: claimsError } = await claimsQuery;
+
+  if (claimsError) {
+    throw claimsError;
+  }
+
+  if (!claims || claims.length === 0) {
+    return NextResponse.json<ApiResponse<GraphVisualizationResponse>>({
+      success: true,
+      data: { nodes: [], edges: [], stats: { insights: 0, entities: 0, challenges: 0, syntheses: 0, claims: 0, insightTypes: 0, edges: 0 } },
+      message: "Aucun claim trouvé",
+    });
+  }
+
+  const claimIds = claims.map((c) => c.id);
+
+  // Claim type labels in French
+  const CLAIM_TYPE_LABELS: Record<string, string> = {
+    finding: "Constat",
+    hypothesis: "Hypothèse",
+    recommendation: "Recommandation",
+    observation: "Observation",
+  };
+
+  // Build claim nodes
+  const nodes: GraphNode[] = claims.map((claim) => ({
+    id: claim.id,
+    type: "claim" as GraphNodeType,
+    label: claim.statement?.length > 120 ? `${claim.statement.slice(0, 117)}...` : claim.statement,
+    subtitle: CLAIM_TYPE_LABELS[claim.claim_type] || claim.claim_type,
+    meta: {
+      claimType: claim.claim_type,
+      evidenceStrength: claim.evidence_strength,
+      sourceCount: claim.source_insight_ids?.length || 0,
+    },
+  }));
+
+  // Fetch SUPPORTS and CONTRADICTS edges between claims
+  const { data: edges, error: edgesError } = await supabase
+    .from("knowledge_graph_edges")
+    .select("source_id, target_id, relationship_type, confidence, similarity_score")
+    .in("relationship_type", ["SUPPORTS", "CONTRADICTS"])
+    .eq("source_type", "claim")
+    .eq("target_type", "claim")
+    .or(`source_id.in.(${claimIds.join(",")}),target_id.in.(${claimIds.join(",")})`);
+
+  if (edgesError) {
+    throw edgesError;
+  }
+
+  // Filter edges to only include those where both source and target are in our claim list
+  const claimIdSet = new Set(claimIds);
+  const graphEdges: GraphEdge[] = (edges || [])
+    .filter((e) => claimIdSet.has(e.source_id) && claimIdSet.has(e.target_id))
+    .map((edge, index) => ({
+      id: `claim-edge-${index}`,
+      source: edge.source_id,
+      target: edge.target_id,
+      relationshipType: edge.relationship_type,
+      label: edge.relationship_type === "SUPPORTS" ? "Soutient" : "Contredit",
+      weight: edge.similarity_score || edge.confidence || 0.7,
+      confidence: edge.confidence,
+    }));
+
+  // Optionally compute analytics
+  let enrichedNodes = nodes;
+  if (includeAnalytics && projectId) {
+    try {
+      const graph = await buildGraphologyGraph(supabase, projectId, { includeEntities: false });
+      const communities = detectCommunities(graph);
+      const centrality = computeCentrality(graph);
+      const nodeAnalyticsMap = getNodeAnalyticsMap(communities, centrality);
+
+      enrichedNodes = nodes.map((node) => {
+        const analytics = nodeAnalyticsMap.get(node.id);
+        if (analytics) {
+          return {
+            ...node,
+            community: analytics.community,
+            betweenness: analytics.betweenness,
+            pageRank: analytics.pageRank,
+            degree: analytics.degree,
+          };
+        }
+        return node;
+      });
+    } catch (e) {
+      console.warn("Failed to compute analytics for claims mode:", e);
+    }
+  }
+
+  return NextResponse.json<ApiResponse<GraphVisualizationResponse>>({
+    success: true,
+    data: {
+      nodes: enrichedNodes,
+      edges: graphEdges,
+      stats: {
+        insights: 0,
+        entities: 0,
+        challenges: 0,
+        syntheses: 0,
+        claims: claims.length,
+        insightTypes: 0,
+        edges: graphEdges.length,
+      },
+    },
+  });
+}
+
 export async function GET(request: NextRequest) {
   const supabase = getAdminSupabaseClient();
   const searchParams = request.nextUrl.searchParams;
@@ -585,12 +742,17 @@ export async function GET(request: NextRequest) {
   const challengeId = searchParams.get("challengeId");
   const limit = Math.min(parseInt(searchParams.get("limit") || "500", 10), 1000);
   const includeAnalytics = searchParams.get("includeAnalytics") === "true";
-  const mode = searchParams.get("mode") || "full"; // "full" | "concepts"
+  const mode = searchParams.get("mode") || "full"; // "full" | "concepts" | "claims"
 
   try {
     // If mode=concepts, use the concepts-only visualization
     if (mode === "concepts") {
       return handleConceptsMode(supabase, { projectId, clientId, challengeId, limit, includeAnalytics });
+    }
+
+    // If mode=claims, use the claims-only visualization
+    if (mode === "claims") {
+      return handleClaimsMode(supabase, { projectId, clientId, challengeId, limit, includeAnalytics });
     }
     // Build the base query for insights (using insight_type_id with join to insight_types)
     let insightQuery = supabase

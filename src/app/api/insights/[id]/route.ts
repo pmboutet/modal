@@ -41,12 +41,28 @@ export async function PATCH(
       throw error;
     }
 
-    // Rebuild the knowledge graph asynchronously (don't block the response)
-    // This ensures manual edits have the same behavior as AI updates
+    // Regenerate embeddings asynchronously (don't block the response)
+    // Note: Graph edges and claims are generated post-interview via generateParticipantGraph()
     const adminSupabase = getAdminSupabaseClient();
-    import("@/lib/graphRAG/graphBuilder").then(({ rebuildGraphForInsight }) => {
-      rebuildGraphForInsight(insightId, sanitizedContent, adminSupabase).catch((err) => {
-        console.error(`[Insight PATCH] Failed to rebuild graph for insight ${insightId}:`, err);
+    import("@/lib/ai/embeddings").then(({ generateEmbedding }) => {
+      generateEmbedding(sanitizedContent).then((embedding) => {
+        if (embedding) {
+          adminSupabase
+            .from("insights")
+            .update({
+              content_embedding: embedding,
+              summary_embedding: null, // Clear since summary is now null
+              embedding_updated_at: new Date().toISOString(),
+            })
+            .eq("id", insightId)
+            .then(({ error }) => {
+              if (error) {
+                console.error(`[Insight PATCH] Failed to update embedding for ${insightId}:`, error);
+              }
+            });
+        }
+      }).catch((err) => {
+        console.error(`[Insight PATCH] Failed to generate embedding for ${insightId}:`, err);
       });
     });
 

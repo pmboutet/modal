@@ -459,14 +459,18 @@ function buildForceGraphData(payload: GraphPayload): ForceGraphData {
     seenLinkKeys.add(linkKey);
 
     const color = EDGE_COLORS[edge.relationshipType] || EDGE_COLORS.default;
-    const weight = edge.weight ?? 0.5;
+    // Use confidence if available, otherwise fall back to weight
+    const effectiveWeight = edge.confidence ?? edge.weight ?? 0.5;
+    // Stronger visual weight for SUPPORTS/CONTRADICTS relationships
+    const isKeyRelation = edge.relationshipType === "SUPPORTS" || edge.relationshipType === "CONTRADICTS";
+    const widthMultiplier = isKeyRelation ? 3 : 2;
 
     links.push({
       source: remappedSource,
       target: remappedTarget,
       label: edge.label || edge.relationshipType,
       color,
-      width: Math.max(0.5, weight * 2),
+      width: Math.max(0.5, effectiveWeight * widthMultiplier),
       relationshipType: edge.relationshipType,
     });
   }
@@ -521,8 +525,25 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
   const [colorMode, setColorMode] = useState<ColorMode>("type");
 
   // View mode state (full graph or concepts-only)
-  type ViewMode = "full" | "concepts";
+  type ViewMode = "full" | "concepts" | "claims";
   const [viewMode, setViewMode] = useState<ViewMode>("full");
+
+  // Edge type visibility filters
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Record<string, boolean>>({
+    SIMILAR_TO: true,
+    RELATED_TO: true,
+    MENTIONS: true,
+    SYNTHESIZES: true,
+    CONTAINS: true,
+    HAS_TYPE: true,
+    INDIRECT: true,
+    CO_OCCURS: true,
+    SUPPORTS: true,
+    CONTRADICTS: true,
+    ADDRESSES: true,
+    EVIDENCE_FOR: true,
+  });
+  const [showEdgeLegend, setShowEdgeLegend] = useState(false);
 
   // Refs
   const fgRef = useRef<any>(null);
@@ -831,8 +852,13 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
       }
     }
 
-    return { nodes: visibleNodes, links: allLinks };
-  }, [graphData, visibleTypes, searchMatchIds]);
+    // Filter links by edge type visibility
+    const filteredLinks = allLinks.filter(link => {
+      return visibleEdgeTypes[link.relationshipType] !== false;
+    });
+
+    return { nodes: visibleNodes, links: filteredLinks };
+  }, [graphData, visibleTypes, searchMatchIds, visibleEdgeTypes]);
 
   // Dimensions - responsive to container width
   const dimensions = useMemo(() => {
@@ -875,8 +901,9 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
       if (selectedChallengeId) params.set("challengeId", selectedChallengeId);
       // Include analytics for community detection and centrality
       if (effectiveProjectId) params.set("includeAnalytics", "true");
-      // Include view mode for concepts-only view
+      // Include view mode for concepts-only view or claims-only view
       if (viewMode === "concepts") params.set("mode", "concepts");
+      if (viewMode === "claims") params.set("mode", "claims");
 
       const response = await fetch(`/api/admin/graph/visualization?${params}`, {
         cache: "no-store",
@@ -1385,21 +1412,39 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
           )}
         </Button>
 
-        {/* View mode toggle (full vs concepts) */}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setViewMode(viewMode === "full" ? "concepts" : "full")}
-          title={viewMode === "full" ? "Vue complète" : "Vue concepts uniquement"}
-          className={`gap-1.5 border-slate-600/50 text-xs ${
-            viewMode === "concepts"
-              ? "bg-sky-500/20 text-sky-300 border-sky-500/50"
-              : "bg-slate-800/60 text-slate-300"
-          }`}
-        >
-          <Layers className="h-3 w-3" />
-          {viewMode === "full" ? "Complet" : "Concepts"}
-        </Button>
+        {/* View mode toggle (full vs concepts vs claims) */}
+        <div className="flex items-center gap-1 rounded-md border border-slate-600/50 bg-slate-800/60 p-0.5">
+          <button
+            onClick={() => setViewMode("full")}
+            className={`rounded px-2 py-1 text-xs transition-colors ${
+              viewMode === "full"
+                ? "bg-slate-700 text-white"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Complet
+          </button>
+          <button
+            onClick={() => setViewMode("concepts")}
+            className={`rounded px-2 py-1 text-xs transition-colors ${
+              viewMode === "concepts"
+                ? "bg-sky-500/30 text-sky-300"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Concepts
+          </button>
+          <button
+            onClick={() => setViewMode("claims")}
+            className={`rounded px-2 py-1 text-xs transition-colors ${
+              viewMode === "claims"
+                ? "bg-emerald-500/30 text-emerald-300"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Claims
+          </button>
+        </div>
 
         {/* Color mode toggle (type vs community) */}
         <Button
@@ -1420,7 +1465,7 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
         {/* Divider */}
         <div className="h-4 w-px bg-slate-600/50" />
 
-        {/* Legend */}
+        {/* Node Legend */}
         {Object.entries(NODE_LABELS).map(([type, label]) => (
           <button
             key={type}
@@ -1441,7 +1486,104 @@ export function ProjectGraphVisualization({ projectId, clientId, refreshKey }: P
             {label}
           </button>
         ))}
+
+        {/* Edge Legend Toggle */}
+        <Button
+          size="sm"
+          variant="outline"
+          className={`gap-1.5 border-slate-600/50 text-xs ${
+            showEdgeLegend
+              ? "bg-amber-500/20 text-amber-300"
+              : "bg-slate-800/60 text-slate-300"
+          }`}
+          onClick={() => setShowEdgeLegend(!showEdgeLegend)}
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform ${showEdgeLegend ? "rotate-180" : ""}`} />
+          Liens
+        </Button>
       </div>
+
+      {/* Edge type filters panel */}
+      {showEdgeLegend && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-700/50 bg-slate-800/30 px-4 py-2">
+          <span className="text-xs text-slate-400 mr-2">Types de liens:</span>
+          {Object.entries(EDGE_LABELS).map(([edgeType, label]) => {
+            const color = EDGE_COLORS[edgeType] || EDGE_COLORS.default;
+            const isVisible = visibleEdgeTypes[edgeType] !== false;
+            // Highlight SUPPORTS and CONTRADICTS as key relationship types
+            const isKeyType = edgeType === "SUPPORTS" || edgeType === "CONTRADICTS";
+            return (
+              <button
+                key={edgeType}
+                onClick={() => setVisibleEdgeTypes(prev => ({
+                  ...prev,
+                  [edgeType]: !prev[edgeType]
+                }))}
+                className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs transition-all ${
+                  isVisible ? "opacity-100" : "opacity-40 line-through"
+                } ${isKeyType ? "ring-1 ring-white/20" : ""}`}
+                style={{
+                  backgroundColor: `${color.replace(/[\d.]+\)$/, "0.15)")}`,
+                  color: color.replace(/[\d.]+\)$/, "1)"),
+                  border: `1px solid ${color.replace(/[\d.]+\)$/, "0.4)")}`,
+                }}
+              >
+                <span
+                  className="h-0.5 w-3 rounded-full"
+                  style={{ backgroundColor: color.replace(/[\d.]+\)$/, "1)") }}
+                />
+                {label}
+              </button>
+            );
+          })}
+          {/* Quick filters */}
+          <div className="h-4 w-px bg-slate-600/50 mx-1" />
+          <button
+            onClick={() => {
+              // Show only consensus/conflict edges
+              setVisibleEdgeTypes({
+                SIMILAR_TO: false,
+                RELATED_TO: false,
+                MENTIONS: false,
+                SYNTHESIZES: false,
+                CONTAINS: false,
+                HAS_TYPE: false,
+                INDIRECT: false,
+                CO_OCCURS: false,
+                SUPPORTS: true,
+                CONTRADICTS: true,
+                ADDRESSES: false,
+                EVIDENCE_FOR: false,
+              });
+            }}
+            className="rounded-full bg-slate-700/50 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600/50"
+          >
+            Consensus/Tensions
+          </button>
+          <button
+            onClick={() => {
+              // Show all edges
+              setVisibleEdgeTypes({
+                SIMILAR_TO: true,
+                RELATED_TO: true,
+                MENTIONS: true,
+                SYNTHESIZES: true,
+                CONTAINS: true,
+                HAS_TYPE: true,
+                INDIRECT: true,
+                CO_OCCURS: true,
+                SUPPORTS: true,
+                CONTRADICTS: true,
+                ADDRESSES: true,
+                EVIDENCE_FOR: true,
+              });
+            }}
+            className="rounded-full bg-slate-700/50 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600/50"
+          >
+            Tous
+          </button>
+        </div>
+      )}
 
       {/* Filter panel */}
       {showFilters && filters && (

@@ -609,26 +609,21 @@ function sanitiseJsonString(raw: string): string {
 }
 
 /**
- * Process Graph RAG for an insight: generate embeddings, extract entities, build graph edges
+ * Process embeddings for an insight (for future semantic search)
+ * Note: Graph edges and claims are generated post-interview via generateParticipantGraph()
  */
-async function processGraphRAGForInsight(
+async function processInsightEmbeddings(
   supabase: ReturnType<typeof getAdminSupabaseClient>,
   insightId: string,
   insightRow: InsightRow,
 ): Promise<void> {
   try {
     const { generateEmbedding } = await import('@/lib/ai/embeddings');
-    const {
-      extractEntitiesFromInsight,
-      storeInsightKeywords,
-      generateEntityEmbeddings,
-    } = await import('@/lib/graphRAG/extractEntities');
-    const { buildAllEdgesForInsight } = await import('@/lib/graphRAG/graphBuilder');
     const { mapInsightRowToInsight } = await import('@/lib/insights');
-    
+
     const insight = mapInsightRowToInsight(insightRow);
-    
-    // Generate embeddings
+
+    // Generate embeddings for future semantic search
     const [contentEmbedding, summaryEmbedding] = await Promise.all([
       insight.content ? generateEmbedding(insight.content).catch((err) => {
         console.error(`Error generating content embedding for insight ${insightId}:`, err);
@@ -639,7 +634,7 @@ async function processGraphRAGForInsight(
         return null;
       }) : Promise.resolve(null),
     ]);
-    
+
     // Update insights with embeddings
     const embeddingUpdate: Record<string, unknown> = {
       embedding_updated_at: new Date().toISOString(),
@@ -650,33 +645,17 @@ async function processGraphRAGForInsight(
     if (summaryEmbedding) {
       embeddingUpdate.summary_embedding = summaryEmbedding;
     }
-    
+
     if (contentEmbedding || summaryEmbedding) {
       await supabase
         .from('insights')
         .update(embeddingUpdate)
         .eq('id', insightId);
     }
-    
-    // Extract entities using Anthropic
-    const { entityIds, keywords } = await extractEntitiesFromInsight(insight);
-    
-    // Store insight-keyword relationships
-    if (keywords.length > 0) {
-      await storeInsightKeywords(supabase, insightId, keywords);
-    }
-    
-    // Generate embeddings for entities (if needed)
-    if (entityIds.length > 0) {
-      await generateEntityEmbeddings(supabase, entityIds);
-    }
-    
-    // Build graph edges (similarity, conceptual, challenge)
-    await buildAllEdgesForInsight(insightId, contentEmbedding || undefined);
-    
+
   } catch (error) {
-    console.error(`Error in processGraphRAGForInsight for ${insightId}:`, error);
-    // Don't throw - we don't want to block insight persistence if Graph RAG fails
+    console.error(`Error in processInsightEmbeddings for ${insightId}:`, error);
+    // Don't throw - we don't want to block insight persistence if embedding fails
   }
 }
 
@@ -877,9 +856,9 @@ async function persistInsights(
         removeFromIndex(existing);
         indexRow(updatedRow);
         
-        // Generate embeddings and extract entities for Graph RAG (async, don't block)
-        processGraphRAGForInsight(supabase, existing.id, updatedRow).catch((error) => {
-          console.error(`Error processing Graph RAG for updated insight ${existing.id}:`, error);
+        // Generate embeddings for future semantic search (async, don't block)
+        processInsightEmbeddings(supabase, existing.id, updatedRow).catch((error) => {
+          console.error(`Error processing embeddings for updated insight ${existing.id}:`, error);
         });
       }
     } else {
@@ -933,9 +912,9 @@ async function persistInsights(
         existingMap[createdRow.id] = createdRow;
         indexRow(createdRow);
         
-        // Generate embeddings and extract entities for Graph RAG (async, don't block)
-        processGraphRAGForInsight(supabase, desiredId, createdRow).catch((error) => {
-          console.error(`Error processing Graph RAG for new insight ${desiredId}:`, error);
+        // Generate embeddings for future semantic search (async, don't block)
+        processInsightEmbeddings(supabase, desiredId, createdRow).catch((error) => {
+          console.error(`Error processing embeddings for new insight ${desiredId}:`, error);
         });
       }
     }

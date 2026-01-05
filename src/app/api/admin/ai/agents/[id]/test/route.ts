@@ -9,7 +9,7 @@ import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread
 import { getConversationPlanWithSteps } from '@/lib/ai/conversation-plan';
 import { fetchInsightTypesForPrompt, fetchInsightsForSession } from '@/lib/insightQueries';
 import { mapInsightRowToInsight } from '@/lib/insights';
-import { buildEntityExtractionVariables } from '@/lib/graphRAG/extractEntities';
+import { buildClaimExtractionVariables } from '@/lib/graphRAG/extractClaims';
 import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries, buildAskGeneratorVariables } from '@/lib/projectJourneyLoader';
 import {
   buildMessageSummary,
@@ -269,8 +269,8 @@ export async function POST(
         },
       });
     } else if (body.insightId) {
-      // Build variables for entity extraction agent (insight-entity-extraction)
-      // Uses THE SAME buildEntityExtractionVariables function as production code
+      // Build variables for claim extraction agent (insight-claim-extraction)
+      // Uses THE SAME buildClaimExtractionVariables function as production code
       const { data: insight, error: insightError } = await supabase
         .from('insights')
         .select('id, content, summary, ask_session_id, challenge_id, insight_type_id, insight_types(name)')
@@ -291,26 +291,26 @@ export async function POST(
         : (insight.insight_types as any)?.name ?? 'unknown';
 
       // Build variables using the SAME function as production code
-      const entityVariables = await buildEntityExtractionVariables(supabase, {
+      const claimVariables = await buildClaimExtractionVariables(supabase, {
         content: insight.content ?? '',
         summary: insight.summary,
         type: insightTypeName,
-        category: '', // Category is not stored directly, could be derived
+        category: '',
         askSessionId: insight.ask_session_id,
         challengeId: insight.challenge_id,
       });
 
       // Build resolved variables for highlighting
       const resolvedVariables: Record<string, string> = {};
-      for (const [key, value] of Object.entries(entityVariables)) {
+      for (const [key, value] of Object.entries(claimVariables)) {
         if (value !== undefined && value !== null && String(value).trim().length > 0) {
           resolvedVariables[key] = String(value);
         }
       }
 
-      // Render templates with entity extraction variables
-      const systemPrompt = renderTemplate(agent.systemPrompt, entityVariables);
-      const userPrompt = renderTemplate(agent.userPrompt, entityVariables);
+      // Render templates with claim extraction variables
+      const systemPrompt = renderTemplate(agent.systemPrompt, claimVariables);
+      const userPrompt = renderTemplate(agent.userPrompt, claimVariables);
 
       return NextResponse.json({
         success: true,
@@ -321,8 +321,8 @@ export async function POST(
           metadata: {
             insightId: insight.id,
             askSessionId: insight.ask_session_id,
-            hasAskContext: !!entityVariables.ask_question,
-            hasChallengeContext: !!entityVariables.challenge_name,
+            hasAskContext: !!claimVariables.ask_question,
+            hasChallengeContext: !!claimVariables.challenge_name,
           },
         },
       });

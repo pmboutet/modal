@@ -97,6 +97,7 @@ export async function POST(
     let profileId: string | null = null;
     let tokenAskSessionId: string | null = null;
     let authenticatedViaToken = false;
+    let currentParticipantId: string | null = null; // For graph generation trigger
 
     if (!isDevBypass && inviteToken) {
       const admin = await getAdminClient();
@@ -109,6 +110,7 @@ export async function POST(
       }
 
       profileId = participant.user_id;
+      currentParticipantId = participant.id; // Store participant ID for graph generation
       tokenAskSessionId = (participant as ParticipantRow & { ask_session_id?: string }).ask_session_id ?? null;
       dataClient = admin;
       authenticatedViaToken = true;
@@ -602,6 +604,28 @@ export async function POST(
                                 completedStepId: stepIdToComplete,
                               });
                               controller.enqueue(encoder.encode(`data: ${stepCompletedEvent}\n\n`));
+
+                              // Check if all steps are completed to trigger graph generation
+                              const steps = updatedPlan.plan_data?.steps || [];
+                              const allStepsCompleted = steps.length > 0 && steps.every(
+                                (s: { status?: string }) => s.status === 'completed' || s.status === 'skipped'
+                              );
+
+                              if (allStepsCompleted && currentParticipantId) {
+                                // Trigger graph generation in background (don't block the stream)
+                                console.log(`[Stream] All steps completed for participant ${currentParticipantId}, triggering graph generation`);
+                                import('@/lib/graphRAG/generateParticipantGraph').then(({ generateParticipantGraph }) => {
+                                  generateParticipantGraph(currentParticipantId!, askRow.id, adminForStepUpdate)
+                                    .then(result => {
+                                      if (result.success) {
+                                        console.log(`[Stream] Graph generation complete: ${result.claimsCreated} claims, ${result.edgesCreated} edges`);
+                                      } else {
+                                        console.error(`[Stream] Graph generation failed: ${result.error}`);
+                                      }
+                                    })
+                                    .catch(err => console.error('[Stream] Graph generation error:', err));
+                                });
+                              }
                             }
                           }
                         }

@@ -16,7 +16,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { extractClaimsFromInsight, generateClaimEmbeddings } from "../src/lib/graphRAG/extractClaims";
 import { buildClaimEdges } from "../src/lib/graphRAG/graphBuilder";
-import { generateEntityEmbeddings } from "../src/lib/graphRAG/extractEntities";
+import { generateEmbedding } from "../src/lib/ai/embeddings";
 import type { Insight } from "../src/types";
 
 // Parse command line arguments
@@ -114,8 +114,28 @@ async function processBatch(insights: InsightRow[]): Promise<{
       }
 
       if (entityIds.length > 0) {
-        // Generate embeddings for entities
-        await generateEntityEmbeddings(supabase, entityIds);
+        // Generate embeddings for entities that don't have one yet
+        const { data: entities } = await supabase
+          .from("knowledge_entities")
+          .select("id, name, embedding")
+          .in("id", entityIds)
+          .is("embedding", null);
+
+        if (entities && entities.length > 0) {
+          for (const entity of entities) {
+            try {
+              const embedding = await generateEmbedding(entity.name);
+              if (embedding) {
+                await supabase
+                  .from("knowledge_entities")
+                  .update({ embedding })
+                  .eq("id", entity.id);
+              }
+            } catch (err) {
+              console.error(`    Error generating embedding for entity ${entity.id}:`, err);
+            }
+          }
+        }
         totalEntities += entityIds.length;
       }
 
