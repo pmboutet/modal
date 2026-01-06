@@ -25,6 +25,7 @@ import {
 import { UserProfileMenu } from "@/components/auth/UserProfileMenu";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { supabase } from "@/lib/supabaseClient";
+import { PublicAskEntryForm } from "@/components/ask/PublicAskEntryForm";
 
 type TokenSessionPayload = {
   ask: Ask;
@@ -466,6 +467,15 @@ export default function HomePage() {
   const [selectedInputMode, setSelectedInputMode] = useState<'voice' | 'text' | null>(null);
   // Track if voice config is loading
   const [isVoiceConfigLoading, setIsVoiceConfigLoading] = useState(false);
+
+  // Public ASK entry mode state (for ?ask=<key> flow)
+  const [publicAskEntry, setPublicAskEntry] = useState<{
+    askKey: string;
+    askName: string | null;
+    askQuestion: string | null;
+    isLoading: boolean;
+    error: string | null;
+  } | null>(null);
 
   // Get current step ID for timer tracking
   // The timer endpoint uses step_identifier (e.g., "step_1"), which is what current_step_id contains
@@ -965,11 +975,58 @@ export default function HomePage() {
     // Try multiple ways to get the key or token
     const keyFromSearchParams = searchParams.get('key');
     const tokenFromSearchParams = searchParams.get('token');
+    const askFromSearchParams = searchParams.get('ask');
     const keyFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('key') : null;
     const tokenFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') : null;
-    
+    const askFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ask') : null;
+
     const key = keyFromSearchParams || keyFromURL;
     const token = tokenFromSearchParams || tokenFromURL;
+    const askKey = askFromSearchParams || askFromURL;
+
+    // If we have an 'ask' param (public entry flow), show the registration form
+    if (askKey && !token) {
+      setPublicAskEntry({
+        askKey,
+        askName: null,
+        askQuestion: null,
+        isLoading: true,
+        error: null,
+      });
+      // Fetch public ASK info
+      fetch(`/api/ask/${encodeURIComponent(askKey)}/public-info`)
+        .then(res => res.json())
+        .then(result => {
+          if (result.success && result.data) {
+            setPublicAskEntry({
+              askKey,
+              askName: result.data.name,
+              askQuestion: result.data.question,
+              isLoading: false,
+              error: null,
+            });
+          } else {
+            setPublicAskEntry({
+              askKey,
+              askName: null,
+              askQuestion: null,
+              isLoading: false,
+              error: result.error || 'Session ASK non trouvée',
+            });
+          }
+        })
+        .catch(err => {
+          console.error('[HomePage] Error fetching public ASK info:', err);
+          setPublicAskEntry({
+            askKey,
+            askName: null,
+            askQuestion: null,
+            isLoading: false,
+            error: 'Erreur de connexion',
+          });
+        });
+      return;
+    }
 
     // If we have a token, use it; otherwise use key
     if (token) {
@@ -2173,6 +2230,75 @@ export default function HomePage() {
   const clearError = () => {
     setSessionData(prev => ({ ...prev, error: null }));
   };
+
+  // Render public ASK entry form (for ?ask=<key> flow)
+  if (publicAskEntry) {
+    // Loading state
+    if (publicAskEntry.isLoading) {
+      return (
+        <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5 }}
+            className="w-full max-w-lg"
+          >
+            <div className="text-center space-y-8">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                className="mx-auto w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center shadow-lg"
+              >
+                <Sparkles className="h-8 w-8 text-white" />
+              </motion.div>
+              <p className="text-slate-400">Chargement...</p>
+            </div>
+          </motion.div>
+        </div>
+      );
+    }
+
+    // Error state for public ASK
+    if (publicAskEntry.error) {
+      return (
+        <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md"
+          >
+            <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
+              <CardHeader className="text-center">
+                <motion.div
+                  initial={{ rotate: 0 }}
+                  animate={{ rotate: [0, -10, 10, -10, 0] }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
+                  className="mx-auto w-16 h-16 bg-gradient-to-br from-red-400 to-red-600 rounded-full flex items-center justify-center mb-4"
+                >
+                  <AlertCircle className="h-8 w-8 text-white" />
+                </motion.div>
+                <CardTitle className="text-xl text-white">Session introuvable</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-slate-400 text-center">{publicAskEntry.error}</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+      );
+    }
+
+    // Render the public entry form
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-4">
+        <PublicAskEntryForm
+          askKey={publicAskEntry.askKey}
+          askName={publicAskEntry.askName ?? undefined}
+          askQuestion={publicAskEntry.askQuestion ?? undefined}
+        />
+      </div>
+    );
+  }
 
   // Render error state with beautiful UI
   if (sessionData.error) {

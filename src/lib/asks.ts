@@ -366,7 +366,7 @@ export async function getAskSessionByKey<Row>(
       conversation_mode: string | null;
       expected_duration_minutes: number | null;
       system_prompt: string | null;
-      is_anonymous: boolean | null;
+      allow_auto_registration: boolean | null;
       name: string | null;
       delivery_mode: string | null;
       start_date: string | null;
@@ -415,7 +415,7 @@ export async function getAskSessionByKey<Row>(
     conversation_mode: rpcData.conversation_mode,
     expected_duration_minutes: rpcData.expected_duration_minutes,
     system_prompt: rpcData.system_prompt,
-    is_anonymous: rpcData.is_anonymous,
+    allow_auto_registration: rpcData.allow_auto_registration,
     name: rpcData.name,
     delivery_mode: rpcData.delivery_mode,
     start_date: rpcData.start_date,

@@ -17,7 +17,7 @@ export interface AskCreateFormValues {
   startDate: string;
   endDate: string;
   status: string;
-  isAnonymous: boolean;
+  allowAutoRegistration: boolean;
   maxParticipants?: number;
   deliveryMode: AskDeliveryMode;
   conversationMode: AskConversationMode;
@@ -34,7 +34,7 @@ export interface AskEditFormValues {
   startDate: string;
   endDate: string;
   status: string;
-  isAnonymous: boolean;
+  allowAutoRegistration: boolean;
   maxParticipants?: number;
   deliveryMode: AskDeliveryMode;
   conversationMode: AskConversationMode;

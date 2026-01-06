@@ -69,7 +69,7 @@ export type AskFormState = {
   status: AskStatus;
   startDate: string;
   endDate: string;
-  isAnonymous: boolean;
+  allowAutoRegistration: boolean;
   maxParticipants: string;
   participantIds: string[];
   spokespersonId: string;
@@ -106,7 +106,7 @@ export function createEmptyAskForm(challengeId?: string): AskFormState {
     status: "active",
     startDate: defaultStart,
     endDate: defaultEnd,
-    isAnonymous: false,
+    allowAutoRegistration: false,
     maxParticipants: "",
     participantIds: [],
     spokespersonId: "",

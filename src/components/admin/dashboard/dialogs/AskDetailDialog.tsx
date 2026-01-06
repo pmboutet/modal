@@ -18,6 +18,15 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
   const [isSendingInvites, setIsSendingInvites] = useState(false);
   const [sendInvitesResult, setSendInvitesResult] = useState<{ sent: number; failed: number } | null>(null);
   const [copiedLinks, setCopiedLinks] = useState<Set<string>>(new Set());
+  const [copiedPublicLink, setCopiedPublicLink] = useState(false);
+
+  // Generate the public registration link for auto-registration
+  const generatePublicRegistrationUrl = (askKey: string): string => {
+    const baseUrl = typeof window !== "undefined"
+      ? (process.env.NEXT_PUBLIC_APP_URL || window.location.origin)
+      : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    return `${baseUrl}/?ask=${askKey}`;
+  };
 
   // Dynamically import to avoid SSR issues
   const generateMagicLinkUrl = (email: string, askKey: string, participantToken?: string | null): string => {
@@ -80,6 +89,16 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
           return next;
         });
       }, 2000);
+    } catch (error) {
+      console.error("Failed to copy:", error);
+    }
+  };
+
+  const copyPublicLink = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPublicLink(true);
+      setTimeout(() => setCopiedPublicLink(false), 2000);
     } catch (error) {
       console.error("Failed to copy:", error);
     }
@@ -164,14 +183,45 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
                   <p className="mt-1 text-sm font-medium text-white">{formatDisplayValue(formatDateTime(ask.endDate))}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Anonyme</p>
-                  <p className="mt-1 text-sm font-medium text-white">{ask.isAnonymous ? "Oui" : "Non"}</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Auto-inscription</p>
+                  <p className="mt-1 text-sm font-medium text-white">{ask.allowAutoRegistration ? "Oui" : "Non"}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <p className="text-xs uppercase tracking-wide text-slate-400">Participants max.</p>
                   <p className="mt-1 text-sm font-medium text-white">{formatDisplayValue(ask.maxParticipants)}</p>
                 </div>
               </div>
+
+              {/* Public registration link - only shown when auto-registration is enabled */}
+              {ask.allowAutoRegistration && (
+                <div className="mt-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+                  <p className="text-xs uppercase tracking-wide text-indigo-300">Lien public d&apos;inscription</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Partagez ce lien pour permettre aux participants de s&apos;inscrire eux-mêmes
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={generatePublicRegistrationUrl(ask.askKey)}
+                      className="flex-1 rounded-lg border border-white/10 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 font-mono"
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copyPublicLink(generatePublicRegistrationUrl(ask.askKey))}
+                      className="rounded-lg border border-white/10 bg-slate-900/60 p-2 text-slate-300 hover:bg-slate-800/60 hover:text-white transition-colors"
+                      title="Copier le lien"
+                    >
+                      {copiedPublicLink ? (
+                        <Check className="h-4 w-4 text-green-400" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">

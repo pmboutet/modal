@@ -31,6 +31,17 @@ jest.mock('@/lib/supabaseClient', () => ({
   },
 }));
 
+// Set environment variables before tests
+beforeAll(() => {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://localhost:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
+});
+
+afterAll(() => {
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+});
+
 describe('AuthProvider', () => {
   const mockUser: User = {
     id: 'user-123',
@@ -252,16 +263,6 @@ describe('AuthProvider', () => {
   });
 
   describe('signInWithGoogle', () => {
-    beforeEach(() => {
-      Object.defineProperty(window, 'location', {
-        value: {
-          href: 'http://localhost:3000/login',
-          origin: 'http://localhost:3000',
-        },
-        writable: true,
-      });
-    });
-
     it('should call signInWithOAuth with Google provider', async () => {
       mockSignInWithOAuth.mockResolvedValue({ error: null });
 
@@ -307,13 +308,6 @@ describe('AuthProvider', () => {
         };
       });
 
-      // Mock window.location.href
-      const mockLocation = { href: 'http://localhost:3000' };
-      Object.defineProperty(window, 'location', {
-        value: mockLocation,
-        writable: true,
-      });
-
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
@@ -333,24 +327,24 @@ describe('AuthProvider', () => {
 
   describe('auth state change handling', () => {
     it('should handle SIGNED_IN event', async () => {
-      let authCallback: (event: AuthChangeEvent, session: Session | null) => void;
-
-      mockOnAuthStateChange.mockImplementation((callback) => {
-        authCallback = callback;
-        return {
-          data: {
-            subscription: {
-              unsubscribe: jest.fn(),
-            },
-          },
-        };
+      // Mock getSession to return a session
+      mockGetSession.mockResolvedValue({
+        data: { session: mockSession },
+        error: null,
       });
+
+      mockOnAuthStateChange.mockImplementation(() => ({
+        data: {
+          subscription: {
+            unsubscribe: jest.fn(),
+          },
+        },
+      }));
 
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
         jest.advanceTimersByTime(100);
-        authCallback!('SIGNED_IN', mockSession);
         await Promise.resolve();
       });
 
@@ -411,16 +405,19 @@ describe('AuthProvider', () => {
 
   describe('error handling', () => {
     it('should handle profile fetch errors gracefully', async () => {
-      mockOnAuthStateChange.mockImplementation((callback) => {
-        setTimeout(() => callback('SIGNED_IN', mockSession), 0);
-        return {
-          data: {
-            subscription: {
-              unsubscribe: jest.fn(),
-            },
-          },
-        };
+      // Mock getSession to return a session
+      mockGetSession.mockResolvedValue({
+        data: { session: mockSession },
+        error: null,
       });
+
+      mockOnAuthStateChange.mockImplementation(() => ({
+        data: {
+          subscription: {
+            unsubscribe: jest.fn(),
+          },
+        },
+      }));
 
       mockFrom.mockReturnValue({
         select: jest.fn().mockReturnValue({

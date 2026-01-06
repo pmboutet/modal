@@ -26,7 +26,7 @@ type AskSessionRow = {
   start_date: string;
   end_date: string;
   status: string;
-  is_anonymous: boolean;
+  allow_auto_registration: boolean;
   max_participants: number | null;
   delivery_mode: string;
   conversation_mode: string;
@@ -104,7 +104,7 @@ async function loadTokenDataWithAdmin(token: string): Promise<TokenDataBundle | 
     const { data: askRow, error: askError } = await admin
       .from("ask_sessions")
       .select(
-        "ask_session_id:id, ask_key, name, question, description, status, start_date, end_date, is_anonymous, max_participants, delivery_mode, conversation_mode, project_id, challenge_id, created_by, created_at, updated_at",
+        "ask_session_id:id, ask_key, name, question, description, status, start_date, end_date, allow_auto_registration, max_participants, delivery_mode, conversation_mode, project_id, challenge_id, created_by, created_at, updated_at",
       )
       .eq("id", askSessionId)
       .maybeSingle<AskSessionRow>();

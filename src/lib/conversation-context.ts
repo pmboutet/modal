@@ -152,7 +152,7 @@ export interface AskSessionRow {
   system_prompt?: string | null;
   project_id?: string | null;
   challenge_id?: string | null;
-  is_anonymous?: boolean | null;
+  allow_auto_registration?: boolean | null;
   conversation_mode?: string | null;
   expected_duration_minutes?: number | null;
 }

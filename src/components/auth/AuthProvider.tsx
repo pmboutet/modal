@@ -380,6 +380,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!isMounted) return;
 
+        // Handle refresh token errors gracefully - user needs to re-login
+        if (sessionError) {
+          const errorMessage = sessionError.message?.toLowerCase() || '';
+          if (errorMessage.includes('refresh token') || errorMessage.includes('invalid') || errorMessage.includes('expired')) {
+            console.log("[Auth] Refresh token invalid/expired - signing out silently");
+            // Clear any stale cookies
+            await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+            setStatus("signed-out");
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            return;
+          }
+        }
+
         console.log(`[Auth] getSession result: session=${localSession ? 'exists' : 'null'}, user=${localSession?.user?.email || 'none'}, error=${sessionError?.message || 'none'}`);
 
         if (localSession?.user) {
@@ -431,30 +446,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!isMounted) return;
 
-      console.log("[Auth] Auth state changed:", event, "session:", newSession ? "exists" : "null");
+      try {
+        console.log("[Auth] Auth state changed:", event, "session:", newSession ? "exists" : "null");
 
-      // Handle SIGNED_OUT immediately
-      if (event === "SIGNED_OUT") {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setStatus("signed-out");
-        lastProcessedSessionId.current = null;
-        authHandledRef.current = false; // Reset on sign out
-        return;
-      }
+        // Handle SIGNED_OUT immediately
+        if (event === "SIGNED_OUT") {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setStatus("signed-out");
+          lastProcessedSessionId.current = null;
+          authHandledRef.current = false; // Reset on sign out
+          return;
+        }
 
-      // Mark auth as handled IMMEDIATELY when we get a session
-      // This prevents the getUser() timeout from incorrectly setting signed-out
-      if (newSession) {
-        console.log("[Auth] Marking auth as handled for event:", event);
-        authHandledRef.current = true;
-        setSession(newSession);
-        await processSession(newSession, event);
-      } else if (event === "INITIAL_SESSION") {
-        // No session on initial load - set signed out
-        console.log("[Auth] No session on initial load");
-        setStatus("signed-out");
+        // Mark auth as handled IMMEDIATELY when we get a session
+        // This prevents the getUser() timeout from incorrectly setting signed-out
+        if (newSession) {
+          console.log("[Auth] Marking auth as handled for event:", event);
+          authHandledRef.current = true;
+          setSession(newSession);
+          await processSession(newSession, event);
+        } else if (event === "INITIAL_SESSION") {
+          // No session on initial load - set signed out
+          console.log("[Auth] No session on initial load");
+          setStatus("signed-out");
+        }
+      } catch (error) {
+        // Handle refresh token errors gracefully
+        const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
+        if (errorMessage.includes('refresh token') || errorMessage.includes('invalid') || errorMessage.includes('already used')) {
+          console.log("[Auth] Token error in auth state change - signing out silently");
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setStatus("signed-out");
+        } else {
+          console.error("[Auth] Auth state change error:", error);
+        }
       }
     });
 

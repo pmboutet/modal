@@ -76,7 +76,14 @@ ARRAY['project_name', 'challenge_name', 'participant_count', 'claim_count',
       'community_count', 'problem_count', 'problems_summary', 'finding_count',
       'findings_summary', 'recommendation_count', 'recommendations_summary',
       'tension_count', 'tensions_summary', 'risk_count', 'risks_summary']
-);
+)
+ON CONFLICT (slug) DO UPDATE SET
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  system_prompt = EXCLUDED.system_prompt,
+  user_prompt = EXCLUDED.user_prompt,
+  available_variables = EXCLUDED.available_variables,
+  updated_at = now();
 
 -- Notify PostgREST to reload schema
 NOTIFY pgrst, 'reload schema';

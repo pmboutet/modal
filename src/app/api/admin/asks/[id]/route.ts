@@ -40,7 +40,7 @@ const updateSchema = z.object({
   challengeId: z.string().uuid().optional().or(z.literal("")),
   startDate: z.string().trim().min(1).optional(),
   endDate: z.string().trim().min(1).optional(),
-  isAnonymous: z.boolean().optional(),
+  allowAutoRegistration: z.boolean().optional(),
   maxParticipants: z.number().int().positive().max(10000).optional(),
   deliveryMode: z.enum(deliveryModes).optional(),
   conversationMode: z.enum(conversationModes).optional(),
@@ -228,7 +228,7 @@ function mapAsk(row: any, includeProgress = false): AskSessionRecord {
     challengeId: row.challenge_id,
     startDate: row.start_date,
     endDate: row.end_date,
-    isAnonymous: row.is_anonymous,
+    allowAutoRegistration: row.allow_auto_registration,
     maxParticipants: row.max_participants,
     deliveryMode: row.delivery_mode ?? "digital",
     conversationMode: row.conversation_mode ?? "collaborative",
@@ -344,7 +344,7 @@ export async function PATCH(
     }
     updateData.end_date = endDate.toISOString();
   }
-  if (payload.isAnonymous !== undefined) updateData.is_anonymous = payload.isAnonymous;
+  if (payload.allowAutoRegistration !== undefined) updateData.allow_auto_registration = payload.allowAutoRegistration;
   if (payload.maxParticipants !== undefined) updateData.max_participants = payload.maxParticipants;
   if (payload.deliveryMode) updateData.delivery_mode = payload.deliveryMode;
 

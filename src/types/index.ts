@@ -590,7 +590,7 @@ export interface AskSessionRecord {
   challengeId?: string | null;
   startDate: string;
   endDate: string;
-  isAnonymous: boolean;
+  allowAutoRegistration: boolean;
   maxParticipants?: number | null;
   deliveryMode: AskDeliveryMode;
   conversationMode: AskConversationMode;
@@ -836,7 +836,7 @@ export interface AiAskSuggestion {
   confidence?: "low" | "medium" | "high" | null;
   urgency?: ProjectChallengeNode["impact"] | null;
   maxParticipants?: number | null;
-  isAnonymous?: boolean | null;
+  allowAutoRegistration?: boolean | null;
   deliveryMode?: AskDeliveryMode | null;
   conversationMode?: AskConversationMode | null;
   startDate?: string | null;

@@ -1,21 +1,21 @@
 -- Migration: Create participant-claims-extraction agent
 -- This agent receives ALL insights from a participant and extracts claims with a global view.
 -- This replaces per-insight extraction with a holistic approach at interview completion.
+-- Fixed: Uses model_config_id instead of deprecated model/temperature/max_tokens columns
 
 INSERT INTO public.ai_agents (
   slug,
   name,
   description,
+  model_config_id,
   system_prompt,
-  user_prompt,
-  model,
-  temperature,
-  max_tokens,
-  is_active
-) VALUES (
+  user_prompt
+)
+SELECT
   'participant-claims-extraction',
   'Participant Claims Extraction',
   'Extrait les claims depuis TOUS les insights d''un participant avec une vision globale. Identifie les patterns, consensus internes et contradictions.',
+  (SELECT id FROM ai_model_configs WHERE code = 'anthropic-claude-sonnet-4-5' LIMIT 1),
   '# Extracteur de Claims (Vision Globale Participant)
 
 Tu es un expert en analyse qualitative. Tu reçois TOUS les insights d''un participant dans une session ASK et tu dois extraire les claims clés avec une vision d''ensemble.
@@ -75,22 +75,13 @@ Tu es un expert en analyse qualitative. Tu reçois TOUS les insights d''un parti
 - Les key_entities doivent être normalisés (minuscules, sans articles)
 - source_insight_indices référence les indices dans la liste d''insights',
 
-  'Analyse les insights ci-dessus et extrais les claims structurés. Retourne UNIQUEMENT le JSON sans texte avant ou après.',
-
-  'anthropic',
-  0.3,
-  4096,
-  true
-)
+  'Analyse les insights ci-dessus et extrais les claims structurés. Retourne UNIQUEMENT le JSON sans texte avant ou après.'
 ON CONFLICT (slug) DO UPDATE SET
   name = EXCLUDED.name,
   description = EXCLUDED.description,
   system_prompt = EXCLUDED.system_prompt,
   user_prompt = EXCLUDED.user_prompt,
-  model = EXCLUDED.model,
-  temperature = EXCLUDED.temperature,
-  max_tokens = EXCLUDED.max_tokens,
-  is_active = EXCLUDED.is_active,
+  model_config_id = EXCLUDED.model_config_id,
   updated_at = now();
 
 -- Notify PostgREST to reload schema

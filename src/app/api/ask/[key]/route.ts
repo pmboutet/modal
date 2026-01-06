@@ -37,7 +37,7 @@ interface AskSessionRow {
   end_date?: string | null;
   delivery_mode?: string | null;
   conversation_mode?: string | null;
-  is_anonymous?: boolean | null;
+  allow_auto_registration?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
   project_id?: string | null;
@@ -225,7 +225,7 @@ export async function GET(
 
     // 3. Validate access permissions (only enforce in non-dev mode)
     if (!isDevBypass) {
-      const isAnonymous = askRow.is_anonymous === true;
+      const allowAutoReg = askRow.allow_auto_registration === true;
       const hasValidAuth = authContext.profileId !== null;
 
       // If invite token was provided but invalid, reject
@@ -237,7 +237,7 @@ export async function GET(
       }
 
       // Require authentication unless session is anonymous
-      if (!hasValidAuth && !isAnonymous) {
+      if (!hasValidAuth && !allowAutoReg) {
         return NextResponse.json<ApiResponse>({
           success: false,
           error: "Authentification requise. Veuillez vous connecter ou utiliser un lien d'invitation valide."
@@ -245,12 +245,12 @@ export async function GET(
       }
 
       // Require participation unless session is anonymous
-      if (hasValidAuth && !authContext.participantId && !isAnonymous) {
+      if (hasValidAuth && !authContext.participantId && !allowAutoReg) {
         return permissionDeniedResponse();
       }
 
       // Auto-add participant for anonymous sessions
-      if (isAnonymous && hasValidAuth && !authContext.participantId) {
+      if (allowAutoReg && hasValidAuth && !authContext.participantId) {
         try {
           // Use RPC to bypass RLS for participant creation
           const { data: newParticipant, error: joinError } = await adminClient
@@ -943,10 +943,10 @@ export async function POST(
       authMethod: participantId ? 'invite_token' : 'regular_auth'
     });
 
-    const { row: askRow, error: askError } = await getAskSessionByKey<Pick<AskSessionRow, 'id' | 'ask_key' | 'is_anonymous' | 'conversation_mode'>>(
+    const { row: askRow, error: askError } = await getAskSessionByKey<Pick<AskSessionRow, 'id' | 'ask_key' | 'allow_auto_registration' | 'conversation_mode'>>(
       dataClient,
       key,
-      'id, ask_key, is_anonymous, conversation_mode'
+      'id, ask_key, allow_auto_registration, conversation_mode'
     );
 
     if (askError) {
@@ -1101,7 +1101,7 @@ export async function POST(
     }
 
     if (!isDevBypass && (profileId || participantId)) {
-      const isAnonymous = askRow.is_anonymous === true;
+      const allowAutoReg = askRow.allow_auto_registration === true;
 
       // If authenticated via invite token, verify participant belongs to this ASK
       if (participantId) {
@@ -1162,7 +1162,7 @@ export async function POST(
 
         // If session allows anonymous participation, allow access even if not in participants list
         // Otherwise, require explicit participation
-        if (!membership && !isAnonymous) {
+        if (!membership && !allowAutoReg) {
           return permissionDeniedResponse();
         }
 
@@ -1172,7 +1172,7 @@ export async function POST(
         }
 
         // If anonymous and user is not yet a participant, create one automatically
-        if (isAnonymous && !membership) {
+        if (allowAutoReg && !membership) {
           const { error: insertError } = await supabase
             .from('ask_participants')
             .insert({

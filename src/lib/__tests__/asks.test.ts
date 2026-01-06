@@ -536,7 +536,7 @@ describe('getAskSessionByKey', () => {
     conversation_mode: 'collaborative',
     expected_duration_minutes: 30,
     system_prompt: null,
-    is_anonymous: false,
+    allow_auto_registration: false,
     name: 'Test Session',
     delivery_mode: 'text',
     start_date: null,

@@ -1666,8 +1666,8 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         participantIds: matchedParticipants.length ? matchedParticipants : baseForm.participantIds,
         spokespersonId: spokespersonId || baseForm.spokespersonId,
         maxParticipants,
-        isAnonymous:
-          typeof suggestion.isAnonymous === "boolean" ? suggestion.isAnonymous : baseForm.isAnonymous,
+        allowAutoRegistration:
+          typeof suggestion.allowAutoRegistration === "boolean" ? suggestion.allowAutoRegistration : baseForm.allowAutoRegistration,
         deliveryMode: suggestion.deliveryMode ?? baseForm.deliveryMode,
         conversationMode: suggestion.conversationMode ?? baseForm.conversationMode,
         startDate,
@@ -2719,7 +2719,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
   };
 
   const handleAskAnonymousToggle = (event: ChangeEvent<HTMLInputElement>) => {
-    setAskFormValues(current => ({ ...current, isAnonymous: event.target.checked }));
+    setAskFormValues(current => ({ ...current, allowAutoRegistration: event.target.checked }));
   };
 
   const handleAskParticipantToggle = (userId: string) => {
@@ -2842,7 +2842,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
       startDate,
       endDate,
       status: askFormValues.status,
-      isAnonymous: askFormValues.isAnonymous,
+      allowAutoRegistration: askFormValues.allowAutoRegistration,
       maxParticipants: numericMaxParticipants,
       deliveryMode: askFormValues.deliveryMode,
       conversationMode: askFormValues.conversationMode,
@@ -2988,7 +2988,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         status: normalizeAskStatus(record.status),
         startDate: toInputDate(record.startDate),
         endDate: toInputDate(record.endDate),
-        isAnonymous: Boolean(record.isAnonymous),
+        allowAutoRegistration: Boolean(record.allowAutoRegistration),
         maxParticipants: record.maxParticipants ? String(record.maxParticipants) : "",
         participantIds: participants,
         spokespersonId: spokesperson && participants.includes(spokesperson) ? spokesperson : "",
@@ -4987,13 +4987,43 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-white/20 bg-slate-900"
-                        checked={askFormValues.isAnonymous}
+                        checked={askFormValues.allowAutoRegistration}
                         onChange={handleAskAnonymousToggle}
                         disabled={isSavingAsk || isLoadingAskDetails}
                       />
-                      Allow anonymous participation
+                      Autoriser l&apos;auto-inscription
                     </label>
                   </div>
+
+                  {/* Public registration link - only shown when editing and auto-registration is enabled */}
+                  {isEditingAsk && askFormValues.allowAutoRegistration && askFormValues.askKey && (
+                    <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+                      <p className="text-xs uppercase tracking-wide text-indigo-300">Lien public d&apos;inscription</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Partagez ce lien pour permettre aux participants de s&apos;inscrire eux-mêmes
+                      </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${typeof window !== "undefined" ? window.location.origin : ""}/?ask=${askFormValues.askKey}`}
+                          className="flex-1 rounded-lg border border-white/10 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-200 font-mono"
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/?ask=${askFormValues.askKey}`;
+                            navigator.clipboard.writeText(url);
+                          }}
+                          className="rounded-lg border border-white/10 bg-slate-900/60 p-1.5 text-slate-300 hover:bg-slate-800/60 hover:text-white transition-colors"
+                          title="Copier le lien"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {isEditingAsk ? (
                     <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">

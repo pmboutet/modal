@@ -52,7 +52,7 @@ export const askFormSchema = z.object({
   startDate: z.string().trim().min(1, "Start date is required"),
   endDate: z.string().trim().min(1, "End date is required"),
   status: z.enum(askStatuses),
-  isAnonymous: z.boolean().default(false),
+  allowAutoRegistration: z.boolean().default(false),
   maxParticipants: z
     .preprocess(value => (value === "" || value === undefined || value === null ? undefined : Number(value)), z
       .number()
@@ -117,7 +117,7 @@ export const defaultAskFormValues: AskFormInput = {
   startDate: "",
   endDate: "",
   status: "active",
-  isAnonymous: false,
+  allowAutoRegistration: false,
   maxParticipants: undefined,
   deliveryMode: "digital",
   conversationMode: "collaborative",

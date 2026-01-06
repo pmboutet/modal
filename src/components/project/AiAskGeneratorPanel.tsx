@@ -206,8 +206,8 @@ function AskSuggestionCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-slate-400">
           {suggestion.maxParticipants ? <div>Capacité recommandée: {suggestion.maxParticipants} participants</div> : null}
-          {typeof suggestion.isAnonymous === "boolean" ? (
-            <div>Mode anonyme: {suggestion.isAnonymous ? "oui" : "non"}</div>
+          {typeof suggestion.allowAutoRegistration === "boolean" ? (
+            <div>Auto-inscription: {suggestion.allowAutoRegistration ? "oui" : "non"}</div>
           ) : null}
           {suggestion.deliveryMode ? <div>Livraison: {suggestion.deliveryMode}</div> : null}
           {suggestion.conversationMode ? (

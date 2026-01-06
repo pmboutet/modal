@@ -146,7 +146,7 @@ export async function POST(
     const { row: askRow, error: askError } = await getAskSessionByKey<AskSessionRow & { conversation_mode?: string | null }>(
       dataClient,
       key,
-      'id, ask_key, question, description, status, system_prompt, project_id, challenge_id, is_anonymous, conversation_mode, expected_duration_minutes'
+      'id, ask_key, question, description, status, system_prompt, project_id, challenge_id, allow_auto_registration, conversation_mode, expected_duration_minutes'
     );
 
     if (askError) {
@@ -166,20 +166,20 @@ export async function POST(
     }
 
     if (!isDevBypass && profileId && !authenticatedViaToken) {
-      const isAnonymous = askRow.is_anonymous === true;
+      const allowAutoReg = askRow.allow_auto_registration === true;
 
       // Check if user is a participant via RPC wrapper
       const adminCheck = await getAdminClient();
       const membership = await fetchUserParticipation(adminCheck, askRow.id, profileId);
 
-      // If session allows anonymous participation, allow access even if not in participants list
+      // If session allows auto-registration, allow access even if not in participants list
       // Otherwise, require explicit participation
-      if (!membership && !isAnonymous) {
+      if (!membership && !allowAutoReg) {
         return permissionDeniedResponse();
       }
 
-      // If anonymous and user is not yet a participant, create one automatically via RPC wrapper
-      if (isAnonymous && !membership) {
+      // If auto-registration enabled and user is not yet a participant, create one automatically via RPC wrapper
+      if (allowAutoReg && !membership) {
         await addAnonymousParticipant(adminCheck, askRow.id, profileId, null);
       }
     }

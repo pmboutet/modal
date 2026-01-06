@@ -394,7 +394,7 @@ export async function getAgentConfigForAsk(
         status: string;
         start_date: string;
         end_date: string;
-        is_anonymous: boolean;
+        allow_auto_registration: boolean;
         max_participants: number | null;
         delivery_mode: string;
         conversation_mode: string;
