@@ -56,13 +56,13 @@ export function generateEmailRedirectUrl(
 ): string {
   const baseUrl = getBaseUrl();
 
-  // Redirect through /auth/callback so the code can be exchanged for a session
-  // The callback will then redirect to /?token=XXX or /?key=XXX
+  // Use path-based token to avoid Supabase stripping query params
+  // The callback will extract the token from the path and redirect to /?token=XXX
   if (participantToken) {
-    return `${baseUrl}/auth/callback?token=${participantToken}`;
+    return `${baseUrl}/auth/callback/token/${participantToken}`;
   }
 
-  return `${baseUrl}/auth/callback?key=${askKey}`;
+  return `${baseUrl}/auth/callback/key/${askKey}`;
 }
 
 /**
