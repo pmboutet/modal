@@ -8,9 +8,10 @@
 function getBaseUrl(): string {
   // Use NEXT_PUBLIC_APP_URL if configured (works for both dev and production)
   if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL;
+    // Remove trailing slash to avoid double slashes in URLs
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '');
   }
-  
+
   // Fallback to localhost for local development
   return 'http://localhost:3000';
 }
@@ -85,6 +86,7 @@ export async function sendMagicLink(
     // Build the redirect URL - goes through /auth/callback to exchange code for session
     // Then redirects to the ASK page with token/key preserved
     const redirectUrl = generateEmailRedirectUrl(askKey, participantToken);
+    console.log(`[MagicLink] Sending magic link to ${normalizedEmail} with redirectUrl: ${redirectUrl}, participantToken: ${participantToken ? 'present' : 'missing'}`);
 
     // Create a client with anon key for sending OTP
     // This will send a magic link email via Supabase's built-in email service
