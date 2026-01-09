@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Clock, MessageSquare, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText } from "lucide-react";
+import { AlertCircle, Clock, MessageSquare, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock } from "lucide-react";
 import { ChatComponent } from "@/components/chat/ChatComponent";
 import { InsightPanel } from "@/components/insight/InsightPanel";
 import { SuggestedQuestionsPanel } from "@/components/consultant/SuggestedQuestionsPanel";
@@ -2302,9 +2302,13 @@ export default function HomePage() {
 
   // Render error state with beautiful UI
   if (sessionData.error) {
+    const isAccessDenied = sessionData.error.toLowerCase().includes('non autorisé') ||
+                           sessionData.error.toLowerCase().includes('unauthorized') ||
+                           sessionData.error.toLowerCase().includes('permission');
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-white to-indigo-200 flex items-center justify-center p-6">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           className="glass-card max-w-md w-full"
@@ -2315,19 +2319,38 @@ export default function HomePage() {
                 initial={{ rotate: 0 }}
                 animate={{ rotate: [0, -10, 10, -10, 0] }}
                 transition={{ duration: 0.5, delay: 0.2 }}
-                className="mx-auto w-16 h-16 bg-gradient-to-br from-red-400 to-red-600 rounded-full flex items-center justify-center mb-4"
+                className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
+                  isAccessDenied
+                    ? 'bg-gradient-to-br from-amber-400 to-orange-500'
+                    : 'bg-gradient-to-br from-red-400 to-red-600'
+                }`}
               >
-                <AlertCircle className="h-8 w-8 text-white" />
+                {isAccessDenied ? (
+                  <Lock className="h-8 w-8 text-white" />
+                ) : (
+                  <AlertCircle className="h-8 w-8 text-white" />
+                )}
               </motion.div>
-              <CardTitle className="text-xl text-destructive">
-                Session Error
+              <CardTitle className={`text-xl ${isAccessDenied ? 'text-amber-700' : 'text-destructive'}`}>
+                {isAccessDenied ? 'Accès restreint' : 'Session Error'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="neumorphic-shadow p-4 rounded-lg">
-                <p className="text-muted-foreground text-center">{sessionData.error}</p>
-              </div>
-              
+              {isAccessDenied ? (
+                <div className="neumorphic-shadow p-4 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50">
+                  <p className="text-muted-foreground text-center mb-3">
+                    Vous n&apos;êtes pas encore participant à cette session ASK.
+                  </p>
+                  <p className="text-sm text-muted-foreground text-center">
+                    Contactez l&apos;organisateur pour recevoir une invitation, ou vérifiez que vous utilisez le bon lien.
+                  </p>
+                </div>
+              ) : (
+                <div className="neumorphic-shadow p-4 rounded-lg">
+                  <p className="text-muted-foreground text-center">{sessionData.error}</p>
+                </div>
+              )}
+
               {/* Show format example for ASK key errors */}
               {sessionData.error.includes('ASK key') && (
                 <motion.div 

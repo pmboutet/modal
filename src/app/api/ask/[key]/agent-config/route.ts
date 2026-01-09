@@ -290,9 +290,12 @@ export async function GET(
     }
 
     // Fetch project and challenge data
+    // Use admin client when token is present to bypass RLS restrictions
+    const dataClient = token ? getAdminSupabaseClient() : supabase;
+
     let projectData: ProjectRow | null = null;
     if (askSession.project_id) {
-      const { data, error } = await supabase
+      const { data, error } = await dataClient
         .from('projects')
         .select('id, name, system_prompt')
         .eq('id', askSession.project_id)
@@ -307,7 +310,7 @@ export async function GET(
 
     let challengeData: ChallengeRow | null = null;
     if (askSession.challenge_id) {
-      const { data, error } = await supabase
+      const { data, error } = await dataClient
         .from('challenges')
         .select('id, name, system_prompt')
         .eq('id', askSession.challenge_id)

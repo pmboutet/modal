@@ -69,34 +69,14 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  // First, call getSession() which can refresh tokens if needed
-  console.log('[Middleware] Calling getSession()...')
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-  console.log(`[Middleware] getSession result: session=${session ? 'exists' : 'null'}, error=${sessionError?.message || 'none'}`)
+  // Use getUser() directly - it validates the JWT with Supabase server
+  // This is more secure than getSession() which only reads from cookies
+  console.log('[Middleware] Calling getUser() to validate authentication...')
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  console.log(`[Middleware] getUser result: user=${user?.email || 'null'}, error=${userError?.message || 'none'}`)
 
-  if (session) {
-    console.log(`[Middleware] Session details: user=${session.user?.email}, expires_at=${session.expires_at}, refresh_token=${session.refresh_token ? 'exists' : 'none'}`)
-  }
-
-  // For protected routes, we need to verify the user is actually authenticated
-  let isAuthenticated = false
-
-  if (session) {
-    // Session exists in cookies, try to validate it
-    console.log('[Middleware] Calling getUser() to validate...')
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    console.log(`[Middleware] getUser result: user=${user?.email || 'null'}, error=${userError?.message || 'none'}`)
-
-    isAuthenticated = !userError && !!user
-
-    // If validation failed but we have a session, the token might be refreshing
-    if (!isAuthenticated && session.refresh_token) {
-      console.log('[Middleware] getUser failed but has refresh_token - allowing through for client-side refresh')
-      isAuthenticated = true
-    }
-  }
-
-  console.log(`[Middleware] Final isAuthenticated: ${isAuthenticated}`)
+  const isAuthenticated = !userError && !!user
+  console.log(`[Middleware] isAuthenticated: ${isAuthenticated}`)
 
   // Protect admin routes
   if (pathname.startsWith('/admin')) {

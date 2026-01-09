@@ -63,6 +63,12 @@ CREATE POLICY "Service role full access" ON public.conversation_threads
   FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
+-- conversation_threads - authenticated users (needed for getOrCreateConversationThread)
+DROP POLICY IF EXISTS "Authenticated users can manage conversation threads" ON public.conversation_threads;
+CREATE POLICY "Authenticated users can manage conversation threads" ON public.conversation_threads
+  FOR ALL TO authenticated
+  USING (true) WITH CHECK (true);
+
 -- knowledge_entities
 DROP POLICY IF EXISTS "Service role full access" ON public.knowledge_entities;
 CREATE POLICY "Service role full access" ON public.knowledge_entities
@@ -90,6 +96,9 @@ CREATE POLICY "Service role full access" ON public.insight_keywords
 -- ============================================================================
 -- SECTION 3: FIX HELPER FUNCTIONS FROM MIGRATION 014
 -- ============================================================================
+
+-- Note: These functions return simple types (BOOLEAN, UUID) so CREATE OR REPLACE works
+-- No need to drop them - RLS policies depend on them
 
 -- is_full_admin
 CREATE OR REPLACE FUNCTION public.is_full_admin()
@@ -183,6 +192,8 @@ $$;
 -- SECTION 4: FIX is_ask_participant FROM MIGRATION 021
 -- ============================================================================
 
+-- Note: Returns BOOLEAN so CREATE OR REPLACE works safely
+
 CREATE OR REPLACE FUNCTION public.is_ask_participant(ask_session_uuid UUID)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -190,15 +201,15 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  session_is_anonymous BOOLEAN;
+  session_allow_auto_registration BOOLEAN;
 BEGIN
-  -- Check if the session allows anonymous participation
-  SELECT is_anonymous INTO session_is_anonymous
+  -- Check if the session allows auto-registration
+  SELECT allow_auto_registration INTO session_allow_auto_registration
   FROM public.ask_sessions
   WHERE id = ask_session_uuid;
 
-  -- If session allows anonymous participation, any logged-in user can participate
-  IF session_is_anonymous = true AND public.current_user_id() IS NOT NULL THEN
+  -- If session allows auto-registration, any logged-in user can participate
+  IF session_allow_auto_registration = true AND public.current_user_id() IS NOT NULL THEN
     RETURN true;
   END IF;
 
@@ -215,6 +226,8 @@ $$;
 -- ============================================================================
 -- SECTION 5: FIX check_* FUNCTIONS FROM MIGRATION 018
 -- ============================================================================
+
+-- Note: These functions return BOOLEAN so CREATE OR REPLACE works safely
 
 -- check_user_authored_insight
 CREATE OR REPLACE FUNCTION public.check_user_authored_insight(insight_uuid UUID)
@@ -260,6 +273,12 @@ $$;
 -- ============================================================================
 -- SECTION 6: FIX VECTOR SEARCH FUNCTIONS FROM MIGRATION 025
 -- ============================================================================
+
+-- Drop functions first to allow signature changes
+DROP FUNCTION IF EXISTS public.find_similar_insights(vector(1024), float, int, uuid);
+DROP FUNCTION IF EXISTS public.insights_similarity_score(vector(1024), vector(1024));
+DROP FUNCTION IF EXISTS public.find_similar_entities(vector(1024), float, int, varchar);
+DROP FUNCTION IF EXISTS public.find_similar_syntheses(vector(1024), float, int, uuid);
 
 -- find_similar_insights
 CREATE OR REPLACE FUNCTION public.find_similar_insights(
@@ -370,6 +389,13 @@ $$;
 -- SECTION 7: FIX TOKEN ACCESS FUNCTIONS FROM MIGRATION 033
 -- ============================================================================
 
+-- Drop functions first to allow signature changes
+DROP FUNCTION IF EXISTS public.get_ask_session_by_token(VARCHAR(255));
+DROP FUNCTION IF EXISTS public.get_ask_participants_by_token(VARCHAR(255));
+DROP FUNCTION IF EXISTS public.get_ask_messages_by_token(VARCHAR(255));
+DROP FUNCTION IF EXISTS public.get_ask_insights_by_token(VARCHAR(255));
+DROP FUNCTION IF EXISTS public.get_ask_context_by_token(VARCHAR(255));
+
 -- get_ask_session_by_token
 CREATE OR REPLACE FUNCTION public.get_ask_session_by_token(
   p_token VARCHAR(255)
@@ -383,11 +409,10 @@ RETURNS TABLE (
   status VARCHAR(50),
   start_date TIMESTAMPTZ,
   end_date TIMESTAMPTZ,
-  is_anonymous BOOLEAN,
+  allow_auto_registration BOOLEAN,
   max_participants INTEGER,
   delivery_mode VARCHAR(50),
-  audience_scope VARCHAR(50),
-  response_mode VARCHAR(50),
+  conversation_mode VARCHAR(30),
   project_id UUID,
   challenge_id UUID,
   created_by UUID,
@@ -424,11 +449,10 @@ BEGIN
     a.status,
     a.start_date,
     a.end_date,
-    a.is_anonymous,
+    a.allow_auto_registration,
     a.max_participants,
     a.delivery_mode,
-    a.audience_scope,
-    a.response_mode,
+    a.conversation_mode,
     a.project_id,
     a.challenge_id,
     a.created_by,
@@ -446,9 +470,9 @@ CREATE OR REPLACE FUNCTION public.get_ask_participants_by_token(
 RETURNS TABLE (
   participant_id UUID,
   user_id UUID,
-  participant_name TEXT,
-  participant_email TEXT,
-  role TEXT,
+  participant_name VARCHAR,
+  participant_email VARCHAR,
+  role VARCHAR,
   is_spokesperson BOOLEAN,
   joined_at TIMESTAMPTZ
 )
@@ -473,7 +497,7 @@ BEGIN
   -- Return participants (bypasses RLS but only for verified session)
   RETURN QUERY
   SELECT
-    ap.id,
+    ap.id AS participant_id,
     ap.user_id,
     ap.participant_name,
     ap.participant_email,
@@ -493,8 +517,8 @@ CREATE OR REPLACE FUNCTION public.get_ask_messages_by_token(
 RETURNS TABLE (
   message_id UUID,
   content TEXT,
-  type VARCHAR(50),
-  sender_type VARCHAR(50),
+  type VARCHAR,
+  sender_type VARCHAR,
   sender_id UUID,
   sender_name TEXT,
   created_at TIMESTAMPTZ,
@@ -505,29 +529,38 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
+  v_participant_id UUID;
   v_ask_session_id UUID;
 BEGIN
-  -- Get ASK session ID from token
-  SELECT ap.ask_session_id INTO v_ask_session_id
+  -- First, verify token exists and get participant
+  SELECT ap.id, ap.ask_session_id INTO v_participant_id, v_ask_session_id
   FROM public.ask_participants ap
-  WHERE invite_token = p_token
+  WHERE ap.invite_token = p_token
   LIMIT 1;
 
-  IF v_ask_session_id IS NULL THEN
+  -- If token not found, return empty result
+  IF v_participant_id IS NULL THEN
     RETURN;
   END IF;
 
+  -- Return messages for the ASK session (bypasses RLS due to SECURITY DEFINER)
   RETURN QUERY
   SELECT
-    m.id,
+    m.id AS message_id,
     m.content,
-    m.type,
+    m.message_type AS type,
     m.sender_type,
-    m.sender_id,
-    m.sender_name,
+    m.user_id AS sender_id,
+    COALESCE(
+      p.full_name,
+      CONCAT(p.first_name, ' ', p.last_name),
+      p.email,
+      'Unknown'
+    )::TEXT AS sender_name,
     m.created_at,
     m.metadata
   FROM public.messages m
+  LEFT JOIN public.profiles p ON p.id = m.user_id
   WHERE m.ask_session_id = v_ask_session_id
   ORDER BY m.created_at ASC;
 END;
@@ -631,6 +664,10 @@ $$;
 -- ============================================================================
 -- SECTION 8: FIX SECURITY MONITORING FUNCTIONS FROM MIGRATION 042
 -- ============================================================================
+
+-- Drop non-trigger functions first to allow signature changes
+DROP FUNCTION IF EXISTS public.detect_malicious_content(TEXT);
+-- Note: trigger_security_monitoring returns TRIGGER so CREATE OR REPLACE works safely
 
 -- detect_malicious_content
 CREATE OR REPLACE FUNCTION public.detect_malicious_content(content TEXT)
@@ -754,6 +791,11 @@ $$;
 -- SECTION 9: FIX PLAN STEP FUNCTIONS FROM MIGRATION 058
 -- ============================================================================
 
+-- Drop functions that return TABLE types to allow signature changes
+DROP FUNCTION IF EXISTS public.get_current_plan_step(UUID);
+DROP FUNCTION IF EXISTS public.get_step_messages(UUID);
+-- Note: update_plan_progress returns TRIGGER so CREATE OR REPLACE works safely
+
 -- get_current_plan_step
 CREATE OR REPLACE FUNCTION public.get_current_plan_step(p_plan_id UUID)
 RETURNS TABLE (
@@ -843,6 +885,9 @@ $$;
 -- ============================================================================
 -- SECTION 10: FIX REMAINING TRIGGER FUNCTIONS
 -- ============================================================================
+
+-- Note: Trigger functions can use CREATE OR REPLACE safely since return type stays TRIGGER
+-- No need to drop them - they're just getting SET search_path added
 
 -- generate_invite_token (from migration 032)
 CREATE OR REPLACE FUNCTION public.generate_invite_token()

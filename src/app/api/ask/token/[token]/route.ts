@@ -3,7 +3,7 @@ import { type SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
 import { type ApiResponse, type Message, type AskConversationMode } from "@/types";
-import { getOrCreateConversationThread } from "@/lib/asks";
+import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread } from "@/lib/asks";
 import {
   getConversationPlanWithSteps,
   generateConversationPlan,
@@ -544,6 +544,71 @@ export async function GET(
 
       // Store thread ID for response (used for realtime subscriptions)
       conversationThreadId = conversationThread?.id ?? null;
+
+      // In individual_parallel mode, filter messages to only show those from the participant's thread
+      // This ensures message isolation between participants
+      if (conversationThread && !shouldUseSharedThread(askConfig)) {
+        // Individual thread mode - reload messages for this specific thread only
+        const { messages: threadMessages, error: threadMessagesError } = await getMessagesForThread(
+          adminClient,
+          conversationThread.id
+        );
+
+        if (!threadMessagesError && threadMessages) {
+          // Get user profiles for sender names
+          const threadMessageUserIds = threadMessages
+            .map(row => row.user_id)
+            .filter((id): id is string => Boolean(id));
+
+          // Update usersById with any new user IDs
+          if (threadMessageUserIds.length > 0) {
+            const missingUserIds = threadMessageUserIds.filter(id => !usersById[id]);
+            if (missingUserIds.length > 0) {
+              const { data: newUsers } = await adminClient
+                .from('profiles')
+                .select('id, full_name, first_name, last_name, email')
+                .in('id', missingUserIds);
+
+              if (newUsers) {
+                newUsers.forEach(user => {
+                  usersById[user.id] = user;
+                });
+              }
+            }
+          }
+
+          // Replace messages array with filtered thread messages
+          messages.length = 0; // Clear existing messages
+          threadMessages.forEach((row, index) => {
+            const messageRow: MessageRow = {
+              id: row.id,
+              ask_session_id: askRow.ask_session_id,
+              content: row.content,
+              sender_type: row.sender_type,
+              user_id: row.user_id,
+              created_at: row.created_at,
+              metadata: row.metadata as Record<string, unknown> | null,
+            };
+            const user = row.user_id ? usersById[row.user_id] ?? null : null;
+
+            messages.push({
+              id: row.id,
+              askKey: askRow.ask_key,
+              askSessionId: askRow.ask_session_id,
+              content: row.content,
+              type: (row.message_type as string) || 'text',
+              senderType: row.sender_type || 'user',
+              senderId: row.user_id,
+              senderName: buildMessageSenderName(messageRow, user as UserRow | null, index),
+              timestamp: row.created_at,
+              metadata: (row.metadata as Record<string, unknown>) || {},
+              clientId: row.id,
+            });
+          });
+
+          console.log(`[token route] Individual thread mode: filtered ${messages.length} messages for thread ${conversationThread.id}`);
+        }
+      }
 
       if (conversationThread) {
         conversationPlan = await getConversationPlanWithSteps(adminClient, conversationThread.id);

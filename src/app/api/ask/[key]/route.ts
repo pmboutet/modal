@@ -367,43 +367,74 @@ export async function GET(
         throw threadMessagesError;
       }
       
-      // Also get messages without conversation_thread_id for backward compatibility
-      // This ensures messages created before thread creation are still visible
-      const { data: messagesWithoutThread, error: messagesWithoutThreadError } = await dataClient
-        .from('messages')
-        .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, conversation_thread_id')
-        .eq('ask_session_id', askSessionId)
-        .is('conversation_thread_id', null)
-        .order('created_at', { ascending: true });
-
-      if (messagesWithoutThreadError && !isPermissionDenied(messagesWithoutThreadError)) {
-        console.warn('⚠️ Error fetching messages without thread:', messagesWithoutThreadError);
-      }
-      
-      // Combine thread messages with messages without thread
+      // Combine thread messages with messages without thread (for backward compatibility)
+      // In individual_parallel mode, ONLY show messages from the user's thread - no legacy messages
+      // This ensures strict message isolation between participants
       const threadMessagesList = (threadMessages ?? []) as MessageRow[];
-      const messagesWithoutThreadList = (messagesWithoutThread ?? []) as MessageRow[];
-      messageRows = [...threadMessagesList, ...messagesWithoutThreadList].sort((a, b) => {
-        const timeA = new Date(a.created_at ?? new Date().toISOString()).getTime();
-        const timeB = new Date(b.created_at ?? new Date().toISOString()).getTime();
-        return timeA - timeB;
-      });
-    } else {
-      // Fallback: get all messages for backward compatibility
-      const { data, error: messageError } = await dataClient
-        .from('messages')
-        .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, conversation_thread_id')
-        .eq('ask_session_id', askSessionId)
-        .order('created_at', { ascending: true });
 
-      if (messageError) {
-        if (isPermissionDenied(messageError)) {
-          return permissionDeniedResponse();
+      if (shouldUseSharedThread(askConfig)) {
+        // Shared thread mode: include messages without thread_id for backward compatibility
+        const { data: messagesWithoutThread, error: messagesWithoutThreadError } = await dataClient
+          .from('messages')
+          .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, conversation_thread_id')
+          .eq('ask_session_id', askSessionId)
+          .is('conversation_thread_id', null)
+          .order('created_at', { ascending: true });
+
+        if (messagesWithoutThreadError && !isPermissionDenied(messagesWithoutThreadError)) {
+          console.warn('⚠️ Error fetching messages without thread:', messagesWithoutThreadError);
         }
-        throw messageError;
+
+        const messagesWithoutThreadList = (messagesWithoutThread ?? []) as MessageRow[];
+        messageRows = [...threadMessagesList, ...messagesWithoutThreadList].sort((a, b) => {
+          const timeA = new Date(a.created_at ?? new Date().toISOString()).getTime();
+          const timeB = new Date(b.created_at ?? new Date().toISOString()).getTime();
+          return timeA - timeB;
+        });
+      } else {
+        // Individual thread mode: strict isolation - only messages from this user's thread
+        messageRows = threadMessagesList;
+        console.log(`🔒 GET /api/ask/[key]: Individual thread mode - showing ${messageRows.length} messages from thread ${conversationThread.id}`);
       }
-      
-      messageRows = (data ?? []) as MessageRow[];
+    } else {
+      // Fallback: get messages when no thread exists yet
+      // In individual_parallel mode, filter by user_id to maintain isolation
+      // In shared mode, get all messages for backward compatibility
+      if (!shouldUseSharedThread(askConfig) && threadProfileId) {
+        // Individual mode without thread yet: only get messages from this user
+        const { data, error: messageError } = await dataClient
+          .from('messages')
+          .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, conversation_thread_id')
+          .eq('ask_session_id', askSessionId)
+          .eq('user_id', threadProfileId)
+          .order('created_at', { ascending: true });
+
+        if (messageError) {
+          if (isPermissionDenied(messageError)) {
+            return permissionDeniedResponse();
+          }
+          throw messageError;
+        }
+
+        messageRows = (data ?? []) as MessageRow[];
+        console.log(`🔒 GET /api/ask/[key]: Individual mode without thread - showing ${messageRows.length} messages for user ${threadProfileId}`);
+      } else {
+        // Shared mode: get all messages for backward compatibility
+        const { data, error: messageError } = await dataClient
+          .from('messages')
+          .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, conversation_thread_id')
+          .eq('ask_session_id', askSessionId)
+          .order('created_at', { ascending: true });
+
+        if (messageError) {
+          if (isPermissionDenied(messageError)) {
+            return permissionDeniedResponse();
+          }
+          throw messageError;
+        }
+
+        messageRows = (data ?? []) as MessageRow[];
+      }
     }
 
     const messageUserIds = (messageRows ?? [])

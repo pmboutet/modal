@@ -1,5 +1,14 @@
 # Claude Code Instructions
 
+## Test Credentials
+
+Pour tester l'application en local (avec `NEXT_PUBLIC_IS_DEV=false`):
+
+- **Email**: `contact@getflowdesign.com`
+- **Password**: `flowDesign1`
+- **Role**: `full_admin`
+- **Client**: `TechCorp Demo`
+
 ## Development Workflow
 
 ### Before Each Commit

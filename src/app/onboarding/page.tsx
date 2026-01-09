@@ -15,16 +15,46 @@ export default function OnboardingPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [checkingClient, setCheckingClient] = useState(true);
+  const [hasClient, setHasClient] = useState(false);
 
-  // If user is already an admin, redirect to admin dashboard
+  // Check if user has at least one client membership
   useEffect(() => {
-    if (status === "signed-in" && profile) {
+    async function checkClientMembership() {
+      if (status !== "signed-in" || !profile?.id) {
+        setCheckingClient(false);
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/admin/clients");
+        if (response.ok) {
+          const data = await response.json();
+          setHasClient(data.data && data.data.length > 0);
+        }
+      } catch {
+        // If we can't check, assume no client
+        setHasClient(false);
+      } finally {
+        setCheckingClient(false);
+      }
+    }
+
+    checkClientMembership();
+  }, [status, profile?.id]);
+
+  // If user is already an admin WITH a client, redirect to admin dashboard
+  useEffect(() => {
+    if (status === "signed-in" && profile && !checkingClient) {
       const role = profile.role?.toLowerCase() ?? "";
-      if (["full_admin", "client_admin", "facilitator", "manager"].includes(role)) {
+      const isAdminRole = ["full_admin", "client_admin", "facilitator", "manager"].includes(role);
+
+      // Only redirect if user has admin role AND has at least one client
+      if (isAdminRole && hasClient) {
         router.push("/admin");
       }
     }
-  }, [status, profile, router]);
+  }, [status, profile, router, checkingClient, hasClient]);
 
   // If not signed in, redirect to login
   useEffect(() => {
@@ -71,7 +101,7 @@ export default function OnboardingPage() {
     }
   };
 
-  if (status === "loading") {
+  if (status === "loading" || checkingClient) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950">
         <Loader2 className="h-8 w-8 animate-spin text-slate-400" />

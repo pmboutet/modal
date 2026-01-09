@@ -18,26 +18,50 @@ function getBaseUrl(): string {
 /**
  * Generates a magic link URL for a participant without sending an email.
  * This can be used to display links that admins can copy/paste.
- * 
+ *
  * @param email - Email address for the participant (optional, for display purposes)
  * @param askKey - Ask session key for the redirect URL
  * @param participantToken - Optional unique token for the participant (if provided, uses token instead of key)
  * @returns The magic link URL
  */
 export function generateMagicLinkUrl(
-  email: string, 
-  askKey: string, 
+  email: string,
+  askKey: string,
   participantToken?: string
 ): string {
   const baseUrl = getBaseUrl();
-  
+
   // If we have a participant token, use it for a unique link per participant
   if (participantToken) {
     return `${baseUrl}/?token=${participantToken}`;
   }
-  
+
   // Otherwise, use the askKey (backward compatible)
   return `${baseUrl}/?key=${askKey}`;
+}
+
+/**
+ * Generates the email redirect URL for Supabase auth.
+ * This URL goes through /auth/callback to exchange the code for a session,
+ * then redirects to the final destination with the ASK token/key.
+ *
+ * @param askKey - Ask session key
+ * @param participantToken - Optional unique token for the participant
+ * @returns The auth callback URL with token/key preserved
+ */
+export function generateEmailRedirectUrl(
+  askKey: string,
+  participantToken?: string
+): string {
+  const baseUrl = getBaseUrl();
+
+  // Redirect through /auth/callback so the code can be exchanged for a session
+  // The callback will then redirect to /?token=XXX or /?key=XXX
+  if (participantToken) {
+    return `${baseUrl}/auth/callback?token=${participantToken}`;
+  }
+
+  return `${baseUrl}/auth/callback?key=${askKey}`;
 }
 
 /**
@@ -58,9 +82,9 @@ export async function sendMagicLink(
   try {
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Build the redirect URL - Supabase will redirect here after user clicks magic link
-    // The user will be authenticated automatically by Supabase
-    const redirectUrl = generateMagicLinkUrl(normalizedEmail, askKey, participantToken);
+    // Build the redirect URL - goes through /auth/callback to exchange code for session
+    // Then redirects to the ASK page with token/key preserved
+    const redirectUrl = generateEmailRedirectUrl(askKey, participantToken);
 
     // Create a client with anon key for sending OTP
     // This will send a magic link email via Supabase's built-in email service

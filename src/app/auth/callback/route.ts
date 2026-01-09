@@ -16,17 +16,20 @@ export async function GET(request: NextRequest) {
   const redirectTo = requestUrl.searchParams.get('redirect_to') || nextParam
   const error_description = requestUrl.searchParams.get('error_description')
 
-  console.log(`[Callback] Params: code=${code ? 'exists' : 'none'}, next=${nextParam}, redirectTo=${redirectTo}, error=${error_description}`)
+  // Extract askKey or token directly from URL params first (from emailRedirectTo)
+  // This handles the case where Supabase redirects to /auth/callback?token=XXX&code=YYY
+  let askKey: string | null = requestUrl.searchParams.get('key')
+  let token: string | null = requestUrl.searchParams.get('token')
+
+  console.log(`[Callback] Params: code=${code ? 'exists' : 'none'}, next=${nextParam}, redirectTo=${redirectTo}, token=${token ? 'exists' : 'none'}, key=${askKey || 'none'}, error=${error_description}`)
 
   // Log incoming cookies
   const allCookies = request.cookies.getAll()
   console.log(`[Callback] Incoming cookies: ${allCookies.length}`)
   allCookies.forEach(c => console.log(`[Callback] Cookie IN: ${c.name}`))
 
-  // Extract askKey or token from redirect URL (format: /?key=ASK_KEY or /?token=TOKEN)
-  let askKey: string | null = null
-  let token: string | null = null
-  if (redirectTo) {
+  // If not found in direct params, try extracting from redirect URL (legacy support)
+  if (!askKey && !token && redirectTo) {
     try {
       const redirectUrl = new URL(redirectTo, requestUrl.origin)
       askKey = redirectUrl.searchParams.get('key')

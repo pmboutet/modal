@@ -1708,7 +1708,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                 isActive && "border-indigo-400 bg-indigo-500/15 shadow-lg",
               )}
             >
-              <div className="flex items-stretch">
+              <div className={cn("flex", isActive ? "flex-col" : "items-stretch")}>
                 <button type="button" className="flex-1 text-left" onClick={() => { setActiveChallengeId(node.id); }}>
                   <div className={cn("flex flex-col gap-2", isActive ? "p-4" : "p-3")}
                     data-active={isActive}
@@ -1716,14 +1716,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                   {isActive ? (
                     <>
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex flex-col gap-2">
-                          <CardTitle className="text-lg font-semibold text-white">{node.title}</CardTitle>
-                          {description ? (
-                            <ReactMarkdown className="space-y-1.5" components={challengeMarkdownComponents}>
-                              {description}
-                            </ReactMarkdown>
-                          ) : null}
-                        </div>
+                        <CardTitle className="text-lg font-semibold text-white">{node.title}</CardTitle>
                         <ChevronRight
                           className={cn(
                             "h-5 w-5 text-slate-500 transition-transform",
@@ -1731,6 +1724,11 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                           )}
                         />
                       </div>
+                      {description ? (
+                        <ReactMarkdown className="space-y-1.5" components={challengeMarkdownComponents}>
+                          {description}
+                        </ReactMarkdown>
+                      ) : null}
                       <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-200">
                         <span className={cn("rounded-full border px-2.5 py-1", impactClasses[node.impact])}>
                           {impactLabels[node.impact]}
@@ -1783,7 +1781,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                   )}
                   </div>
                 </button>
-                <div className={cn("flex shrink-0 items-start gap-1", isActive ? "p-4" : "p-3")}>
+                <div className={cn("flex flex-wrap items-center gap-1", isActive ? "px-4 pb-4 pt-0" : "shrink-0 items-start p-3")}>
                   {insightCount > 0 ? (
                     <Button
                       type="button"
