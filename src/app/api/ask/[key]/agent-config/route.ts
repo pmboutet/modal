@@ -266,14 +266,36 @@ export async function GET(
         }
       } else {
         // Fallback: try direct query (for authenticated users without token)
-        const { data: threadData } = await supabase
-          .from('conversation_threads')
-          .select('id')
-          .eq('ask_session_id', askSession.id)
-          .maybeSingle();
+        // In individual_parallel mode, we need to filter by user_id
+        const { data: userData } = await supabase.auth.getUser();
+        const authUserId = userData?.user?.id;
 
-        if (threadData?.id) {
-          conversationThreadId = threadData.id;
+        if (authUserId) {
+          // First try to find user's profile ID
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', authUserId)
+            .maybeSingle();
+
+          const profileId = profile?.id;
+
+          const threadQuery = supabase
+            .from('conversation_threads')
+            .select('id')
+            .eq('ask_session_id', askSession.id);
+
+          if (profileId) {
+            threadQuery.eq('user_id', profileId);
+          } else {
+            // Fallback to shared thread
+            threadQuery.eq('is_shared', true);
+          }
+
+          const { data: threadData } = await threadQuery.maybeSingle();
+          if (threadData?.id) {
+            conversationThreadId = threadData.id;
+          }
         }
       }
 

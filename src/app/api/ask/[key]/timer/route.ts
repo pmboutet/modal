@@ -50,18 +50,27 @@ interface StepTimerData {
 /**
  * Fetch step elapsed time from the conversation plan
  * Reusable helper for both token and connected modes
+ * @param profileId - User's profile ID to find their specific thread in individual_parallel mode
  */
 async function fetchStepElapsedTime(
   adminClient: SupabaseClient,
-  askSessionId: string
+  askSessionId: string,
+  profileId?: string | null
 ): Promise<StepTimerData> {
-  // Find conversation thread for this ASK session
-  const { data: threadData } = await adminClient
+  // Find conversation thread for this ASK session AND user
+  // In individual_parallel mode, each user has their own thread
+  const threadQuery = adminClient
     .from('conversation_threads')
     .select('id')
-    .eq('ask_session_id', askSessionId)
-    .limit(1)
-    .maybeSingle();
+    .eq('ask_session_id', askSessionId);
+
+  if (profileId) {
+    threadQuery.eq('user_id', profileId);
+  } else {
+    threadQuery.eq('is_shared', true);
+  }
+
+  const { data: threadData } = await threadQuery.maybeSingle();
 
   if (!threadData) {
     return {};
@@ -142,7 +151,7 @@ export async function GET(
       if (!participantResult.error && participant && !askResult.error && askData && askData.ask_key === key) {
         // Fetch step elapsed time from the conversation plan
         const admin = await getAdminClient();
-        const stepTimerData = await fetchStepElapsedTime(admin, askData.ask_session_id);
+        const stepTimerData = await fetchStepElapsedTime(admin, askData.ask_session_id, participant.user_id);
 
         return NextResponse.json<ApiResponse<TimerResponse>>({
           success: true,
@@ -238,7 +247,7 @@ export async function GET(
 
     // Fetch step elapsed time from the conversation plan
     const admin = await getAdminClient();
-    const stepTimerData = await fetchStepElapsedTime(admin, askRow.id);
+    const stepTimerData = await fetchStepElapsedTime(admin, askRow.id, profileId);
 
     return NextResponse.json<ApiResponse<TimerResponse>>({
       success: true,
