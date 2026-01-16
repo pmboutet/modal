@@ -437,13 +437,23 @@ export async function PATCH(
       clearAdminClientCache();
       const admin = getAdminSupabaseClient();
 
-      // Step 1: Find conversation thread for this ASK session
-      const { data: threadData } = await admin
+      // Step 1: Find conversation thread for this ASK session AND user
+      // IMPORTANT: In individual_parallel mode, each user has their own thread
+      // We must filter by user_id to get the correct thread/plan
+      const threadQuery = admin
         .from('conversation_threads')
         .select('id')
-        .eq('ask_session_id', askRow.id)
-        .limit(1)
-        .maybeSingle();
+        .eq('ask_session_id', askRow.id);
+
+      // Filter by user_id if we have a profileId (individual mode)
+      // Otherwise fall back to shared thread (is_shared = true)
+      if (profileId) {
+        threadQuery.eq('user_id', profileId);
+      } else {
+        threadQuery.eq('is_shared', true);
+      }
+
+      const { data: threadData } = await threadQuery.maybeSingle();
 
       if (threadData) {
         // Step 2: Find the plan for this thread using RPC (bypasses RLS)
