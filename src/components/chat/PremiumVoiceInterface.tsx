@@ -914,6 +914,50 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Cas FINAL → flush des buffers locaux
     if (role === 'assistant') {
       setInterimAssistant(null);
+
+      // Detect STEP_COMPLETE in assistant messages and call API to complete the step
+      const { hasMarker, stepId: detectedStepId } = detectStepComplete(rawMessage.content);
+      if (hasMarker) {
+        console.log('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
+          detectedStepId,
+          currentStepId: conversationPlan?.current_step_id,
+        });
+
+        // Determine which step to complete
+        const stepIdToComplete = detectedStepId === 'CURRENT' || !detectedStepId
+          ? conversationPlan?.current_step_id
+          : detectedStepId;
+
+        if (stepIdToComplete && askKey) {
+          // Call step-complete API
+          const headers: HeadersInit = { 'Content-Type': 'application/json' };
+          if (inviteToken) {
+            headers['x-invite-token'] = inviteToken;
+          }
+
+          fetch(`/api/ask/${askKey}/step-complete`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ stepId: stepIdToComplete }),
+          })
+            .then(response => response.json())
+            .then(result => {
+              if (result.success) {
+                console.log('[PremiumVoiceInterface] ✅ Step completed via API:', {
+                  completedStepId: stepIdToComplete,
+                  nextStepId: result.data?.nextStepId,
+                });
+                // Immediately refresh prompts with new step context
+                updatePromptsFromApi(`step completed: ${stepIdToComplete}`);
+              } else {
+                console.error('[PremiumVoiceInterface] ❌ Step completion failed:', result.error);
+              }
+            })
+            .catch(error => {
+              console.error('[PremiumVoiceInterface] ❌ Step completion API error:', error);
+            });
+        }
+      }
     } else {
       setInterimUser(null);
     }
@@ -924,7 +968,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       messageId: finalMessageId,
       isInterim: false,
     });
-  }, [mergeStreamingContent, onMessage]);
+  }, [mergeStreamingContent, onMessage, conversationPlan, askKey, inviteToken, updatePromptsFromApi]);
 
   /**
    * Handler appelé en cas d'erreur de l'agent vocal
