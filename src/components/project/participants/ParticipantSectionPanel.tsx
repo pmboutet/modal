@@ -53,6 +53,8 @@ export interface ParticipantSectionPanelProps {
   isSendingInvites?: boolean;
   /** Progress data for participants */
   progressData?: ParticipantProgressData | null;
+  /** IDs of participants who have responded (have at least one insight) */
+  respondedParticipantIds?: Set<string>;
   className?: string;
 }
 
@@ -81,6 +83,7 @@ export function ParticipantSectionPanel({
   isSaving = false,
   isSendingInvites = false,
   progressData,
+  respondedParticipantIds,
   className,
 }: ParticipantSectionPanelProps) {
   // Use selectedIds if available, otherwise fall back to initial count or participants
@@ -160,6 +163,7 @@ export function ParticipantSectionPanel({
                 disabled={isSaving}
                 progressData={progressData}
                 conversationMode={conversationMode}
+                respondedParticipantIds={respondedParticipantIds}
               />
 
               {/* Add Participant Button */}

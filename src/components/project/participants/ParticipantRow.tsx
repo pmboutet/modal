@@ -24,6 +24,8 @@ export interface ParticipantRowProps {
   progress?: ParticipantProgress | null;
   /** Show progress badge (false for shared modes where progress is in header) */
   showProgress?: boolean;
+  /** Whether the participant has responded (has at least one insight) */
+  hasResponded?: boolean;
   /** Ask key for generating invite link */
   askKey?: string;
   /** Callback after copying link */
@@ -66,6 +68,7 @@ export function ParticipantRow({
   disabled = false,
   progress,
   showProgress = true,
+  hasResponded = false,
   askKey,
   onCopyLink,
   onSendInvite,
@@ -131,16 +134,44 @@ export function ParticipantRow({
         )}
       </div>
 
-      {/* Progress Badge (only if showProgress and has progress data) */}
-      {showProgress && progress && (
-        <ParticipantProgressBadge
-          completedSteps={progress.completedSteps}
-          totalSteps={progress.totalSteps}
-          isCompleted={progress.isCompleted}
-          isActive={progress.isActive}
-          size="sm"
-          className="shrink-0"
-        />
+      {/* Progress/Response indicator */}
+      {showProgress && (
+        (() => {
+          // Show plan progress if we have meaningful progress data (active or completed plan)
+          const hasMeaningfulProgress = progress && (progress.isActive || progress.isCompleted || progress.completedSteps > 0);
+
+          if (hasMeaningfulProgress) {
+            return (
+              <ParticipantProgressBadge
+                completedSteps={progress!.completedSteps}
+                totalSteps={progress!.totalSteps}
+                isCompleted={progress!.isCompleted}
+                isActive={progress!.isActive}
+                size="sm"
+                className="shrink-0"
+              />
+            );
+          }
+
+          // Show responded checkmark if participant has submitted insights
+          if (hasResponded) {
+            return (
+              <span
+                className="inline-flex items-center gap-1 rounded text-xs px-1.5 py-0.5 font-medium text-emerald-400 shrink-0"
+                title="A répondu"
+              >
+                <Check className="h-3 w-3" />
+              </span>
+            );
+          }
+
+          // Show not started indicator
+          return (
+            <span className="inline-flex items-center rounded text-xs px-1.5 py-0.5 font-medium text-slate-500 shrink-0">
+              --
+            </span>
+          );
+        })()
       )}
 
       {/* Actions (only visible when selected) */}

@@ -4281,6 +4281,21 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                                     </Link>
                                   </Button>
                                 )}
+                                {ask.allowAutoRegistration && ask.askKey && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="gap-1 h-8 bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 hover:bg-indigo-500/30 hover:text-indigo-200"
+                                    onClick={() => {
+                                      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/?ask=${ask.askKey}`;
+                                      navigator.clipboard.writeText(url);
+                                    }}
+                                    title="Copier le lien public d'inscription"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Lien
+                                  </Button>
+                                )}
                                 <Button
                                   type="button"
                                   size="sm"
@@ -4341,6 +4356,11 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                               isSaving={isSavingThisAsk}
                               isSendingInvites={isSendingAskInvites}
                               progressData={askRecord?.progressData as ParticipantProgressData | null | undefined}
+                              respondedParticipantIds={new Set(
+                                ask.participants
+                                  ?.filter(p => p.insights && p.insights.length > 0)
+                                  .flatMap(p => [p.id, p.userId].filter((id): id is string => Boolean(id)))
+                              )}
                             />
 
                             {/* Collected Insights */}

@@ -302,7 +302,7 @@ export async function fetchProjectJourneyContext(
     supabase
       .from("ask_sessions")
       .select(
-        "id, ask_key, name, question, description, status, start_date, end_date, challenge_id, project_id, conversation_mode",
+        "id, ask_key, name, question, description, status, start_date, end_date, challenge_id, project_id, conversation_mode, allow_auto_registration",
       )
       .eq("project_id", projectId),
   ]);
@@ -745,6 +745,7 @@ export async function fetchProjectJourneyContext(
       theme: "General",
       dueDate: row.end_date ?? row.start_date ?? new Date().toISOString(),
       conversationMode: row.conversation_mode ?? null,
+      allowAutoRegistration: row.allow_auto_registration ?? false,
       originatingChallengeIds: Array.from(originatingChallengeIds),
       primaryChallengeId,
       relatedChallengeIds: Array.from(relatedChallengeIds),

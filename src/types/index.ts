@@ -691,6 +691,7 @@ export interface ProjectAskOverview {
   theme: string;
   dueDate: string;
   conversationMode?: AskConversationMode | null;
+  allowAutoRegistration?: boolean;
   participants: ProjectAskParticipant[];
   originatingChallengeIds: string[];
   primaryChallengeId?: string | null;

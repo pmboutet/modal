@@ -32,6 +32,8 @@ export interface ParticipantListProps {
   onCopyLink?: (participantId: string) => void;
   /** Callback for sending invite to a participant */
   onSendInvite?: (participantId: string) => void;
+  /** IDs of participants who have responded (have at least one insight) */
+  respondedParticipantIds?: Set<string>;
   className?: string;
 }
 
@@ -50,6 +52,7 @@ export function ParticipantList({
   conversationMode,
   onCopyLink,
   onSendInvite,
+  respondedParticipantIds,
   className,
 }: ParticipantListProps) {
   const selectedCount = selectedIds.length;
@@ -94,6 +97,7 @@ export function ParticipantList({
             const progress = !isSharedMode
               ? getParticipantProgress(participant.id, progressData)
               : null;
+            const hasResponded = respondedParticipantIds?.has(participant.id) ?? false;
 
             return (
               <ParticipantRow
@@ -104,6 +108,7 @@ export function ParticipantList({
                 disabled={disabled}
                 progress={progress}
                 showProgress={!isSharedMode}
+                hasResponded={hasResponded}
                 askKey={askKey}
                 onCopyLink={onCopyLink}
                 onSendInvite={onSendInvite}
