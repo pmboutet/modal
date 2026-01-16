@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { LoginForm } from "@/components/auth/LoginForm";
+import { Logo } from "@/components/ui/Logo";
 
 function LoginPageContent() {
   const { status } = useAuth();
@@ -112,6 +113,7 @@ function LoginPageContent() {
 
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
+          <Logo className="text-5xl mb-4 block" />
           <h1 className="text-3xl font-bold text-white mb-2">Sign In</h1>
           <p className="text-slate-400">Welcome back! Please sign in to continue.</p>
           {isDevMode && (

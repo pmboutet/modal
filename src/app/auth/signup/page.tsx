@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { SignupForm } from "@/components/auth/SignupForm";
+import { Logo } from "@/components/ui/Logo";
 
 const ADMIN_ROLES = ["full_admin", "client_admin", "facilitator", "manager"];
 
@@ -27,26 +28,37 @@ export default function SignupPage() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-600">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="aurora-background" aria-hidden="true">
+          <div className="aurora-layer aurora-cyan" />
+          <div className="aurora-layer aurora-pink" />
+        </div>
+        <div className="text-slate-400">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center px-4 relative">
+      {/* Aurora background */}
+      <div className="aurora-background" aria-hidden="true">
+        <div className="aurora-layer aurora-cyan" />
+        <div className="aurora-layer aurora-pink" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
-          <p className="text-gray-600">Sign up to get started.</p>
+          <Logo className="text-5xl mb-4 block" />
+          <h1 className="text-3xl font-bold text-white mb-2">Create Account</h1>
+          <p className="text-slate-400">Sign up to get started.</p>
         </div>
 
-        <div className="bg-white shadow-lg rounded-lg p-8">
+        <div className="neon-card p-8">
           <SignupForm />
 
-          <div className="mt-6 text-center text-sm text-gray-600">
+          <div className="mt-6 text-center text-sm text-slate-400">
             Already have an account?{" "}
-            <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link href="/auth/login" className="text-neon-cyan hover:text-neon-cyan/80 font-medium">
               Sign in
             </Link>
           </div>
