@@ -259,6 +259,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const reloadRequestedRef = useRef(false);
   // StrictMode detection: track if this is the first mount (skip it) or second mount (use it)
   const strictModeFirstMountRef = useRef(true);
+  // Track steps being completed to prevent duplicate API calls
+  const completingStepsRef = useRef<Set<string>>(new Set());
 
   // ===== INACTIVITY MONITOR =====
   const inactivityMonitor = useInactivityMonitor({
@@ -918,17 +920,24 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Detect STEP_COMPLETE in assistant messages and call API to complete the step
       const { hasMarker, stepId: detectedStepId } = detectStepComplete(rawMessage.content);
       if (hasMarker) {
-        console.log('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
-          detectedStepId,
-          currentStepId: conversationPlan?.current_step_id,
-        });
-
         // Determine which step to complete
         const stepIdToComplete = detectedStepId === 'CURRENT' || !detectedStepId
           ? conversationPlan?.current_step_id
           : detectedStepId;
 
-        if (stepIdToComplete && askKey) {
+        // DEDUPLICATION: Skip if this step is already being completed or was completed
+        if (stepIdToComplete && completingStepsRef.current.has(stepIdToComplete)) {
+          console.log('[PremiumVoiceInterface] ⏭️ STEP_COMPLETE skipped (already completing):', stepIdToComplete);
+        } else if (stepIdToComplete && askKey) {
+          // Mark step as being completed to prevent duplicate calls
+          completingStepsRef.current.add(stepIdToComplete);
+
+          console.log('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
+            detectedStepId,
+            stepIdToComplete,
+            currentStepId: conversationPlan?.current_step_id,
+          });
+
           // Call step-complete API
           const headers: HeadersInit = { 'Content-Type': 'application/json' };
           if (inviteToken) {
@@ -951,10 +960,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 updatePromptsFromApi(`step completed: ${stepIdToComplete}`);
               } else {
                 console.error('[PremiumVoiceInterface] ❌ Step completion failed:', result.error);
+                // Remove from set on failure so it can be retried
+                completingStepsRef.current.delete(stepIdToComplete);
               }
             })
             .catch(error => {
               console.error('[PremiumVoiceInterface] ❌ Step completion API error:', error);
+              // Remove from set on error so it can be retried
+              completingStepsRef.current.delete(stepIdToComplete);
             });
         }
       }
