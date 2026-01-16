@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Clock, MessageSquare, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock } from "lucide-react";
+import { AlertCircle, Clock, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock } from "lucide-react";
 import { ChatComponent } from "@/components/chat/ChatComponent";
 import { InsightPanel } from "@/components/insight/InsightPanel";
 import { SuggestedQuestionsPanel } from "@/components/consultant/SuggestedQuestionsPanel";
@@ -26,6 +26,7 @@ import { UserProfileMenu } from "@/components/auth/UserProfileMenu";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { supabase } from "@/lib/supabaseClient";
 import { PublicAskEntryForm } from "@/components/ask/PublicAskEntryForm";
+import { Logo } from "@/components/ui/Logo";
 
 type TokenSessionPayload = {
   ask: Ask;
@@ -2307,13 +2308,18 @@ export default function HomePage() {
                            sessionData.error.toLowerCase().includes('permission');
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-white to-indigo-200 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 flex items-center justify-center p-6">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="glass-card max-w-md w-full"
+          className="max-w-md w-full"
         >
-          <Card className="border-0 bg-transparent shadow-none">
+          {/* Logo */}
+          <div className="text-center mb-8">
+            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          </div>
+
+          <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
             <CardHeader className="text-center">
               <motion.div
                 initial={{ rotate: 0 }}
@@ -2331,59 +2337,59 @@ export default function HomePage() {
                   <AlertCircle className="h-8 w-8 text-white" />
                 )}
               </motion.div>
-              <CardTitle className={`text-xl ${isAccessDenied ? 'text-amber-700' : 'text-destructive'}`}>
+              <CardTitle className={`text-xl ${isAccessDenied ? 'text-amber-400' : 'text-red-400'}`}>
                 {isAccessDenied ? 'Accès restreint' : 'Session Error'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {isAccessDenied ? (
-                <div className="neumorphic-shadow p-4 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50">
-                  <p className="text-muted-foreground text-center mb-3">
+                <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-slate-300 text-center mb-3">
                     Vous n&apos;êtes pas encore participant à cette session ASK.
                   </p>
-                  <p className="text-sm text-muted-foreground text-center">
+                  <p className="text-sm text-slate-400 text-center">
                     Contactez l&apos;organisateur pour recevoir une invitation, ou vérifiez que vous utilisez le bon lien.
                   </p>
                 </div>
               ) : (
-                <div className="neumorphic-shadow p-4 rounded-lg">
-                  <p className="text-muted-foreground text-center">{sessionData.error}</p>
+                <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <p className="text-slate-300 text-center">{sessionData.error}</p>
                 </div>
               )}
 
               {/* Show format example for ASK key errors */}
               {sessionData.error.includes('ASK key') && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="neumorphic-shadow p-4 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50"
+                  className="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/20"
                 >
-                  <p className="text-sm font-medium mb-2 text-primary">Expected URL format:</p>
-                  <code className="text-xs bg-white/50 px-2 py-1 rounded text-muted-foreground block">
+                  <p className="text-sm font-medium mb-2 text-indigo-400">Expected URL format:</p>
+                  <code className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-300 block">
                     https://your-domain.com/?key=your-ask-key-123
                   </code>
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    For testing: add <span className="font-mono bg-yellow-100 px-1 rounded">&mode=test</span>
+                  <p className="text-xs text-slate-400 mt-2 text-center">
+                    For testing: add <span className="font-mono bg-slate-700 px-1 rounded">&mode=test</span>
                   </p>
                 </motion.div>
               )}
-              
+
               <div className="flex gap-3 pt-2">
                 {sessionData.askKey && (
-                  <Button 
-                    onClick={retryLoad} 
-                    variant="outline" 
-                    className="flex-1 neumorphic-raised border-0"
+                  <Button
+                    onClick={retryLoad}
+                    variant="outline"
+                    className="flex-1 border-white/10 text-slate-300 hover:bg-slate-800"
                   >
                     <Sparkles className="w-4 h-4 mr-2" />
                     Retry
                   </Button>
                 )}
-                <Button 
-                  onClick={clearError} 
-                  variant="ghost" 
-                  className="flex-1 neumorphic-shadow"
+                <Button
+                  onClick={clearError}
+                  variant="ghost"
+                  className="flex-1 text-slate-300 hover:bg-slate-800"
                 >
                   Dismiss
                 </Button>
@@ -2410,6 +2416,11 @@ export default function HomePage() {
           className="w-full max-w-lg"
         >
           <div className="text-center space-y-8">
+            {/* Logo */}
+            <div className="mb-4">
+              <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+            </div>
+
             {/* Animated loading spinner */}
             <motion.div
               animate={{ rotate: 360 }}
@@ -2487,6 +2498,11 @@ export default function HomePage() {
           transition={{ duration: 0.5, ease: "easeOut" }}
           className="w-full max-w-lg sm:my-auto"
         >
+          {/* Logo */}
+          <div className="text-center mb-8">
+            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          </div>
+
           {/* Welcome message */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -2651,12 +2667,12 @@ export default function HomePage() {
               whileHover={{ scale: 1.02 }}
               transition={{ type: "spring", stiffness: 400 }}
             >
-              <div className="w-7 h-7 sm:w-9 sm:h-9 bg-gradient-to-br from-pink-500 to-violet-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-md">
-                <MessageSquare className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-              </div>
               <div>
-                <h1 className="text-base font-semibold sm:text-xl bg-gradient-to-r from-pink-500 to-violet-600 bg-clip-text text-transparent">
-                  Modal
+                <h1
+                  className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-pink-500 bg-clip-text text-transparent"
+                  style={{ fontFamily: "'Saira Extra Condensed', sans-serif" }}
+                >
+                  MODAL
                 </h1>
                 {isTestMode && (
                   <span className="test-mode-badge text-[10px]">TEST</span>
