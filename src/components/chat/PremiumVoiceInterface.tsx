@@ -369,9 +369,44 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     isMutedRef.current = isMuted;
   }, [isMuted]);
 
-  // ===== MISE À JOUR DYNAMIQUE DES PROMPTS LORS DU CHANGEMENT DE STEP =====
-  // Quand le current_step_id change, on recharge les variables depuis l'API
-  // et on met à jour les prompts de l'agent Speechmatics sans reconnexion
+  // ===== MISE À JOUR DYNAMIQUE DES PROMPTS =====
+  // Fonction réutilisable pour mettre à jour les prompts depuis l'API
+  // Utilisée lors du changement de step ET périodiquement pour les variables de temps
+  const updatePromptsFromApi = useCallback(async (reason: string) => {
+    const agent = agentRef.current;
+    if (!(agent instanceof SpeechmaticsVoiceAgent) || !agent.isConnected()) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/ask/${askKey}/agent-config`);
+      if (!response.ok) {
+        console.error('[PremiumVoiceInterface] ❌ Failed to fetch agent config:', reason);
+        return;
+      }
+
+      const result = await response.json();
+      if (!result.success || !result.data) {
+        console.error('[PremiumVoiceInterface] ❌ Invalid agent config response:', reason);
+        return;
+      }
+
+      const { systemPrompt: newSystemPrompt, userPrompt: newUserPrompt, promptVariables: newPromptVariables } = result.data;
+
+      // Update the agent's prompts without reconnecting
+      agent.updatePrompts({
+        systemPrompt: newSystemPrompt,
+        userPrompt: newUserPrompt,
+        promptVariables: newPromptVariables,
+      });
+
+      console.log('[PremiumVoiceInterface] ✅ Prompts updated:', reason);
+    } catch (error) {
+      console.error('[PremiumVoiceInterface] ❌ Error updating prompts:', reason, error);
+    }
+  }, [askKey]);
+
+  // ===== MISE À JOUR LORS DU CHANGEMENT DE STEP =====
   const previousStepIdRef = useRef<string | null | undefined>(currentConversationStepId);
 
   useEffect(() => {
@@ -390,50 +425,44 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const prevStepId = previousStepIdRef.current;
     previousStepIdRef.current = currentConversationStepId;
 
-    // Only update if we have a Speechmatics agent connected
-    const agent = agentRef.current;
-    if (!(agent instanceof SpeechmaticsVoiceAgent) || !agent.isConnected()) {
-      console.log('[PremiumVoiceInterface] 📋 Step changed but no Speechmatics agent connected, skipping prompt update');
-      return;
-    }
-
-    console.log('[PremiumVoiceInterface] 📋 Step changed, updating prompts dynamically:', {
+    console.log('[PremiumVoiceInterface] 📋 Step changed:', {
       previousStepId: prevStepId,
       newStepId: currentConversationStepId,
     });
 
-    // Fetch fresh agent config with updated variables
-    const updatePromptsFromApi = async () => {
-      try {
-        const response = await fetch(`/api/ask/${askKey}/agent-config`);
-        if (!response.ok) {
-          console.error('[PremiumVoiceInterface] ❌ Failed to fetch agent config for step update');
-          return;
-        }
+    updatePromptsFromApi(`step changed to ${currentConversationStepId}`);
+  }, [currentConversationStepId, updatePromptsFromApi]);
 
-        const result = await response.json();
-        if (!result.success || !result.data) {
-          console.error('[PremiumVoiceInterface] ❌ Invalid agent config response');
-          return;
-        }
+  // ===== MISE À JOUR PÉRIODIQUE DES VARIABLES DE TEMPS =====
+  // Rafraîchit les prompts toutes les 30 secondes pour mettre à jour step_elapsed_minutes, is_overtime, etc.
+  // Ces variables sont calculées côté serveur et doivent être rechargées périodiquement
+  const lastPromptUpdateMinuteRef = useRef<number>(0);
 
-        const { systemPrompt: newSystemPrompt, userPrompt: newUserPrompt, promptVariables: newPromptVariables } = result.data;
+  useEffect(() => {
+    // Skip if no elapsed time or timer is paused
+    if (elapsedMinutes === undefined || isTimerPaused) {
+      return;
+    }
 
-        // Update the agent's prompts without reconnecting
-        agent.updatePrompts({
-          systemPrompt: newSystemPrompt,
-          userPrompt: newUserPrompt,
-          promptVariables: newPromptVariables,
-        });
+    // Calculate the current "update slot" (every 0.5 minute = 30 seconds)
+    const currentSlot = Math.floor(elapsedMinutes * 2);
 
-        console.log('[PremiumVoiceInterface] ✅ Prompts updated successfully for new step:', currentConversationStepId);
-      } catch (error) {
-        console.error('[PremiumVoiceInterface] ❌ Error updating prompts for step change:', error);
-      }
-    };
+    // Skip if we're still in the same slot
+    if (currentSlot === lastPromptUpdateMinuteRef.current) {
+      return;
+    }
 
-    updatePromptsFromApi();
-  }, [currentConversationStepId, askKey]);
+    // Update the ref
+    lastPromptUpdateMinuteRef.current = currentSlot;
+
+    // Skip the very first slot (initial load)
+    if (currentSlot === 0) {
+      return;
+    }
+
+    console.log('[PremiumVoiceInterface] ⏱️ Periodic time update at', elapsedMinutes.toFixed(1), 'min');
+    updatePromptsFromApi(`periodic time update at ${elapsedMinutes.toFixed(1)}min`);
+  }, [elapsedMinutes, isTimerPaused, updatePromptsFromApi]);
 
   // ===== FONCTIONS DE FUSION ET GESTION DES MESSAGES =====
   /**
