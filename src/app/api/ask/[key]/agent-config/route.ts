@@ -4,7 +4,7 @@ import { getAgentConfigForAsk, type PromptVariables } from '@/lib/ai/agent-confi
 import { isValidAskKey } from '@/lib/utils';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import { getConversationPlanWithSteps } from '@/lib/ai/conversation-plan';
-import { getAskSessionByKey } from '@/lib/asks';
+import { getAskSessionByKey, getConversationThreadId } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import {
   buildParticipantDisplayName,
@@ -278,23 +278,12 @@ export async function GET(
             .eq('id', authUserId)
             .maybeSingle();
 
-          const profileId = profile?.id;
+          const profileId = profile?.id ?? null;
 
-          const threadQuery = supabase
-            .from('conversation_threads')
-            .select('id')
-            .eq('ask_session_id', askSession.id);
-
-          if (profileId) {
-            threadQuery.eq('user_id', profileId);
-          } else {
-            // Fallback to shared thread
-            threadQuery.eq('is_shared', true);
-          }
-
-          const { data: threadData } = await threadQuery.maybeSingle();
-          if (threadData?.id) {
-            conversationThreadId = threadData.id;
+          // Uses shared helper that handles individual_parallel vs shared mode
+          const threadId = await getConversationThreadId(supabase, askSession.id, profileId);
+          if (threadId) {
+            conversationThreadId = threadId;
           }
         }
       }

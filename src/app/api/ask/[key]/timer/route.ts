@@ -3,6 +3,7 @@ import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { ApiResponse } from '@/types';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
+import { getConversationThreadId } from '@/lib/asks';
 
 interface AskSessionRow {
   id: string;
@@ -58,21 +59,10 @@ async function fetchStepElapsedTime(
   profileId?: string | null
 ): Promise<StepTimerData> {
   // Find conversation thread for this ASK session AND user
-  // In individual_parallel mode, each user has their own thread
-  const threadQuery = adminClient
-    .from('conversation_threads')
-    .select('id')
-    .eq('ask_session_id', askSessionId);
+  // Uses shared helper that handles individual_parallel vs shared mode
+  const threadId = await getConversationThreadId(adminClient, askSessionId, profileId ?? null);
 
-  if (profileId) {
-    threadQuery.eq('user_id', profileId);
-  } else {
-    threadQuery.eq('is_shared', true);
-  }
-
-  const { data: threadData } = await threadQuery.maybeSingle();
-
-  if (!threadData) {
+  if (!threadId) {
     return {};
   }
 
@@ -80,7 +70,7 @@ async function fetchStepElapsedTime(
   const { data: planData } = await adminClient
     .from('ask_conversation_plans')
     .select('id, current_step_id')
-    .eq('conversation_thread_id', threadData.id)
+    .eq('conversation_thread_id', threadId)
     .maybeSingle();
 
   if (!planData?.current_step_id) {
@@ -447,27 +437,13 @@ export async function PATCH(
       const admin = getAdminSupabaseClient();
 
       // Step 1: Find conversation thread for this ASK session AND user
-      // IMPORTANT: In individual_parallel mode, each user has their own thread
-      // We must filter by user_id to get the correct thread/plan
-      const threadQuery = admin
-        .from('conversation_threads')
-        .select('id')
-        .eq('ask_session_id', askRow.id);
+      // Uses shared helper that handles individual_parallel vs shared mode
+      const threadId = await getConversationThreadId(admin, askRow.id, profileId);
 
-      // Filter by user_id if we have a profileId (individual mode)
-      // Otherwise fall back to shared thread (is_shared = true)
-      if (profileId) {
-        threadQuery.eq('user_id', profileId);
-      } else {
-        threadQuery.eq('is_shared', true);
-      }
-
-      const { data: threadData } = await threadQuery.maybeSingle();
-
-      if (threadData) {
+      if (threadId) {
         // Step 2: Find the plan for this thread using RPC (bypasses RLS)
         const { data: planResult } = await admin
-          .rpc('get_conversation_plan_with_steps', { p_conversation_thread_id: threadData.id });
+          .rpc('get_conversation_plan_with_steps', { p_conversation_thread_id: threadId });
 
         const planData = planResult?.plan as { id: string } | null;
 
@@ -499,7 +475,7 @@ export async function PATCH(
             });
           }
         } else {
-          console.warn('[timer] No plan found for thread:', threadData.id);
+          console.warn('[timer] No plan found for thread:', threadId);
         }
       }
     }

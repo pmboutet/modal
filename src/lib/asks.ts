@@ -294,6 +294,37 @@ export async function getOrCreateConversationThread(
 }
 
 /**
+ * Get the conversation thread ID for an ASK session
+ *
+ * In individual_parallel mode, each user has their own thread (user_id = specific user).
+ * In other modes (collaborative, group_reporter, consultant), a shared thread is used (is_shared = true).
+ *
+ * @param client - Supabase client (session or admin)
+ * @param askSessionId - The ASK session ID
+ * @param profileId - The user's profile ID (null for shared thread lookup)
+ * @returns The thread ID or null if not found
+ */
+export async function getConversationThreadId(
+  client: SupabaseClient,
+  askSessionId: string,
+  profileId: string | null
+): Promise<string | null> {
+  const threadQuery = client
+    .from('conversation_threads')
+    .select('id')
+    .eq('ask_session_id', askSessionId);
+
+  if (profileId) {
+    threadQuery.eq('user_id', profileId);
+  } else {
+    threadQuery.eq('is_shared', true);
+  }
+
+  const { data: threadData } = await threadQuery.maybeSingle();
+  return threadData?.id ?? null;
+}
+
+/**
  * Get messages for a specific conversation thread
  */
 export async function getMessagesForThread(
