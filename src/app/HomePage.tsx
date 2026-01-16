@@ -2656,7 +2656,7 @@ export default function HomePage() {
               </div>
               <div>
                 <h1 className="text-base font-semibold sm:text-xl bg-gradient-to-r from-pink-500 to-violet-600 bg-clip-text text-transparent">
-                  Insido.ai
+                  Modal
                 </h1>
                 {isTestMode && (
                   <span className="test-mode-badge text-[10px]">TEST</span>

@@ -113,7 +113,7 @@ function LoginPageContent() {
 
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
-          <Logo className="text-5xl mb-4 block" />
+          <Logo className="text-[10rem] leading-none mb-4" showTagline />
           <h1 className="text-3xl font-bold text-white mb-2">Sign In</h1>
           <p className="text-slate-400">Welcome back! Please sign in to continue.</p>
           {isDevMode && (

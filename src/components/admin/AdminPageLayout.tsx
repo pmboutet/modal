@@ -416,12 +416,12 @@ function AdminLayoutInner({ children }: AdminPageLayoutProps) {
         >
           {/* Logo with primary/accent gradient */}
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-sm font-bold text-white shadow-lg">
-            IN
+            M
           </div>
           {!isSidebarCollapsed && (
             <div className="overflow-hidden">
-              <div className="text-sm font-semibold text-white truncate">Insido.ai</div>
-              <p className="text-xs text-neon-cyan/60 truncate">Control center</p>
+              <div className="text-lg font-bold text-white truncate" style={{ fontFamily: "'Saira Extra Condensed', sans-serif" }}>MODAL</div>
+              <p className="text-[10px] text-neon-cyan/60 truncate tracking-wider">Capture. Connect. Understand.</p>
             </div>
           )}
         </div>
