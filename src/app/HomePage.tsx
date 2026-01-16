@@ -179,7 +179,7 @@ function MobileLayout({
             opacity: isHeaderHidden ? 0 : 1,
           }}
           transition={{ duration: 0.2 }}
-          className="overflow-hidden border-b border-white/50 bg-white/80 backdrop-blur flex-shrink-0"
+          className="overflow-hidden border-b border-slate-200/60 bg-white/90 backdrop-blur-lg flex-shrink-0"
         >
           <div className="px-3 py-2">
             <div className="flex items-center justify-between gap-2">
@@ -227,7 +227,7 @@ function MobileLayout({
                         </span>
                       )}
                       {sessionData.ask && (
-                        <span className={sessionData.ask.isActive ? 'session-active' : 'session-closed'}>
+                        <span className={sessionData.ask.isActive ? 'light-status-active' : 'light-status-closed'}>
                           {sessionData.ask.isActive ? 'Active' : 'Closed'}
                         </span>
                       )}
@@ -393,7 +393,7 @@ function MobileLayout({
           opacity: isHeaderHidden ? 0 : 1,
         }}
         transition={{ duration: 0.2 }}
-        className="flex items-center justify-center gap-2 bg-white/50 backdrop-blur border-t border-white/50 overflow-hidden"
+        className="flex items-center justify-center gap-2 bg-white/80 backdrop-blur-lg border-t border-slate-200/60 overflow-hidden"
         style={{
           paddingTop: isHeaderHidden ? 0 : 8,
           paddingBottom: isHeaderHidden ? 0 : 'max(8px, env(safe-area-inset-bottom))',
@@ -403,8 +403,8 @@ function MobileLayout({
           onClick={() => setMobileActivePanel('chat')}
           className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
             mobileActivePanel === 'chat'
-              ? 'bg-primary text-white shadow-md'
-              : 'bg-white/80 text-muted-foreground'
+              ? 'light-tab-active'
+              : 'light-tab-inactive'
           }`}
         >
           <MessageCircle className="h-4 w-4" />
@@ -414,8 +414,8 @@ function MobileLayout({
           onClick={() => setMobileActivePanel('insights')}
           className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
             mobileActivePanel === 'insights'
-              ? 'bg-primary text-white shadow-md'
-              : 'bg-white/80 text-muted-foreground'
+              ? 'light-tab-active'
+              : 'light-tab-inactive'
           }`}
         >
           <Lightbulb className="h-4 w-4" />
@@ -499,37 +499,47 @@ export default function HomePage() {
     }
   }, [sessionTimer]);
 
-  // Handle scroll events from mobile ChatComponent to hide/show header, logo bar, and panel indicator
+  // Handle scroll events from ChatComponent to hide/show header and toggle compact mode
   const handleMobileChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
     // Ignore tiny scroll changes (less than 2px) to avoid jitter
     if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
       return;
     }
 
-    // Initial load: hide header if already scrolled down
+    // Initial load: compact header if already scrolled down
     if (scrollDelta === 0 && scrollTop > 50) {
       setIsMobileHeaderHidden(true);
+      setIsHeaderCompact(true);
       return;
     }
 
     if (scrollDelta > 0) {
-      // Scrolling down - hide header immediately
+      // Scrolling down - hide mobile header and compact desktop header immediately
       setIsMobileHeaderHidden(true);
+      setIsHeaderCompact(true);
       mobileScrollUpAccumulator.current = 0;
+      scrollUpAccumulator.current = 0;
     } else if (scrollDelta < 0) {
       // Scrolling up - accumulate scroll distance
       mobileScrollUpAccumulator.current += Math.abs(scrollDelta);
+      scrollUpAccumulator.current += Math.abs(scrollDelta);
 
-      // Show header only after scrolling up significantly
+      // Show mobile header only after scrolling up significantly
       if (mobileScrollUpAccumulator.current >= MOBILE_SCROLL_UP_THRESHOLD) {
         setIsMobileHeaderHidden(false);
       }
+      // Expand header after scrolling up
+      if (scrollUpAccumulator.current >= SCROLL_UP_THRESHOLD) {
+        setIsHeaderCompact(false);
+      }
     }
 
-    // If at the very top, always show header
+    // If at the very top, always show full header
     if (scrollTop <= 10) {
       setIsMobileHeaderHidden(false);
+      setIsHeaderCompact(false);
       mobileScrollUpAccumulator.current = 0;
+      scrollUpAccumulator.current = 0;
     }
   }, []);
 
@@ -597,8 +607,11 @@ export default function HomePage() {
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isMobileHeaderHidden, setIsMobileHeaderHidden] = useState(false);
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const mobileScrollUpAccumulator = useRef(0);
+  const scrollUpAccumulator = useRef(0);
   const MOBILE_SCROLL_UP_THRESHOLD = 100;
+  const SCROLL_UP_THRESHOLD = 80;
   // Desktop compact mode states (tabbed layout when content is minimal)
   const [desktopRightPanelTab, setDesktopRightPanelTab] = useState<'questions' | 'details' | 'insights'>('insights');
   const [useCompactMode, setUseCompactMode] = useState(false);
@@ -2590,7 +2603,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="conversation-layout min-h-[100dvh] bg-gradient-to-br from-indigo-100 via-white to-indigo-200 overflow-x-hidden w-full max-w-full">
+    <div className="conversation-layout min-h-[100dvh] overflow-x-hidden w-full max-w-full">
       {/* Session Expired Overlay */}
       <AnimatePresence>
         {isTokenExpired && (
@@ -2649,7 +2662,7 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* Beautiful Header - Compact on mobile, hides on scroll down */}
+      {/* Beautiful Header - Compact on scroll, hides on mobile scroll down */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{
@@ -2658,48 +2671,57 @@ export default function HomePage() {
           height: isMobile && isMobileHeaderHidden ? 0 : 'auto',
         }}
         transition={{ duration: 0.2 }}
-        className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm overflow-hidden"
+        className="conversation-layout-header sticky top-0 z-50 overflow-hidden"
       >
-        <div className="container mx-auto px-3 sm:px-6 py-1.5 sm:py-3">
+        <motion.div
+          className="px-2 sm:px-4"
+          animate={{
+            paddingTop: isHeaderCompact ? 2 : 0,
+            paddingBottom: isHeaderCompact ? 2 : 0,
+          }}
+          transition={{ duration: 0.2 }}
+        >
           <div className="flex items-center justify-between gap-2">
             <motion.div
               className="flex items-center gap-2"
               whileHover={{ scale: 1.02 }}
               transition={{ type: "spring", stiffness: 400 }}
             >
-              <div>
-                <h1
-                  className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-pink-500 bg-clip-text text-transparent"
-                  style={{ fontFamily: "'Saira Extra Condensed', sans-serif" }}
+              <div className="flex flex-col">
+                <Logo
+                  animated
+                  showTagline={!isHeaderCompact}
+                  align="start"
+                  textClassName={isHeaderCompact ? "text-[1.8rem] leading-none" : "text-[3.9rem] leading-none"}
+                  taglineClassName="text-[0.5rem] tracking-[0.25em] -mt-1"
+                />
+                <motion.div
+                  className="flex gap-1 mt-1"
+                  animate={{
+                    opacity: isHeaderCompact ? 0 : 1,
+                    height: isHeaderCompact ? 0 : 'auto',
+                  }}
+                  transition={{ duration: 0.15 }}
                 >
-                  MODAL
-                </h1>
-                {isTestMode && (
-                  <span className="test-mode-badge text-[10px]">TEST</span>
-                )}
-                {isDevMode && isSharedThread && !isSubscribed && !isPolling && (
-                  <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-300" title="En mode dev, la synchronisation temps réel ne fonctionne pas. Utilisez ?token= pour activer le realtime.">
-                    ⚠️ Realtime off
-                  </span>
-                )}
-                {debugAuthId && !isMobile && (
-                  <div className="mt-1 text-xs font-mono bg-yellow-100 px-2 py-1 rounded border border-yellow-300">
-                    🔑 Auth ID: {debugAuthId}
-                  </div>
-                )}
+                  {isTestMode && (
+                    <span className="test-mode-badge text-[10px]">TEST</span>
+                  )}
+                  {isDevMode && isSharedThread && !isSubscribed && !isPolling && (
+                    <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-300" title="En mode dev, la synchronisation temps réel ne fonctionne pas. Utilisez ?token= pour activer le realtime.">
+                      ⚠️ Realtime off
+                    </span>
+                  )}
+                </motion.div>
               </div>
             </motion.div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {currentParticipantName && !isMobile && (
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/80 px-3 py-1 text-xs font-medium text-foreground shadow-sm">
-                  <span className="text-muted-foreground/80">Profil</span>
-                  <span className="font-semibold text-foreground">{currentParticipantName}</span>
-                </div>
+                <span className="text-xs text-slate-400">{currentParticipantName}</span>
               )}
               <UserProfileMenu />
             </div>
           </div>
-        </div>
+        </motion.div>
       </motion.header>
 
       {/* Main Content with Beautiful Layout */}
@@ -2741,7 +2763,7 @@ export default function HomePage() {
           onChatScroll={handleMobileChatScroll}
         />
       ) : (
-        <main className="flex h-[calc(100dvh-88px)] overflow-hidden gap-6 p-6 min-w-0">
+        <main className={`flex overflow-hidden gap-6 p-6 min-w-0 transition-all duration-200 ${isHeaderCompact ? 'h-[calc(100dvh-48px)]' : 'h-[calc(100dvh-88px)]'}`}>
           {/* Chat Section - 1/3 of screen with glass effect */}
           <motion.div
             initial={{ opacity: 0, x: -40 }}
@@ -2761,7 +2783,7 @@ export default function HomePage() {
               )}
               <div className="flex-1 overflow-hidden">
                 <ChatComponent
-                  key={`chat-mobile-${sessionData.askKey}`}
+                  key={`chat-desktop-${sessionData.askKey}`}
                   askKey={sessionData.askKey}
                   ask={sessionData.ask}
                   messages={sessionData.messages}
@@ -2787,6 +2809,7 @@ export default function HomePage() {
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
                   onTogglePause={handleToggleTimerPause}
+                  onChatScroll={handleMobileChatScroll}
                 />
               </div>
             </div>
@@ -2802,17 +2825,17 @@ export default function HomePage() {
             <div className="h-full flex flex-col overflow-hidden gap-4">
               {useCompactMode ? (
                 /* Compact tabbed mode - when details collapsed and minimal content */
-                <div className="h-full flex flex-col glass-card rounded-xl p-4">
+                <div className="h-full flex flex-col light-aurora-card p-4">
                   {/* Tab buttons */}
-                  <div className="flex items-center gap-2 pb-3 border-b border-white/30 mb-3">
+                  <div className="flex items-center gap-2 pb-3 border-b border-slate-200/60 mb-3">
                     {isConsultantMode && isSpokesperson && (
                       <button
                         onClick={() => setDesktopRightPanelTab('questions')}
                         className={cn(
                           "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
                           desktopRightPanelTab === 'questions'
-                            ? 'bg-primary text-white shadow-md'
-                            : 'bg-white/80 text-muted-foreground hover:bg-white hover:text-foreground'
+                            ? 'light-tab-active'
+                            : 'light-tab-inactive'
                         )}
                       >
                         <Sparkles className="h-4 w-4" />
@@ -2824,8 +2847,8 @@ export default function HomePage() {
                       className={cn(
                         "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
                         desktopRightPanelTab === 'details'
-                          ? 'bg-primary text-white shadow-md'
-                          : 'bg-white/80 text-muted-foreground hover:bg-white hover:text-foreground'
+                          ? 'light-tab-active'
+                          : 'light-tab-inactive'
                       )}
                     >
                       <Info className="h-4 w-4" />
@@ -2836,8 +2859,8 @@ export default function HomePage() {
                       className={cn(
                         "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
                         desktopRightPanelTab === 'insights'
-                          ? 'bg-primary text-white shadow-md'
-                          : 'bg-white/80 text-muted-foreground hover:bg-white hover:text-foreground'
+                          ? 'light-tab-active'
+                          : 'light-tab-inactive'
                       )}
                     >
                       <Lightbulb className="h-4 w-4" />
@@ -2891,7 +2914,7 @@ export default function HomePage() {
                                   </span>
                                 )}
                                 {sessionData.ask && (
-                                  <span className={sessionData.ask.isActive ? 'session-active' : 'session-closed'}>
+                                  <span className={sessionData.ask.isActive ? 'light-status-active' : 'light-status-closed'}>
                                     {sessionData.ask.isActive ? 'Active' : 'Closed'}
                                   </span>
                                 )}
@@ -2980,11 +3003,7 @@ export default function HomePage() {
                         opacity: 1,
                         y: 0
                       }}
-                      className="rounded-xl border border-white/50 bg-white/80 backdrop-blur px-4 shadow-sm transition-all duration-300"
-                      style={{
-                        paddingTop: "0.75rem",
-                        paddingBottom: "0.75rem"
-                      }}
+                      className="light-aurora-card px-4 py-3 transition-all duration-300"
                     >
                       <div className="flex flex-col gap-3">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -3039,7 +3058,7 @@ export default function HomePage() {
                                       </span>
                                     )}
                                     {sessionData.ask && (
-                                      <span className={sessionData.ask.isActive ? 'session-active' : 'session-closed'}>
+                                      <span className={sessionData.ask.isActive ? 'light-status-active' : 'light-status-closed'}>
                                         {sessionData.ask.isActive ? 'Active' : 'Closed'}
                                       </span>
                                     )}

@@ -444,6 +444,234 @@ a.neumorphic-raised:active {
 }
 
 /* ==========================================
+   CONVERSATION LAYOUT - LIGHT AURORA THEME
+   Elegant light theme with subtle aurora effects
+   ========================================== */
+
+/* Light Aurora Background - matching logo page style */
+.conversation-layout {
+  background: linear-gradient(to bottom right, #e2e8f0, #f1f5f9, #e2e8f0) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Aurora cyan layer - strong visible effect */
+.conversation-layout::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background:
+    radial-gradient(ellipse 40% 30% at 30% 40%, hsla(185, 100%, 50%, 0.25) 0%, transparent 70%),
+    radial-gradient(ellipse 35% 25% at 70% 60%, hsla(185, 100%, 45%, 0.2) 0%, transparent 60%),
+    radial-gradient(ellipse 30% 20% at 50% 80%, hsla(195, 100%, 50%, 0.15) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  filter: blur(80px);
+  animation: aurora-drift-1 30s ease-in-out infinite;
+}
+
+/* Aurora pink layer - strong visible effect */
+.conversation-layout::after {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background:
+    radial-gradient(ellipse 35% 25% at 70% 35%, hsla(320, 100%, 50%, 0.2) 0%, transparent 70%),
+    radial-gradient(ellipse 30% 20% at 25% 65%, hsla(280, 100%, 55%, 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 25% 18% at 60% 75%, hsla(300, 100%, 50%, 0.12) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  filter: blur(80px);
+  animation: aurora-drift-2 35s ease-in-out infinite;
+}
+
+/* Light theme glass card */
+.conversation-layout .glass-card {
+  background: hsla(0, 0%, 100%, 0.75);
+  backdrop-filter: blur(20px);
+  border: 1px solid hsla(220, 30%, 90%, 0.8);
+  box-shadow:
+    0 4px 20px hsla(220, 40%, 50%, 0.08),
+    0 1px 3px hsla(220, 40%, 50%, 0.05);
+}
+
+/* Light theme header */
+.conversation-layout-header {
+  background: hsla(0, 0%, 100%, 0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid hsla(220, 30%, 90%, 0.6);
+  box-shadow: 0 1px 8px hsla(220, 40%, 50%, 0.06);
+}
+
+/* Light theme content cards */
+.light-aurora-card {
+  background: hsla(0, 0%, 100%, 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid hsla(220, 30%, 90%, 0.7);
+  border-radius: 16px;
+  box-shadow:
+    0 2px 12px hsla(220, 40%, 50%, 0.06),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.8);
+}
+
+/* Light theme insight cards with subtle glow */
+.light-aurora-insight {
+  background: hsla(0, 0%, 100%, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsla(220, 30%, 88%, 0.8);
+  border-radius: 12px;
+  box-shadow:
+    0 2px 8px hsla(220, 40%, 50%, 0.05),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.9);
+  transition: all 0.2s ease;
+}
+
+.light-aurora-insight:hover {
+  box-shadow:
+    0 4px 16px hsla(185, 60%, 50%, 0.1),
+    0 2px 8px hsla(220, 40%, 50%, 0.06),
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.9);
+  border-color: hsla(185, 40%, 80%, 0.6);
+}
+
+/* Light theme badges - type indicators */
+.light-badge-idea {
+  background: linear-gradient(135deg, hsla(280, 60%, 95%, 1), hsla(280, 50%, 92%, 1));
+  color: hsl(280, 60%, 35%);
+  border: 1px solid hsla(280, 50%, 85%, 0.8);
+}
+
+.light-badge-pain {
+  background: linear-gradient(135deg, hsla(350, 70%, 95%, 1), hsla(350, 60%, 92%, 1));
+  color: hsl(350, 60%, 35%);
+  border: 1px solid hsla(350, 50%, 85%, 0.8);
+}
+
+.light-badge-opportunity {
+  background: linear-gradient(135deg, hsla(160, 60%, 94%, 1), hsla(160, 50%, 90%, 1));
+  color: hsl(160, 60%, 30%);
+  border: 1px solid hsla(160, 50%, 82%, 0.8);
+}
+
+.light-badge-risk {
+  background: linear-gradient(135deg, hsla(35, 80%, 94%, 1), hsla(35, 70%, 90%, 1));
+  color: hsl(35, 70%, 30%);
+  border: 1px solid hsla(35, 60%, 82%, 0.8);
+}
+
+.light-badge-signal {
+  background: linear-gradient(135deg, hsla(200, 70%, 94%, 1), hsla(200, 60%, 90%, 1));
+  color: hsl(200, 70%, 30%);
+  border: 1px solid hsla(200, 50%, 82%, 0.8);
+}
+
+.light-badge-gain {
+  background: linear-gradient(135deg, hsla(140, 60%, 94%, 1), hsla(140, 50%, 90%, 1));
+  color: hsl(140, 60%, 28%);
+  border: 1px solid hsla(140, 50%, 82%, 0.8);
+}
+
+/* Light theme status badges - aurora gradient */
+.light-status-active {
+  background: linear-gradient(135deg, hsl(185, 80%, 45%), hsl(280, 70%, 55%));
+  color: white;
+  padding: 0.375rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px hsla(185, 70%, 50%, 0.35);
+}
+
+.light-status-closed {
+  background: linear-gradient(135deg, hsl(220, 15%, 55%), hsl(220, 15%, 50%));
+  color: white;
+  padding: 0.375rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px hsla(220, 15%, 50%, 0.25);
+}
+
+/* Light theme primary accent color - cyan aurora */
+.conversation-layout .text-primary {
+  color: hsl(185, 70%, 35%);
+}
+
+.conversation-layout .bg-primary {
+  background: linear-gradient(135deg, hsl(185, 65%, 45%), hsl(200, 70%, 45%));
+}
+
+.conversation-layout .bg-primary\/10 {
+  background: hsla(185, 70%, 50%, 0.12);
+}
+
+/* Light theme panel tabs */
+.light-tab-active {
+  background: linear-gradient(135deg, hsl(185, 65%, 45%), hsl(200, 70%, 45%));
+  color: white;
+  box-shadow: 0 2px 8px hsla(185, 65%, 45%, 0.35);
+}
+
+.light-tab-inactive {
+  background: hsla(0, 0%, 100%, 0.8);
+  color: hsl(220, 15%, 45%);
+  border: 1px solid hsla(220, 20%, 88%, 0.8);
+}
+
+.light-tab-inactive:hover {
+  background: hsla(0, 0%, 100%, 0.95);
+  color: hsl(220, 20%, 35%);
+  border-color: hsla(185, 40%, 75%, 0.6);
+}
+
+/* Light theme input fields */
+.conversation-layout input,
+.conversation-layout textarea {
+  background: hsla(0, 0%, 100%, 0.9);
+  border: 1px solid hsla(220, 25%, 88%, 0.8);
+  color: hsl(220, 20%, 20%);
+}
+
+.conversation-layout input:focus,
+.conversation-layout textarea:focus {
+  border-color: hsla(185, 60%, 55%, 0.6);
+  box-shadow: 0 0 0 3px hsla(185, 60%, 55%, 0.15);
+}
+
+.conversation-layout input::placeholder,
+.conversation-layout textarea::placeholder {
+  color: hsl(220, 15%, 55%);
+}
+
+/* Light theme scrollbar */
+.conversation-layout ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.conversation-layout ::-webkit-scrollbar-track {
+  background: hsla(220, 20%, 95%, 0.5);
+  border-radius: 4px;
+}
+
+.conversation-layout ::-webkit-scrollbar-thumb {
+  background: hsla(220, 20%, 75%, 0.6);
+  border-radius: 4px;
+}
+
+.conversation-layout ::-webkit-scrollbar-thumb:hover {
+  background: hsla(185, 40%, 60%, 0.7);
+}
+
+/* ==========================================
    ADMIN LAYOUT - FUTURISTIC DARK THEME
    All styles below are scoped to .admin-layout
    ========================================== */

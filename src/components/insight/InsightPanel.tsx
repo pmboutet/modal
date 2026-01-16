@@ -60,6 +60,18 @@ const INSIGHT_GROUPS: InsightGroup[] = [
   { label: "Idées", value: "idea" }
 ];
 
+function getInsightTypeBadgeClass(type: Insight["type"]): string {
+  const badgeClasses: Record<Insight["type"], string> = {
+    idea: "light-badge-idea",
+    pain: "light-badge-pain",
+    opportunity: "light-badge-opportunity",
+    risk: "light-badge-risk",
+    signal: "light-badge-signal",
+    gain: "light-badge-gain",
+  };
+  return badgeClasses[type] || "light-badge-signal";
+}
+
 function InsightCard({
   insight,
   onLink,
@@ -129,19 +141,19 @@ function InsightCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
       transition={{ duration: 0.2 }}
-      className="neumorphic-shadow rounded-lg border border-border/60 bg-white/70 px-3 py-2"
+      className="light-aurora-insight px-3 py-2"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center rounded-full border border-primary/50 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getInsightTypeBadgeClass(insight.type)}`}>
               {getInsightTypeLabel(insight.type)}
             </span>
-            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900">
+            <span className="inline-flex items-center rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-700">
               {categoryLabel}
             </span>
             {insight.status !== "new" && (
-              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-900">
+              <span className="inline-flex items-center rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
                 {insight.status}
               </span>
             )}
@@ -297,18 +309,18 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
   }, [activeFilter, insights]);
 
   return (
-    <Card className="h-full glass-card flex flex-col overflow-hidden">
+    <Card className="h-full light-aurora-card flex flex-col overflow-hidden border-0">
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2 pt-3">
         <div>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <MessageSquareQuote className="h-4 w-4 text-primary" />
+          <CardTitle className="flex items-center gap-2 text-base text-slate-800">
+            <MessageSquareQuote className="h-4 w-4 text-teal-600" />
             Insights collectés
           </CardTitle>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-slate-500">
             {filteredInsights.length} insight(s) pour la session {askKey}
           </p>
         </div>
-        <Button variant="outline" size="sm" className="flex items-center gap-2 h-7 text-xs px-2">
+        <Button variant="outline" size="sm" className="flex items-center gap-2 h-7 text-xs px-2 border-slate-200 text-slate-600 hover:bg-slate-50">
           <Filter className="h-3 w-3" />
           Filtrer
         </Button>
@@ -321,8 +333,8 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                 activeFilter === group.value
-                  ? "border-primary bg-primary text-white"
-                  : "border-border bg-white/70 text-slate-600 hover:border-primary/60"
+                  ? "border-teal-500 bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-sm"
+                  : "border-slate-200 bg-white/80 text-slate-600 hover:border-teal-400 hover:text-teal-700"
               )}
               onClick={() => setActiveFilter(group.value)}
             >
@@ -339,10 +351,10 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex h-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-muted/80 bg-white/60 py-6 text-center"
+                className="flex h-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white/70 py-6 text-center"
               >
-                <Lightbulb className="h-6 w-6 text-muted-foreground" />
-                <p className="text-xs text-muted-foreground">Aucun insight à afficher pour ce filtre.</p>
+                <Lightbulb className="h-6 w-6 text-slate-400" />
+                <p className="text-xs text-slate-500">Aucun insight à afficher pour ce filtre.</p>
               </motion.div>
             ) : (
               filteredInsights.map((insight) => (
@@ -360,7 +372,7 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-muted-foreground bg-primary/5 rounded-lg border border-primary/20"
+                className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-teal-700 bg-teal-50 rounded-lg border border-teal-200"
                 aria-live="polite"
               >
                 <motion.div
@@ -368,7 +380,7 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
                   transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   className="flex h-2.5 w-2.5 items-center justify-center"
                 >
-                  <Lightbulb className="h-2.5 w-2.5 text-primary" />
+                  <Lightbulb className="h-2.5 w-2.5 text-teal-600" />
                 </motion.div>
                 <span className="italic">Collecte d'insights en cours...</span>
               </motion.div>

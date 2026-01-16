@@ -63,40 +63,60 @@ export function ConversationProgressBar({
   const pacingLevel = getPacingLevel(duration);
 
   const pacingLevelLabels = isDark ? {
-    intensive: { label: 'Intensif', color: 'bg-green-500/20 text-green-300' },
-    standard: { label: 'Standard', color: 'bg-blue-500/20 text-blue-300' },
-    deep: { label: 'Approfondi', color: 'bg-purple-500/20 text-purple-300' },
+    intensive: { label: 'Intensif', color: 'bg-cyan-500/20 text-cyan-300' },
+    standard: { label: 'Standard', color: 'bg-cyan-500/20 text-cyan-300' },
+    deep: { label: 'Approfondi', color: 'bg-fuchsia-500/20 text-fuchsia-300' },
   } : {
-    intensive: { label: 'Intensif', color: 'bg-green-100 text-green-700' },
-    standard: { label: 'Standard', color: 'bg-blue-100 text-blue-700' },
-    deep: { label: 'Approfondi', color: 'bg-purple-100 text-purple-700' },
+    intensive: { label: 'Intensif', color: 'bg-cyan-100 text-cyan-700' },
+    standard: { label: 'Standard', color: 'bg-cyan-100 text-cyan-700' },
+    deep: { label: 'Approfondi', color: 'bg-fuchsia-100 text-fuchsia-700' },
   };
 
-  const getStepClasses = (step: ConversationStep) => {
+  // Returns { className, style } for continuous gradient across all steps
+  const getStepStyles = (step: ConversationStep, index: number): { className: string; style?: React.CSSProperties } => {
+    const totalSteps = steps.length;
+    // Calculate position for continuous gradient effect
+    const positionPercent = totalSteps > 1 ? (index / (totalSteps - 1)) * 100 : 50;
+
     if (isDark) {
       // Dark mode: glowing effects for voice interface
       if (step.status === 'completed') {
-        return 'bg-emerald-400/80 border border-emerald-300/60 shadow-[0_0_8px_rgba(16,185,129,0.4)]';
+        return {
+          className: 'border border-cyan-300/60 shadow-[0_0_8px_rgba(6,182,212,0.4)]',
+          style: {
+            background: 'linear-gradient(to right, #22d3ee, #d946ef)', // cyan-400 to fuchsia-500
+            backgroundSize: `${totalSteps * 100}% 100%`,
+            backgroundPosition: `${positionPercent}% center`,
+          }
+        };
       }
       if (step.status === 'active' || step.id === currentStepId) {
-        return 'bg-sky-400/90 border border-sky-300/60 shadow-[0_0_8px_rgba(14,165,233,0.4)]';
+        return { className: 'bg-sky-400/90 border border-sky-300/60 shadow-[0_0_8px_rgba(14,165,233,0.4)]' };
       }
       if (step.status === 'skipped') {
-        return 'bg-white/5 border border-white/5 opacity-40';
+        return { className: 'bg-white/5 border border-white/5 opacity-40' };
       }
-      return 'bg-white/15 border border-white/5 opacity-60';
+      return { className: 'bg-white/15 border border-white/5 opacity-60' };
     }
-    // Light mode
+
+    // Light mode - continuous aurora gradient for completed steps
     if (step.status === 'completed') {
-      return 'bg-emerald-500 opacity-90';
+      return {
+        className: 'opacity-90',
+        style: {
+          background: 'linear-gradient(to right, #06b6d4, #d946ef)', // cyan-500 to fuchsia-500
+          backgroundSize: `${totalSteps * 100}% 100%`,
+          backgroundPosition: `${positionPercent}% center`,
+        }
+      };
     }
     if (step.status === 'active' || step.id === currentStepId) {
-      return 'bg-blue-500 opacity-100';
+      return { className: 'bg-cyan-500 opacity-100' };
     }
     if (step.status === 'skipped') {
-      return 'bg-gray-400 opacity-40';
+      return { className: 'bg-gray-400 opacity-40' };
     }
-    return 'bg-gray-300 opacity-40';
+    return { className: 'bg-gray-300 opacity-40' };
   };
 
   return (
@@ -154,13 +174,15 @@ export function ConversationProgressBar({
             const isActive = step.id === currentStepId || step.status === 'active';
             const isCompleted = step.status === 'completed';
             const isPending = step.status === 'pending';
+            const stepStyles = getStepStyles(step, index);
 
             return (
               <React.Fragment key={step.id}>
                 <Popover>
                   <PopoverTrigger asChild>
                     <motion.div
-                      className={`flex-1 h-1.5 rounded-full cursor-pointer transition-all duration-300 ${getStepClasses(step)}`}
+                      className={`flex-1 h-1.5 rounded-full cursor-pointer transition-all duration-300 ${stepStyles.className}`}
+                      style={stepStyles.style}
                       whileHover={{ height: 8, opacity: 1 }}
                       onHoverStart={() => setHoveredStep(step.id)}
                       onHoverEnd={() => setHoveredStep(null)}
@@ -183,8 +205,8 @@ export function ConversationProgressBar({
                       <div className="flex items-center gap-2">
                         <div
                           className={`w-2 h-2 rounded-full ${
-                            isCompleted ? 'bg-emerald-500' :
-                            isActive ? (isDark ? 'bg-sky-400' : 'bg-blue-500') :
+                            isCompleted ? 'bg-gradient-to-r from-cyan-500 to-fuchsia-500' :
+                            isActive ? (isDark ? 'bg-sky-400' : 'bg-cyan-500') :
                             'bg-gray-400'
                           }`}
                         />
@@ -203,7 +225,7 @@ export function ConversationProgressBar({
                         )}
                         {isCompleted && (
                           <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${
-                            isDark ? 'bg-emerald-500/20 text-emerald-100' : 'bg-emerald-100 text-emerald-700'
+                            isDark ? 'bg-cyan-500/20 text-cyan-100' : 'bg-gradient-to-r from-cyan-100 to-fuchsia-100 text-cyan-700'
                           }`}>
                             Terminée
                           </span>
@@ -230,10 +252,10 @@ export function ConversationProgressBar({
                         {step.objective}
                       </p>
                       {isCompleted && step.summary && (
-                        <div className={`mt-3 pt-3 border-t ${isDark ? 'border-emerald-500/20' : 'border-emerald-200'}`}>
+                        <div className={`mt-3 pt-3 border-t ${isDark ? 'border-cyan-500/20' : 'border-cyan-200'}`}>
                           <div className="flex items-center gap-1.5 mb-2">
                             <svg
-                              className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
+                              className={`w-3.5 h-3.5 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}
                               fill="none"
                               viewBox="0 0 24 24"
                               stroke="currentColor"
@@ -245,14 +267,14 @@ export function ConversationProgressBar({
                                 d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                               />
                             </svg>
-                            <span className={`text-xs font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                            <span className={`text-xs font-semibold ${isDark ? 'text-cyan-400' : 'text-cyan-700'}`}>
                               Résumé de l'étape
                             </span>
                           </div>
                           <div className={`rounded-lg p-2.5 border ${
-                            isDark ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-emerald-50/80 border-emerald-100'
+                            isDark ? 'bg-cyan-500/10 border-cyan-500/20' : 'bg-gradient-to-r from-cyan-50/80 to-fuchsia-50/80 border-cyan-100'
                           }`}>
-                            <p className={`text-xs leading-relaxed ${isDark ? 'text-emerald-100' : 'text-emerald-800'}`}>
+                            <p className={`text-xs leading-relaxed ${isDark ? 'text-cyan-100' : 'text-slate-700'}`}>
                               {step.summary}
                             </p>
                           </div>

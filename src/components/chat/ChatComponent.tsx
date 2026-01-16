@@ -520,13 +520,13 @@ export function ChatComponent({
               transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
               className="mx-auto my-6 max-w-md"
             >
-              <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6 shadow-xl">
+              <div className="relative overflow-hidden rounded-2xl border-2 border-cyan-500/30 bg-gradient-to-br from-cyan-50 via-white to-fuchsia-50 p-6 shadow-xl">
                 {/* Confetti animation background */}
                 <div className="absolute inset-0 opacity-20">
                   {[...Array(15)].map((_, i) => (
                     <motion.div
                       key={i}
-                      className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500"
+                      className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500"
                       initial={{ 
                         x: Math.random() * 100 + '%',
                         y: -20,
@@ -564,27 +564,27 @@ export function ChatComponent({
                     🎉
                   </motion.div>
                   
-                  <h3 className="mb-2 text-2xl font-bold text-emerald-800">
+                  <h3 className="mb-2 text-2xl font-bold text-cyan-800">
                     Entretien terminé !
                   </h3>
-                  
-                  <p className="mb-4 text-sm text-emerald-700">
+
+                  <p className="mb-4 text-sm text-slate-600">
                     Merci pour votre participation et vos réponses détaillées.
                     Toutes les étapes ont été complétées avec succès !
                   </p>
-                  
+
                   <motion.div
                     animate={{
                       boxShadow: [
-                        '0 0 0 0 rgba(16, 185, 129, 0.4)',
-                        '0 0 0 10px rgba(16, 185, 129, 0)',
+                        '0 0 0 0 rgba(6, 182, 212, 0.4)',
+                        '0 0 0 10px rgba(6, 182, 212, 0)',
                       ]
                     }}
                     transition={{
                       duration: 1.5,
                       repeat: Infinity,
                     }}
-                    className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg"
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg"
                   >
                     <svg 
                       className="h-5 w-5" 
