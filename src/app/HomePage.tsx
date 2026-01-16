@@ -2714,12 +2714,9 @@ export default function HomePage() {
                 </motion.div>
               </div>
             </motion.div>
-            <div className="flex items-center gap-1.5">
-              {currentParticipantName && !isMobile && (
-                <span className="text-xs text-slate-400">{currentParticipantName}</span>
-              )}
-              <UserProfileMenu />
-            </div>
+            {currentParticipantName && !isMobile && (
+              <span className="text-xs text-slate-400">{currentParticipantName}</span>
+            )}
           </div>
         </motion.div>
       </motion.header>
