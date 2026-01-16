@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Mail, User, CheckCircle2, XCircle, Loader2, ArrowLeft } from "lucide-react";
+import { Logo } from "@/components/ui/Logo";
 
 type Step = "email" | "complete-profile" | "success" | "not-invited";
 
@@ -126,17 +127,21 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
   // Step: Email entry
   if (step === "email") {
     return (
-      <Card className="mx-auto max-w-md border-white/10 bg-slate-900/80 backdrop-blur-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl text-white">
-            {askName || "Session ASK"}
-          </CardTitle>
-          {askQuestion && (
-            <CardDescription className="mt-2 text-slate-400">
-              {askQuestion}
-            </CardDescription>
-          )}
-        </CardHeader>
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Logo textClassName="text-[4rem] leading-none" taglineClassName="text-[0.65rem] tracking-[0.25em] -mt-[0.5rem]" showTagline />
+        </div>
+        <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl text-white">
+              {askName || "Session ASK"}
+            </CardTitle>
+            {askQuestion && (
+              <CardDescription className="mt-2 text-slate-400">
+                {askQuestion}
+              </CardDescription>
+            )}
+          </CardHeader>
         <CardContent>
           <form onSubmit={handleEmailSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -180,22 +185,27 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
             </Button>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     );
   }
 
   // Step: Complete profile
   if (step === "complete-profile") {
     return (
-      <Card className="mx-auto max-w-md border-white/10 bg-slate-900/80 backdrop-blur-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl text-white">
-            Complétez votre profil
-          </CardTitle>
-          <CardDescription className="mt-2 text-slate-400">
-            Pour participer, veuillez nous donner quelques informations.
-          </CardDescription>
-        </CardHeader>
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Logo textClassName="text-[4rem] leading-none" taglineClassName="text-[0.65rem] tracking-[0.25em] -mt-[0.5rem]" showTagline />
+        </div>
+        <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-xl text-white">
+              Complétez votre profil
+            </CardTitle>
+            <CardDescription className="mt-2 text-slate-400">
+              Pour participer, veuillez nous donner quelques informations.
+            </CardDescription>
+          </CardHeader>
         <CardContent>
           <form onSubmit={handleProfileSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -283,35 +293,45 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
             </div>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     );
   }
 
   // Step: Success
   if (step === "success") {
     return (
-      <Card className="mx-auto max-w-md border-white/10 bg-slate-900/80 backdrop-blur-sm">
-        <CardContent className="pt-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/20">
-            <CheckCircle2 className="h-8 w-8 text-green-400" />
-          </div>
-          <h2 className="mb-2 text-xl font-semibold text-white">Email envoyé !</h2>
-          <p className="text-slate-400">{successMessage}</p>
-          <p className="mt-4 text-sm text-slate-500">
-            Vérifiez votre boîte de réception à l&apos;adresse <span className="font-medium text-slate-300">{email}</span>
-          </p>
-        </CardContent>
-      </Card>
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Logo textClassName="text-[4rem] leading-none" taglineClassName="text-[0.65rem] tracking-[0.25em] -mt-[0.5rem]" showTagline />
+        </div>
+        <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
+          <CardContent className="pt-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/20">
+              <CheckCircle2 className="h-8 w-8 text-green-400" />
+            </div>
+            <h2 className="mb-2 text-xl font-semibold text-white">Email envoyé !</h2>
+            <p className="text-slate-400">{successMessage}</p>
+            <p className="mt-4 text-sm text-slate-500">
+              Vérifiez votre boîte de réception à l&apos;adresse <span className="font-medium text-slate-300">{email}</span>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   // Step: Not invited
   if (step === "not-invited") {
     return (
-      <Card className="mx-auto max-w-md border-white/10 bg-slate-900/80 backdrop-blur-sm">
-        <CardContent className="pt-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/20">
-            <XCircle className="h-8 w-8 text-amber-400" />
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Logo textClassName="text-[4rem] leading-none" taglineClassName="text-[0.65rem] tracking-[0.25em] -mt-[0.5rem]" showTagline />
+        </div>
+        <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
+          <CardContent className="pt-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/20">
+              <XCircle className="h-8 w-8 text-amber-400" />
           </div>
           <h2 className="mb-2 text-xl font-semibold text-white">Accès non autorisé</h2>
           <p className="text-slate-400">{successMessage}</p>
@@ -324,7 +344,8 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
             Réessayer avec un autre email
           </Button>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     );
   }
 

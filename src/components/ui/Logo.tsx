@@ -1,6 +1,7 @@
 interface LogoProps {
   className?: string;
   textClassName?: string;
+  taglineClassName?: string;
   showTagline?: boolean;
 }
 
@@ -8,7 +9,12 @@ interface LogoProps {
  * Logo component displaying "MODAL" text
  * Uses Saira Extra Condensed font (bold 700) in white
  */
-export function Logo({ className = "", textClassName = "text-[10rem] leading-none", showTagline = false }: LogoProps) {
+export function Logo({
+  className = "",
+  textClassName = "text-[10rem] leading-none",
+  taglineClassName = "text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]",
+  showTagline = false
+}: LogoProps) {
   return (
     <div className={`inline-flex flex-col items-center ${className}`}>
       <span
@@ -19,7 +25,7 @@ export function Logo({ className = "", textClassName = "text-[10rem] leading-non
       </span>
       {showTagline && (
         <span
-          className="text-white/80 text-[1.15rem] tracking-[0.3em] uppercase -mt-[1.5rem] text-center pl-[0.39em]"
+          className={`text-white/80 uppercase text-center ${taglineClassName}`}
           style={{ fontFamily: "'Saira Extra Condensed', sans-serif" }}
         >
           Capture. Connect. Understand.
