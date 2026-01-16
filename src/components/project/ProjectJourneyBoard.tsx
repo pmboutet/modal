@@ -1708,7 +1708,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                 isActive && "border-indigo-400 bg-indigo-500/15 shadow-lg",
               )}
             >
-              <div className={cn("flex", isActive ? "flex-col" : "items-stretch")}>
+              <div className={cn("flex flex-col", !isActive && "sm:flex-row sm:items-stretch")}>
                 <button type="button" className="flex-1 text-left" onClick={() => { setActiveChallengeId(node.id); }}>
                   <div className={cn("flex flex-col gap-2", isActive ? "p-4" : "p-3")}
                     data-active={isActive}

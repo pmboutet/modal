@@ -36,7 +36,7 @@ SELECT * FROM public.get_ask_session_by_token('1643f806ebf868a0d1a414ceda9b5269'
 
 Ou testez l'URL en production :
 ```
-https://agentic-design-flow.vercel.app/?token=1643f806ebf868a0d1a414ceda9b5269
+https://app-modal.com/?token=1643f806ebf868a0d1a414ceda9b5269
 ```
 
 ## Corrections appliquées

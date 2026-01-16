@@ -1,10 +1,10 @@
-# Agentic Design Flow
+# Modal
 
 A collective idea emergence and specification system with AI-driven chat and challenge management.
 
 ## 🎯 Purpose
 
-Agentic Design Flow enables collective idea generation through AI-driven conversations. Users interact with an AI chatbot that asks questions, and responses feed into a system that generates structured challenges with pains, gains, and KPI estimations.
+Modal enables collective idea generation through AI-driven conversations. Users interact with an AI chatbot that asks questions, and responses feed into a system that generates structured challenges with pains, gains, and KPI estimations.
 
 ## 🏗️ System Architecture
 
@@ -104,8 +104,8 @@ DELETE /api/challenges/[key] - Clear challenges
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/pmboutet/agentic-design-flow.git
-cd agentic-design-flow
+git clone https://github.com/pmboutet/modal.git
+cd modal
 
 # Install dependencies
 npm install

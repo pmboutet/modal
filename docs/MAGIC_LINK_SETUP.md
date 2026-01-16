@@ -25,7 +25,7 @@
 1. Allez sur https://supabase.com/dashboard/project/[VOTRE_PROJECT]/auth/url-configuration
 2. Dans "Site URL", configurez votre URL de production :
    ```
-   https://agentic-design-flow.vercel.app
+   https://app-modal.com
    ```
    Ou pour le développement local :
    ```
@@ -33,7 +33,7 @@
    ```
 3. Dans "Redirect URLs", ajoutez les URLs autorisées :
    ```
-   https://agentic-design-flow.vercel.app/**
+   https://app-modal.com/**
    http://localhost:3000/**
    ```
 
@@ -43,7 +43,7 @@ Assurez-vous que `NEXT_PUBLIC_APP_URL` est configuré correctement :
 
 ```env
 # En production (Vercel)
-NEXT_PUBLIC_APP_URL=https://agentic-design-flow.vercel.app
+NEXT_PUBLIC_APP_URL=https://app-modal.com
 
 # En développement local
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -52,7 +52,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 **Important :** La variable `NEXT_PUBLIC_APP_URL` doit être définie dans Vercel :
 1. Allez sur votre projet Vercel
 2. Settings → Environment Variables
-3. Vérifiez que `NEXT_PUBLIC_APP_URL` est défini avec la valeur `https://agentic-design-flow.vercel.app` (ou votre domaine de production)
+3. Vérifiez que `NEXT_PUBLIC_APP_URL` est défini avec la valeur `https://app-modal.com` (ou votre domaine de production)
 4. Redéployez après modification
 
 ### 4. Comment fonctionnent les magic links maintenant
@@ -76,12 +76,12 @@ Pour tester que tout fonctionne :
 1. **Vérifiez les variables d'environnement en production :**
    ```bash
    # Dans Vercel Dashboard → Settings → Environment Variables
-   NEXT_PUBLIC_APP_URL=https://agentic-design-flow.vercel.app
+   NEXT_PUBLIC_APP_URL=https://app-modal.com
    ```
 
 2. **Vérifiez la configuration Supabase :**
-   - Site URL : `https://agentic-design-flow.vercel.app`
-   - Redirect URLs : `https://agentic-design-flow.vercel.app/**`
+   - Site URL : `https://app-modal.com`
+   - Redirect URLs : `https://app-modal.com/**`
 
 3. **Testez un lien avec token :**
    - Le lien `/?token=xxx` devrait fonctionner directement

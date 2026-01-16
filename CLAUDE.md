@@ -133,7 +133,7 @@ Rationale: Duplicated code leads to inconsistent behavior, harder maintenance, a
 Les variables d'environnement sont dans `.env.local`. Pour les charger dans le shell:
 
 ```bash
-source /Users/pmboutet/Documents/GitHub/agentic-design-flow/.env.local
+source /Users/pmboutet/Documents/GitHub/modal/.env.local
 ```
 
 ### Requêtes SQL directes sur la base de données
