@@ -12,6 +12,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import * as Sentry from '@sentry/nextjs';
 import { normaliseMessageMetadata } from './messages';
 import { getOrCreateConversationThread, getMessagesForThread, type AskSessionConfig } from './asks';
 import { getConversationPlanWithSteps, type ConversationPlan, type ConversationPlanWithSteps } from './ai/conversation-plan';
@@ -63,6 +64,19 @@ export class RpcDebugError extends Error {
     console.error(`   Message: ${errorMessage}`);
     console.error(`   Params:`, params);
     console.error(`   Full error:`, originalError);
+
+    // Send to Sentry for monitoring
+    Sentry.captureException(this, {
+      tags: {
+        rpcName,
+        errorCode,
+      },
+      extra: {
+        params,
+        originalError,
+        timestamp: this.timestamp,
+      },
+    });
   }
 }
 

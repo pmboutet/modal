@@ -104,7 +104,8 @@ export async function GET(
     const adminClient = getAdminSupabaseClient();
 
     // In dev mode, use admin client for data operations
-    const dataClient: SupabaseClient = isDevBypass ? adminClient : sessionClient;
+    // NOTE: This will be reassigned to adminClient if invite token auth succeeds
+    let dataClient: SupabaseClient = isDevBypass ? adminClient : sessionClient;
 
     // Check for invite token in headers
     const inviteToken = request.headers.get('X-Invite-Token');
@@ -145,6 +146,13 @@ export async function GET(
       authMethod: authContext.authMethod,
       hasViewer: !!viewer,
     });
+
+    // IMPORTANT: Switch to admin client when auth context requires it (e.g., invite token auth)
+    // This is determined by loadFullAuthContext based on auth method
+    if (authContext.useAdminClient) {
+      console.log(`🔓 GET /api/ask/[key]: Auth requires admin client - switching to bypass RLS`);
+      dataClient = adminClient;
+    }
 
     // Dev mode fallback: if no auth, try to find a spokesperson participant for the viewer
     // This helps with testing consultant mode without requiring login

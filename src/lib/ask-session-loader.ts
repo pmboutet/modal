@@ -76,6 +76,8 @@ export interface AuthContext {
   participantEmail: string | null;
   participantRole: string | null;
   authMethod: 'invite_token' | 'session' | 'anonymous' | 'none';
+  /** Whether to use admin client for data operations (bypasses RLS) */
+  useAdminClient: boolean;
 }
 
 /**
@@ -145,6 +147,7 @@ export async function loadAuthFromInviteToken(
     participantEmail: participant.participant_email,
     participantRole: participant.role,
     authMethod: 'invite_token',
+    useAdminClient: true, // Invite token auth requires admin client to bypass RLS
   };
 }
 
@@ -214,6 +217,7 @@ export async function loadAuthFromSession(
     participantEmail: profile.email,
     participantRole: null,
     authMethod: 'session',
+    useAdminClient: false, // Session auth has proper RLS access
   };
 }
 
@@ -349,6 +353,7 @@ export async function loadFullAuthContext(
     participantEmail: null,
     participantRole: null,
     authMethod: 'none',
+    useAdminClient: false,
   };
 
   // 1. Try invite token first
