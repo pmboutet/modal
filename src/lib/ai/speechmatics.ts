@@ -986,4 +986,71 @@ export class SpeechmaticsVoiceAgent {
   getCurrentStepId(): string | null {
     return this.config?.promptVariables?.current_step_id as string | null ?? null;
   }
+
+  /**
+   * Speak an initial/welcome message via TTS
+   * Used to greet the user when starting a voice session with no existing messages
+   *
+   * @param text - The message text to speak
+   */
+  async speakInitialMessage(text: string): Promise<void> {
+    if (!text?.trim()) {
+      console.warn('[Speechmatics] speakInitialMessage: empty text, skipping');
+      return;
+    }
+
+    // Skip if TTS is disabled
+    if (this.config?.disableElevenLabsTTS || !this.elevenLabsTTS || !this.audio) {
+      console.log('[Speechmatics] speakInitialMessage: TTS disabled, skipping audio playback');
+      // Still emit the message for display
+      this.onMessageCallback?.({
+        role: 'agent',
+        content: text,
+        timestamp: new Date().toISOString(),
+        isInterim: false,
+        messageId: `initial-${Date.now()}`,
+      });
+      return;
+    }
+
+    console.log('[Speechmatics] 🎤 Speaking initial message:', text.substring(0, 50) + '...');
+
+    try {
+      // Add to conversation history
+      this.conversationHistory.push({
+        role: 'agent',
+        content: text,
+      });
+
+      // Emit message callback for UI display
+      this.onMessageCallback?.({
+        role: 'agent',
+        content: text,
+        timestamp: new Date().toISOString(),
+        isInterim: false,
+        messageId: `initial-${Date.now()}`,
+      });
+
+      // Clean any STEP_COMPLETE markers before TTS
+      const ttsText = cleanStepCompleteMarker(text);
+
+      // Set current assistant speech for echo detection
+      this.audio.setCurrentAssistantSpeech(ttsText);
+
+      // Generate and play TTS audio
+      const audioStream = await this.elevenLabsTTS.streamTextToSpeech(ttsText);
+      const audioData = await this.audio.streamToUint8Array(audioStream);
+      if (audioData) {
+        this.onAudioCallback?.(audioData);
+        await this.audio.playAudio(audioData).catch(err => {
+          console.error('[Speechmatics] Error playing initial message audio:', err);
+        });
+      }
+
+      console.log('[Speechmatics] ✅ Initial message spoken successfully');
+    } catch (error) {
+      console.error('[Speechmatics] Error speaking initial message:', error);
+      // Don't throw - initial message failure shouldn't break the session
+    }
+  }
 }

@@ -1336,6 +1336,41 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
         // Configurer la visualisation audio
         startAudioVisualization();
+
+        // If no messages exist, generate and speak initial welcome message (DRY with text mode)
+        if (!consultantMode && messages.length === 0 && askKey) {
+          console.log('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
+          try {
+            const headers: HeadersInit = { 'Content-Type': 'application/json' };
+            if (inviteToken) {
+              headers['x-invite-token'] = inviteToken;
+            }
+
+            // Use respond endpoint to generate initial AI message (same as text mode)
+            const response = await fetch(`/api/ask/${askKey}/respond`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                content: '', // Empty content triggers initial greeting
+                senderType: 'system', // System-triggered initial message
+              }),
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success && result.data?.aiResponse) {
+                // Speak the initial message via TTS
+                await agent.speakInitialMessage(result.data.aiResponse);
+                console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+              }
+            } else {
+              console.warn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
+            }
+          } catch (error) {
+            console.error('[PremiumVoiceInterface] Error generating initial message:', error);
+            // Don't fail - voice session can still work without initial message
+          }
+        }
       } else {
         // Agent Deepgram par défaut : Deepgram STT + LLM + Deepgram TTS (tout-en-un)
         const agent = new DeepgramVoiceAgent();
