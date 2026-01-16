@@ -2316,7 +2316,7 @@ export default function HomePage() {
         >
           {/* Logo */}
           <div className="text-center mb-8">
-            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
           </div>
 
           <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
@@ -2418,7 +2418,7 @@ export default function HomePage() {
           <div className="text-center space-y-8">
             {/* Logo */}
             <div className="mb-4">
-              <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+              <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
             </div>
 
             {/* Animated loading spinner */}
@@ -2500,7 +2500,7 @@ export default function HomePage() {
         >
           {/* Logo */}
           <div className="text-center mb-8">
-            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+            <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
           </div>
 
           {/* Welcome message */}

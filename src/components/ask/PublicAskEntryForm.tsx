@@ -129,7 +129,7 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
     return (
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
         </div>
         <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
           <CardHeader className="text-center">
@@ -195,7 +195,7 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
     return (
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
         </div>
         <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
           <CardHeader className="text-center">
@@ -303,7 +303,7 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
     return (
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
         </div>
         <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
           <CardContent className="pt-8 text-center">
@@ -326,7 +326,7 @@ export function PublicAskEntryForm({ askKey, askName, askQuestion }: PublicAskEn
     return (
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]" showTagline />
+          <Logo textClassName="text-[10rem] leading-none" taglineClassName="text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]" showTagline />
         </div>
         <Card className="border-white/10 bg-slate-900/80 backdrop-blur-sm">
           <CardContent className="pt-8 text-center">

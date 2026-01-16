@@ -12,7 +12,7 @@ interface LogoProps {
 export function Logo({
   className = "",
   textClassName = "text-[10rem] leading-none",
-  taglineClassName = "text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.39em]",
+  taglineClassName = "text-[1.15rem] tracking-[0.3em] -mt-[1.5rem] pl-[0.6em]",
   showTagline = false
 }: LogoProps) {
   return (
