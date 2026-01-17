@@ -234,6 +234,40 @@ describe('cleanStepCompleteMarker', () => {
       expect(cleanStepCompleteMarker('Hello STEP_COMPLETE: step_id world')).toBe('Hello  world');
     });
   });
+
+  // BUG-039 FIX: Tests for regex not consuming valid content
+  describe('BUG-039: regex should not consume valid content', () => {
+    test('should preserve content immediately after step ID (with space)', () => {
+      const result = cleanStepCompleteMarker('STEP_COMPLETE: step_1 Important message here');
+      expect(result).toBe('Important message here');
+    });
+
+    test('should preserve content after marker without step ID', () => {
+      const result = cleanStepCompleteMarker('STEP_COMPLETE: Important message here');
+      expect(result).toBe('message here');
+    });
+
+    test('should preserve multiline content after marker', () => {
+      const result = cleanStepCompleteMarker('**STEP_COMPLETE:step_1**\nThis is the next step message.');
+      expect(result).toBe('This is the next step message.');
+    });
+
+    test('should not consume content that looks like a step ID but is part of message', () => {
+      // The regex should stop at word boundary
+      const result = cleanStepCompleteMarker('STEP_COMPLETE:step_1 step_2 is next');
+      expect(result).toBe('step_2 is next');
+    });
+
+    test('should handle marker followed by punctuation', () => {
+      const result = cleanStepCompleteMarker('STEP_COMPLETE:step_1. Moving on.');
+      expect(result).toBe('. Moving on.');
+    });
+
+    test('should handle marker with just colon and space before content', () => {
+      const result = cleanStepCompleteMarker('**STEP_COMPLETE:** Now let us discuss the next topic.');
+      expect(result).toBe('Now let us discuss the next topic.');
+    });
+  });
 });
 
 // ============================================================================

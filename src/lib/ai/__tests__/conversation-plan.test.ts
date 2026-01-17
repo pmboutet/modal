@@ -515,6 +515,72 @@ Moving to the next step.`;
   });
 
   // --------------------------------------------------------------------------
+  // BUG-025: Step status validation
+  // --------------------------------------------------------------------------
+  describe('BUG-025: Step status validation', () => {
+    test('should identify completed steps correctly', () => {
+      const plan = createMockPlanWithSteps({
+        steps: [
+          createMockStep({
+            step_identifier: 'step_1',
+            status: 'completed',
+          }),
+          createMockStep({
+            id: 'step-uuid-2',
+            step_identifier: 'step_2',
+            step_order: 2,
+            status: 'active',
+          }),
+        ],
+        current_step_id: 'step_2',
+      });
+
+      const currentStep = getCurrentStep(plan);
+      expect(currentStep).not.toBeNull();
+      expect((currentStep as ConversationPlanStep).status).toBe('active');
+    });
+
+    test('should identify skipped steps correctly', () => {
+      const plan = createMockPlanWithSteps({
+        steps: [
+          createMockStep({
+            step_identifier: 'step_1',
+            status: 'skipped',
+          }),
+          createMockStep({
+            id: 'step-uuid-2',
+            step_identifier: 'step_2',
+            step_order: 2,
+            status: 'active',
+          }),
+        ],
+        current_step_id: 'step_2',
+      });
+
+      const skippedStep = plan.steps.find(s => s.step_identifier === 'step_1');
+      expect(skippedStep?.status).toBe('skipped');
+    });
+
+    test('formatPlanForPrompt shows correct status for all step states', () => {
+      const plan = createMockPlanWithSteps({
+        steps: [
+          createMockStep({ step_identifier: 'step_1', step_order: 1, status: 'completed' }),
+          createMockStep({ id: 'step-uuid-2', step_identifier: 'step_2', step_order: 2, status: 'skipped' }),
+          createMockStep({ id: 'step-uuid-3', step_identifier: 'step_3', step_order: 3, status: 'active' }),
+          createMockStep({ id: 'step-uuid-4', step_identifier: 'step_4', step_order: 4, status: 'pending' }),
+        ],
+      });
+
+      const result = formatPlanForPrompt(plan);
+
+      expect(result).toContain('✅'); // completed
+      expect(result).toContain('⏭️'); // skipped
+      expect(result).toContain('▶️'); // active
+      expect(result).toContain('⏳'); // pending
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Edge Cases and Integration
   // --------------------------------------------------------------------------
   describe('Edge Cases', () => {

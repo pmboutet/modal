@@ -648,6 +648,13 @@ export class HybridVoiceAgent {
   }
 
   private async speakWithElevenLabs(text: string): Promise<void> {
+    // BUG-001 FIX: Extra guard - never play TTS in consultant mode (disableLLM) even if other code paths
+    // accidentally call this method. This is a belt-and-suspenders check.
+    if (this.config?.disableLLM) {
+      console.log('[HybridVoiceAgent] 🛡️ Consultant mode active - blocking TTS playback');
+      return;
+    }
+
     if (!this.elevenLabsTTS || !this.audioContext) {
       console.error('[HybridVoiceAgent] Cannot speak: TTS or audio context not initialized');
       return;

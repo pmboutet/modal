@@ -82,6 +82,8 @@ export function ChatComponent({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null); // BUG-016: Track edit errors
+  const [recordingError, setRecordingError] = useState<string | null>(null); // BUG-008: Track recording errors
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -145,6 +147,18 @@ export function ChatComponent({
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
+      // BUG-009 FIX: Stop MediaRecorder and release microphone on unmount
+      if (mediaRecorderRef.current) {
+        try {
+          if (mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+          }
+          // Release all audio tracks to free the microphone
+          mediaRecorderRef.current.stream?.getTracks().forEach(track => track.stop());
+        } catch (e) {
+          // Ignore errors during cleanup
+        }
+      }
     };
   }, []);
 
@@ -166,29 +180,66 @@ export function ChatComponent({
   const handleStartEdit = useCallback((messageId: string, currentContent: string) => {
     setEditingMessageId(messageId);
     setEditContent(currentContent);
+    setEditError(null); // Clear any previous error
   }, []);
 
   // Handle canceling edit
   const handleCancelEdit = useCallback(() => {
     setEditingMessageId(null);
     setEditContent("");
+    setEditError(null); // Clear error on cancel
   }, []);
 
-  // Handle submitting the edit
+  // Handle submitting the edit (BUG-016: Enhanced error handling with UI feedback)
   const handleSubmitEdit = useCallback(async () => {
     if (!editingMessageId || !editContent.trim() || !onEditMessage) return;
 
     setIsSubmittingEdit(true);
+    setEditError(null); // Clear previous error
     try {
       await onEditMessage(editingMessageId, editContent.trim());
       setEditingMessageId(null);
       setEditContent("");
+      setEditError(null);
     } catch (error) {
       console.error('Error editing message:', error);
+      // BUG-016: Set user-friendly error message and keep edit mode open for retry
+      const errorMessage = error instanceof Error ? error.message : 'Une erreur est survenue lors de la modification';
+      setEditError(errorMessage);
+      // Keep edit mode open so user can retry
     } finally {
       setIsSubmittingEdit(false);
     }
   }, [editingMessageId, editContent, onEditMessage]);
+
+  // Promise-based file reading utilities to avoid race conditions (BUG-002, BUG-034)
+  const readFileAsDataURL = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        // Convert ArrayBuffer to base64 string properly (BUG-034)
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        bytes.forEach((byte) => {
+          binary += String.fromCharCode(byte);
+        });
+        const base64 = btoa(binary);
+        resolve(`data:${file.type};base64,${base64}`);
+      };
+      reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+      reader.readAsArrayBuffer(file);
+    });
+  };
 
   // Handle sending messages
   const handleSendMessage = async () => {
@@ -199,27 +250,37 @@ export function ChatComponent({
       clearTimeout(typingTimeoutRef.current);
     }
 
+    // Process files with proper async/await to avoid race conditions (BUG-002)
     if (selectedFiles.length > 0) {
-      // Handle file uploads
-      for (const fileUpload of selectedFiles) {
-        const fileReader = new FileReader();
-        fileReader.onload = (e) => {
-          const content = e.target?.result as string;
-          onSendMessage(content, fileUpload.type, {
-            fileName: fileUpload.file.name,
-            fileSize: fileUpload.file.size,
-            mimeType: fileUpload.file.type,
-          });
-        };
-        
-        if (fileUpload.type === 'image') {
-          fileReader.readAsDataURL(fileUpload.file);
-        } else {
-          fileReader.readAsArrayBuffer(fileUpload.file);
-        }
+      try {
+        const filePromises = selectedFiles.map(async (fileUpload) => {
+          try {
+            let content: string;
+            if (fileUpload.type === 'image') {
+              content = await readFileAsDataURL(fileUpload.file);
+            } else {
+              // Use proper base64 conversion for non-image files (BUG-034)
+              content = await readFileAsBase64(fileUpload.file);
+            }
+            onSendMessage(content, fileUpload.type, {
+              fileName: fileUpload.file.name,
+              fileSize: fileUpload.file.size,
+              mimeType: fileUpload.file.type,
+            });
+          } catch (error) {
+            console.error(`Error reading file ${fileUpload.file.name}:`, error);
+            // Notify user of file read failure
+            throw error;
+          }
+        });
+
+        await Promise.all(filePromises);
+      } catch (error) {
+        console.error('Error processing files:', error);
+        // Allow text message to still be sent even if file processing failed
       }
     }
-    
+
     if (inputValue.trim()) {
       onSendMessage(inputValue.trim(), 'text');
     }
@@ -244,7 +305,7 @@ export function ChatComponent({
   // Handle file selection
   const handleFileSelect = (files: FileList) => {
     const newFiles: FileUpload[] = [];
-    
+
     Array.from(files).forEach((file) => {
       const validation = validateFileType(file);
       if (validation.isValid && validation.type) {
@@ -252,12 +313,19 @@ export function ChatComponent({
           file,
           type: validation.type,
         };
-        
+
         // Create preview for images
         if (validation.type === 'image') {
           const reader = new FileReader();
           reader.onload = (e) => {
             fileUpload.preview = e.target?.result as string;
+            setSelectedFiles(prev => [...prev, fileUpload]);
+          };
+          // BUG-014: Add error handler with user feedback
+          reader.onerror = () => {
+            console.error(`Failed to create preview for file: ${file.name}`);
+            // Still add the file without preview so user can see the error context
+            fileUpload.preview = undefined;
             setSelectedFiles(prev => [...prev, fileUpload]);
           };
           reader.readAsDataURL(file);
@@ -266,7 +334,7 @@ export function ChatComponent({
         }
       }
     });
-    
+
     if (newFiles.length > 0) {
       setSelectedFiles(prev => [...prev, ...newFiles]);
     }
@@ -294,6 +362,9 @@ export function ChatComponent({
 
   // Handle audio recording
   const startRecording = async () => {
+    // BUG-008 FIX: Clear any previous error
+    setRecordingError(null);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
@@ -306,12 +377,12 @@ export function ChatComponent({
       mediaRecorderRef.current.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const audioFile = new File([audioBlob], 'recording.wav', { type: 'audio/wav' });
-        
+
         const fileUpload: FileUpload = {
           file: audioFile,
           type: 'audio',
         };
-        
+
         setSelectedFiles(prev => [...prev, fileUpload]);
         stream.getTracks().forEach(track => track.stop());
       };
@@ -320,6 +391,17 @@ export function ChatComponent({
       setIsRecording(true);
     } catch (error) {
       console.error('Error starting recording:', error);
+      // BUG-008 FIX: Show user-friendly error message
+      const errorMessage = error instanceof Error
+        ? (error.name === 'NotAllowedError'
+            ? 'Microphone access denied. Please allow microphone access in your browser settings.'
+            : error.name === 'NotFoundError'
+            ? 'No microphone found. Please connect a microphone and try again.'
+            : `Recording failed: ${error.message}`)
+        : 'Failed to start recording';
+      setRecordingError(errorMessage);
+      // Auto-clear error after 5 seconds
+      setTimeout(() => setRecordingError(null), 5000);
     }
   };
 
@@ -506,6 +588,7 @@ export function ChatComponent({
                   onSubmitEdit={handleSubmitEdit}
                   onEditContentChange={setEditContent}
                   isSubmittingEdit={isSubmittingEdit}
+                  editError={editingMessageId === message.id ? editError : null}
                 />
               );
             })}
@@ -657,6 +740,13 @@ export function ChatComponent({
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
+              {/* BUG-008 FIX: Recording error display */}
+              {recordingError && (
+                <div className="mb-2 p-2 text-sm text-red-600 bg-red-50 rounded-md border border-red-200">
+                  {recordingError}
+                </div>
+              )}
+
               {/* Responsive layout based on container width */}
               <div className="flex flex-col @[320px]:flex-row items-stretch @[320px]:items-end gap-2 min-w-0 max-w-full">
                 <div className="flex-1 min-w-0">
@@ -806,6 +896,7 @@ function MessageBubble({
   onSubmitEdit,
   onEditContentChange,
   isSubmittingEdit = false,
+  editError = null, // BUG-016: Edit error for UI feedback
 }: {
   message: Message;
   showSender: boolean;
@@ -819,6 +910,7 @@ function MessageBubble({
   onSubmitEdit?: () => void;
   onEditContentChange?: (content: string) => void;
   isSubmittingEdit?: boolean;
+  editError?: string | null; // BUG-016: Edit error message
 }) {
   const isUser = message.senderType === 'user';
   const isSystem = message.senderType === 'system';
@@ -929,10 +1021,19 @@ function MessageBubble({
                   e.target.style.height = 'auto';
                   e.target.style.height = e.target.scrollHeight + 'px';
                 }}
-                className="w-full min-h-[60px] p-2 rounded border border-border bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary overflow-hidden"
+                className={cn(
+                  "w-full min-h-[60px] p-2 rounded border bg-background text-foreground resize-none focus:outline-none focus:ring-2 overflow-hidden",
+                  editError ? "border-red-500 focus:ring-red-500" : "border-border focus:ring-primary"
+                )}
                 autoFocus
                 disabled={isSubmittingEdit}
               />
+              {/* BUG-016: Display edit error with retry option */}
+              {editError && (
+                <div className="flex items-center gap-2 p-2 rounded bg-red-500/20 text-red-100 text-sm">
+                  <span className="flex-1">{editError}</span>
+                </div>
+              )}
               <div className="flex justify-end gap-2">
                 <Button
                   size="sm"
@@ -950,6 +1051,11 @@ function MessageBubble({
                 >
                   {isSubmittingEdit ? (
                     <>Sauvegarde...</>
+                  ) : editError ? (
+                    <>
+                      <Check className="h-4 w-4 mr-1" />
+                      Réessayer
+                    </>
                   ) : (
                     <>
                       <Check className="h-4 w-4 mr-1" />

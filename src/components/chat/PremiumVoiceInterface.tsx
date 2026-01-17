@@ -938,37 +938,70 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             currentStepId: conversationPlan?.current_step_id,
           });
 
-          // Call step-complete API
+          // BUG-026 FIX: Call step-complete API with retry logic
           const headers: HeadersInit = { 'Content-Type': 'application/json' };
           if (inviteToken) {
             headers['x-invite-token'] = inviteToken;
           }
 
-          fetch(`/api/ask/${askKey}/step-complete`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ stepId: stepIdToComplete }),
-          })
-            .then(response => response.json())
-            .then(result => {
-              if (result.success) {
-                console.log('[PremiumVoiceInterface] ✅ Step completed via API:', {
-                  completedStepId: stepIdToComplete,
-                  nextStepId: result.data?.nextStepId,
+          // Helper function to complete step with retry logic
+          const completeStepWithRetry = async (maxRetries: number = 3, baseDelay: number = 1000) => {
+            let lastError: Error | null = null;
+
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                const response = await fetch(`/api/ask/${askKey}/step-complete`, {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify({ stepId: stepIdToComplete }),
                 });
-                // Immediately refresh prompts with new step context
-                updatePromptsFromApi(`step completed: ${stepIdToComplete}`);
-              } else {
-                console.error('[PremiumVoiceInterface] ❌ Step completion failed:', result.error);
-                // Remove from set on failure so it can be retried
-                completingStepsRef.current.delete(stepIdToComplete);
+
+                // Validate response before parsing JSON
+                if (!response.ok) {
+                  throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                  console.log('[PremiumVoiceInterface] ✅ Step completed via API:', {
+                    completedStepId: stepIdToComplete,
+                    nextStepId: result.data?.nextStepId,
+                    attempt,
+                  });
+                  // Immediately refresh prompts with new step context
+                  updatePromptsFromApi(`step completed: ${stepIdToComplete}`);
+                  return true; // Success - exit retry loop
+                } else {
+                  // API returned success: false - this is a logical error, may be retryable
+                  lastError = new Error(result.error || 'Unknown error');
+                  console.warn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} failed:`, result.error);
+                }
+              } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                console.warn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} error:`, error);
               }
-            })
-            .catch(error => {
-              console.error('[PremiumVoiceInterface] ❌ Step completion API error:', error);
-              // Remove from set on error so it can be retried
-              completingStepsRef.current.delete(stepIdToComplete);
+
+              // Don't delay after the last attempt
+              if (attempt < maxRetries) {
+                // Exponential backoff with jitter
+                const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 500;
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+            }
+
+            // All retries failed
+            console.error('[PremiumVoiceInterface] ❌ Step completion failed after all retries:', {
+              stepIdToComplete,
+              error: lastError?.message,
             });
+            // Remove from set on final failure so it can be retried later (e.g., on next message)
+            completingStepsRef.current.delete(stepIdToComplete);
+            return false;
+          };
+
+          // Execute with retry logic (fire and forget, but with proper error handling)
+          completeStepWithRetry();
         }
       }
     } else {
@@ -1116,13 +1149,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Remove the processed speaker from the queue (not all - just this one)
     setPendingSpeakers(prev => prev.filter(s => s !== decision.speaker));
 
-    // Notify parent of mapping change (use timeout to get updated state)
+    // BUG-010 FIX: Notify parent of mapping change using setSpeakerMappings callback
+    // to get the updated state instead of relying on stale closure
     if (onSpeakerMappingChange) {
-      setTimeout(() => {
-        onSpeakerMappingChange(speakerMappings);
-      }, 0);
+      // Use a functional update to capture the current state
+      setSpeakerMappings(currentMappings => {
+        // Call the parent with the updated mappings
+        setTimeout(() => onSpeakerMappingChange(currentMappings), 0);
+        return currentMappings; // Return unchanged
+      });
     }
-  }, [askKey, inviteToken, onSpeakerMappingChange, speakerMappings]);
+  }, [askKey, inviteToken, onSpeakerMappingChange]);
 
   /**
    * Handle closing the speaker assignment overlay without making a decision

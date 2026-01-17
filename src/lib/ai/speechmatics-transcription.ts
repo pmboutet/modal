@@ -273,13 +273,13 @@ export class TranscriptionManager {
         return;
       }
 
-      // Store values before clearing state
+      // Store values before processing (keep state until processing completes)
       const messageId = this.currentStreamingMessageId;
       const fullContent = finalMessage;
+      const speakerSnapshot = this.currentSpeaker;
 
-      // Clear state
-      this.clearState();
-      this.lastProcessedContent = finalMessage;
+      // BUG-007 FIX: Don't clear state until processing completes successfully
+      // This allows retry if processUserMessage fails
 
       // Add to conversation history
       this.conversationHistory.push({ role: 'user', content: fullContent });
@@ -291,11 +291,28 @@ export class TranscriptionManager {
         timestamp: new Date().toISOString(),
         isInterim: false,
         messageId: messageId || undefined,
-        speaker: this.currentSpeaker,
+        speaker: speakerSnapshot,
       });
 
-      // Process user message (triggers LLM + TTS)
-      await this.processUserMessage(fullContent);
+      try {
+        // Process user message (triggers LLM + TTS)
+        await this.processUserMessage(fullContent);
+
+        // BUG-007 FIX: Only clear state AFTER successful processing
+        this.clearState();
+        this.lastProcessedContent = fullContent;
+      } catch (error) {
+        // BUG-007 FIX: On error, remove from conversation history and keep state for retry
+        // Simplified: directly check and remove the last element if it matches
+        const lastMsg = this.conversationHistory[this.conversationHistory.length - 1];
+        if (lastMsg && lastMsg.role === 'user' && lastMsg.content === fullContent) {
+          this.conversationHistory.pop();
+        }
+
+        console.error('[Transcription] Error processing user message, transcript preserved for retry:', error);
+        // Re-throw so the caller knows it failed
+        throw error;
+      }
     }
   }
 

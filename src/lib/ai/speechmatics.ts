@@ -281,7 +281,8 @@ export class SpeechmaticsVoiceAgent {
       this.websocket.getWebSocket(),
       () => this.abortResponse(), // Barge-in callback
       () => this.onAudioPlaybackEndCallback?.(), // Audio playback end callback (for inactivity timer)
-      () => this.handleEchoDetected() // Echo detection callback - discard pending transcript
+      // BUG-008 FIX: Pass echo details to handler for UI feedback
+      (details) => this.handleEchoDetected(details)
     );
     
     // Update audio with WebSocket reference
@@ -525,10 +526,15 @@ export class SpeechmaticsVoiceAgent {
     // The transcription is already captured and sent via callback, so just exit
     if (this.config?.disableLLM) {
       this.isGeneratingResponse = false;
-      // Process any queued messages (still in transcription-only mode)
+      // BUG-002 FIX: Process any queued messages with await to ensure proper error handling
+      // and prevent isGeneratingResponse from getting stuck
       if (this.userMessageQueue.length > 0) {
         const next = this.userMessageQueue.shift()!;
-        this.processUserMessage(next.content);
+        try {
+          await this.processUserMessage(next.content);
+        } catch (error) {
+          console.error('[Speechmatics] Error processing queued message in consultant mode:', error);
+        }
       }
       return;
     }
@@ -608,7 +614,9 @@ export class SpeechmaticsVoiceAgent {
       });
 
       // Generate TTS audio only if ElevenLabs is enabled (not in text-only mode)
-      if (!this.config?.disableElevenLabsTTS && this.elevenLabsTTS && this.audio) {
+      // BUG-001 FIX: Extra guard - never play TTS in consultant mode (disableLLM) even if other code paths
+      // accidentally generate a response. This is a belt-and-suspenders check.
+      if (!this.config?.disableLLM && !this.config?.disableElevenLabsTTS && this.elevenLabsTTS && this.audio) {
         try {
           // Clean STEP_COMPLETE markers before sending to TTS (we don't want to "say" them)
           const ttsText = cleanStepCompleteMarker(llmResponse);
@@ -732,6 +740,16 @@ export class SpeechmaticsVoiceAgent {
       // This ensures orphaned connections will be aborted when they finish
       SpeechmaticsVoiceAgent.globalConnectionToken++;
       this.isDisconnected = true;
+
+      // BUG-020 FIX: Always abort any pending LLM request on disconnect
+      // This prevents stuck requests from holding resources or continuing after disconnect
+      if (this.llmAbortController) {
+        this.llmAbortController.abort();
+        this.llmAbortController = null;
+      }
+      // Reset generation state to ensure clean slate
+      this.isGeneratingResponse = false;
+      this.generationStartedAt = 0;
 
       // CRITICAL: According to Speechmatics API docs:
       // 1. Stop sending audio FIRST (no AddAudio after EndOfStream)
@@ -911,14 +929,35 @@ export class SpeechmaticsVoiceAgent {
   }
 
   /**
-   * Handle echo detection - discard pending transcript
+   * Handle echo detection - discard pending transcript and notify UI
    * Called when the audio module detects that the transcribed audio is actually
    * TTS playback being picked up by the microphone (not real user speech)
+   *
+   * BUG-008 FIX: Now accepts echo details and notifies the UI via message callback
    */
-  private handleEchoDetected(): void {
+  private handleEchoDetected(details?: { transcript: string; matchType: string; similarity: number }): void {
     // Discard any pending transcript in the transcription manager
     // This prevents sending echo as user input to the LLM
     this.transcriptionManager?.discardPendingTranscript();
+
+    // BUG-008 FIX: Notify UI about echo detection so it can provide feedback
+    // Send a special interim message to clear any displayed user input
+    if (details) {
+      console.log('[Speechmatics] 🔇 Echo detected:', {
+        matchType: details.matchType,
+        similarity: details.similarity.toFixed(2),
+        transcriptPreview: details.transcript.substring(0, 50) + (details.transcript.length > 50 ? '...' : ''),
+      });
+
+      // Clear any interim user message that was showing the echo
+      this.onMessageCallback?.({
+        role: 'user',
+        content: '',
+        timestamp: new Date().toISOString(),
+        isInterim: true,
+        messageId: `echo-cleared-${Date.now()}`,
+      });
+    }
   }
 
   /**

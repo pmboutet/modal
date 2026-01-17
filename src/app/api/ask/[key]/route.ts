@@ -4,7 +4,7 @@ import { ApiResponse, Ask, AskParticipant, Insight, Message } from '@/types';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 import { mapInsightRowToInsight } from '@/lib/insights';
 import { fetchInsightsForSession } from '@/lib/insightQueries';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, resolveThreadUserId } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getInsightsForThread, shouldUseSharedThread, resolveThreadUserId } from '@/lib/asks';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { executeAgent } from '@/lib/ai/service';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
@@ -654,30 +654,41 @@ export async function GET(
     }
 
     // Get insights for the session
-    // In individual mode, we should ideally filter by thread, but to ensure all insights are visible
-    // (especially when insights are created in individual threads but viewed from shared thread),
-    // we fetch all insights for the session and filter client-side if needed
+    // BUG-004 FIX: In individual_parallel mode, filter insights by thread to ensure isolation
+    // In shared modes (collaborative, group_reporter, consultant), show all insights
     let insightRows;
     try {
-      // Always fetch all insights for the session to ensure visibility across threads
-      // This is important because insights might be created in individual threads
-      // but need to be visible when viewing from a shared thread or different user context
-      insightRows = await fetchInsightsForSession(dataClient, askSessionId);
-      
-      console.log('📊 GET /api/ask/[key]: Fetched insights for session:', {
-        totalInsights: insightRows.length,
-        threadId: conversationThread?.id ?? null,
-        isShared: conversationThread?.is_shared ?? null,
-        insightsByThread: insightRows.reduce((acc, insight) => {
-          const threadId = (insight as any).conversation_thread_id ?? 'no-thread';
-          acc[threadId] = (acc[threadId] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>),
-      });
-      
-      // If we have a specific thread and it's not shared, we could filter by thread
-      // But for now, we show all insights to ensure visibility
-      // TODO: Consider adding a query parameter to filter by thread if needed
+      if (!shouldUseSharedThread(askConfig) && conversationThread) {
+        // Individual_parallel mode: strict isolation - only insights from this user's thread
+        const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
+          dataClient,
+          conversationThread.id
+        );
+
+        if (threadInsightsError) {
+          if (isPermissionDenied(threadInsightsError)) {
+            return permissionDeniedResponse();
+          }
+          throw threadInsightsError;
+        }
+
+        insightRows = threadInsights;
+        console.log(`🔒 GET /api/ask/[key]: Individual thread mode - showing ${insightRows.length} insights from thread ${conversationThread.id}`);
+      } else {
+        // Shared thread mode: show all insights for the session for visibility
+        insightRows = await fetchInsightsForSession(dataClient, askSessionId);
+
+        console.log('📊 GET /api/ask/[key]: Fetched insights for session:', {
+          totalInsights: insightRows.length,
+          threadId: conversationThread?.id ?? null,
+          isShared: conversationThread?.is_shared ?? null,
+          insightsByThread: insightRows.reduce((acc, insight) => {
+            const threadId = (insight as any).conversation_thread_id ?? 'no-thread';
+            acc[threadId] = (acc[threadId] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>),
+        });
+      }
     } catch (error) {
       if (isPermissionDenied((error as PostgrestError) ?? null)) {
         return permissionDeniedResponse();
@@ -685,12 +696,23 @@ export async function GET(
       throw error;
     }
 
+    // BUG-031 FIX: Only override conversationThreadId in shared modes
+    // In individual_parallel mode, preserve the original thread ID to maintain isolation
     const insights: Insight[] = insightRows.map((row) => {
       const insight = mapInsightRowToInsight(row);
-      return {
-        ...insight,
-        conversationThreadId: conversationThread?.id ?? null,
-      };
+      if (shouldUseSharedThread(askConfig)) {
+        // In shared modes, use the current thread ID for consistency
+        return {
+          ...insight,
+          conversationThreadId: conversationThread?.id ?? null,
+        };
+      } else {
+        // In individual_parallel mode, preserve the original thread ID
+        return {
+          ...insight,
+          conversationThreadId: (row as any).conversation_thread_id ?? insight.conversationThreadId ?? null,
+        };
+      }
     });
 
     console.log('📊 GET /api/ask/[key]: Returning insights:', {
@@ -788,7 +810,17 @@ export async function POST(
       }, { status: 400 });
     }
 
-    const body = await request.json();
+    // BUG-001 FIX: Wrap JSON parsing in try-catch to handle malformed requests
+    let body;
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      console.error('POST /api/ask/[key]: Invalid JSON in request body:', parseError);
+      return NextResponse.json<ApiResponse>({
+        success: false,
+        error: 'Invalid JSON in request body'
+      }, { status: 400 });
+    }
 
     if (!body?.content) {
       return NextResponse.json<ApiResponse>({

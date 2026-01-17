@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getLastUserMessageThread } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getLastUserMessageThread, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { callModelProviderStream } from '@/lib/ai/providers';
 import { createAgentLog, markAgentLogProcessing, completeAgentLog, failAgentLog, createStreamingDebugLogger, buildStreamingResponsePayload } from '@/lib/ai/logs';
@@ -261,6 +261,8 @@ export async function POST(
     }
 
     // Get messages for the thread (or all messages if no thread for backward compatibility)
+    // BUG-005 FIX: In individual_parallel mode, ONLY show messages from the user's thread
+    // Do NOT include legacy messages without thread_id as they may belong to other participants
     let messageRows: MessageRow[] = [];
     if (conversationThread) {
       const { messages: threadMessages, error: threadMessagesError } = await getMessagesForThread(
@@ -275,18 +277,25 @@ export async function POST(
         throw threadMessagesError;
       }
 
-      // Also get messages without conversation_thread_id for backward compatibility via RPC wrapper
-      // This ensures messages created before thread creation are still visible
-      const msgAdmin = await getAdminClient();
-      const messagesWithoutThread = await fetchMessagesWithoutThread(msgAdmin, askRow.id);
-
-      // Combine thread messages with messages without thread
       const threadMessagesList = (threadMessages ?? []) as MessageRow[];
-      messageRows = [...threadMessagesList, ...messagesWithoutThread].sort((a, b) => {
-        const timeA = new Date(a.created_at ?? new Date().toISOString()).getTime();
-        const timeB = new Date(b.created_at ?? new Date().toISOString()).getTime();
-        return timeA - timeB;
-      });
+
+      // BUG-005 FIX: Only include messages without thread_id in shared modes
+      // In individual_parallel mode, strict isolation means no legacy messages
+      if (shouldUseSharedThread(askConfig)) {
+        // Shared mode: also include messages without thread_id for backward compatibility
+        const msgAdmin = await getAdminClient();
+        const messagesWithoutThread = await fetchMessagesWithoutThread(msgAdmin, askRow.id);
+
+        messageRows = [...threadMessagesList, ...messagesWithoutThread].sort((a, b) => {
+          const timeA = new Date(a.created_at ?? new Date().toISOString()).getTime();
+          const timeB = new Date(b.created_at ?? new Date().toISOString()).getTime();
+          return timeA - timeB;
+        });
+      } else {
+        // Individual_parallel mode: strict isolation - only messages from this thread
+        messageRows = threadMessagesList;
+        console.log(`🔒 [stream] Individual thread mode - showing ${messageRows.length} messages from thread ${conversationThread.id}`);
+      }
     } else {
       // Fallback: get all messages for backward compatibility via RPC wrapper
       const fallbackMsgAdmin = await getAdminClient();

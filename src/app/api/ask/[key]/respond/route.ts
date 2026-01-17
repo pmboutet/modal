@@ -691,22 +691,40 @@ async function persistInsights(
     return value.replace(/\s+/g, ' ').trim().toLowerCase();
   };
 
+  // BUG-013 FIX: Content/summary deduplication must be scoped to the same thread
+  // Build composite keys that include thread context to prevent cross-thread matches
+  const buildThreadScopedKey = (baseKey: string, threadId: string | null | undefined): string => {
+    // Include thread ID in the key to ensure deduplication is thread-scoped
+    // Use 'no-thread' as a marker for insights without thread assignment
+    const threadMarker = threadId ?? 'no-thread';
+    return `${threadMarker}::${baseKey}`;
+  };
+
   const contentIndex = new Map<string, InsightRow>();
   const summaryIndex = new Map<string, InsightRow>();
+
   const indexRow = (row: InsightRow | null | undefined) => {
     if (!row) return;
+    const rowThreadId = (row as any).conversation_thread_id ?? null;
     const contentKey = normaliseKey(row.content ?? null);
-    if (contentKey) contentIndex.set(contentKey, row);
+    if (contentKey) {
+      // BUG-013 FIX: Use thread-scoped key for deduplication
+      contentIndex.set(buildThreadScopedKey(contentKey, rowThreadId), row);
+    }
     const summaryKey = normaliseKey(row.summary ?? null);
-    if (summaryKey) summaryIndex.set(summaryKey, row);
+    if (summaryKey) {
+      // BUG-013 FIX: Use thread-scoped key for deduplication
+      summaryIndex.set(buildThreadScopedKey(summaryKey, rowThreadId), row);
+    }
   };
 
   const removeFromIndex = (row: InsightRow | null | undefined) => {
     if (!row) return;
+    const rowThreadId = (row as any).conversation_thread_id ?? null;
     const contentKey = normaliseKey(row.content ?? null);
-    if (contentKey) contentIndex.delete(contentKey);
+    if (contentKey) contentIndex.delete(buildThreadScopedKey(contentKey, rowThreadId));
     const summaryKey = normaliseKey(row.summary ?? null);
-    if (summaryKey) summaryIndex.delete(summaryKey);
+    if (summaryKey) summaryIndex.delete(buildThreadScopedKey(summaryKey, rowThreadId));
   };
 
   Object.values(existingMap).forEach(indexRow);
@@ -715,7 +733,13 @@ async function persistInsights(
 
   for (const incoming of incomingInsights) {
     const nowIso = new Date().toISOString();
-    const dedupeKey = [normaliseKey(incoming.content), normaliseKey(incoming.summary), incoming.type ?? ''].join('|');
+    // BUG-013 FIX: Include thread ID in the deduplication key to prevent cross-thread matches
+    const dedupeKey = [
+      conversationThreadId ?? 'no-thread',
+      normaliseKey(incoming.content),
+      normaliseKey(incoming.summary),
+      incoming.type ?? '',
+    ].join('|');
 
     if (dedupeKey.trim().length > 0) {
       if (processedKeys.has(dedupeKey)) {
@@ -730,9 +754,10 @@ async function persistInsights(
       existing = existingMap[incoming.duplicateOfId];
     }
 
+    // BUG-013 FIX: Use thread-scoped keys for content/summary matching
     if (!existing) {
-      const contentMatch = contentIndex.get(normaliseKey(incoming.content));
-      const summaryMatch = summaryIndex.get(normaliseKey(incoming.summary));
+      const contentMatch = contentIndex.get(buildThreadScopedKey(normaliseKey(incoming.content), conversationThreadId));
+      const summaryMatch = summaryIndex.get(buildThreadScopedKey(normaliseKey(incoming.summary), conversationThreadId));
       existing = contentMatch ?? summaryMatch ?? undefined;
     }
 
@@ -1585,28 +1610,47 @@ export async function POST(
     });
 
     // Get insights for the thread (or all insights if no thread for backward compatibility)
+    // BUG-012 FIX: In individual_parallel mode without a thread, return empty insights
+    // to prevent cross-thread data exposure
     let insightRows: InsightRow[];
     if (conversationThread) {
       const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
         supabase,
         conversationThread.id
       );
-      
+
       if (threadInsightsError) {
         throw threadInsightsError;
       }
-      
+
       // Convert to InsightRow format (simplified - we'll need to hydrate properly)
       insightRows = threadInsights as InsightRow[];
+    } else if (!shouldUseSharedThread(askConfig)) {
+      // BUG-012 FIX: Individual mode requires a thread - don't fall back to session-wide insights
+      console.warn('[respond] Individual parallel mode without thread - returning empty insights for isolation');
+      insightRows = [];
     } else {
-      // Fallback: get all insights for backward compatibility
+      // Shared mode fallback: get all insights for backward compatibility
       insightRows = await fetchInsightsForSession(supabase, askRow.id);
     }
     
-    const existingInsights = insightRows.map(mapInsightRowToInsight).map(insight => ({
-      ...insight,
-      conversationThreadId: conversationThread?.id ?? null,
-    }));
+    // BUG-031 FIX: Only override conversationThreadId in shared modes
+    // In individual_parallel mode, preserve the original thread ID to maintain isolation
+    const existingInsights = insightRows.map(mapInsightRowToInsight).map(insight => {
+      if (shouldUseSharedThread(askConfig)) {
+        // In shared modes, use the current thread ID for consistency
+        return {
+          ...insight,
+          conversationThreadId: conversationThread?.id ?? null,
+        };
+      } else {
+        // In individual_parallel mode, preserve the original thread ID
+        return {
+          ...insight,
+          conversationThreadId: (insight as any).conversationThreadId ?? null,
+        };
+      }
+    });
 
     // Fetch insight types for prompt
     const insightTypes = await fetchInsightTypesForPrompt(supabase);
@@ -1695,6 +1739,11 @@ export async function POST(
           timestamp: m.timestamp,
         }));
 
+        // BUG-028 FIX: In consultant mode, set latestAiResponse to empty string since
+        // there's no AI response being generated - this prevents any potential leakage
+        // of previous AI responses in the detection variables
+        const latestAiResponseForDetection = isConsultantMode ? '' : (lastAiMessage?.content ?? '');
+
         const detectionVariables = buildConversationAgentVariables({
           ask: askRow,
           project: projectData,
@@ -1706,7 +1755,7 @@ export async function POST(
           elapsedActiveSeconds,
           stepElapsedActiveSeconds,
           insights: existingInsights,
-          latestAiResponse: lastAiMessage?.content ?? '',
+          latestAiResponse: latestAiResponseForDetection,
           insightTypes,
         });
 
@@ -1745,7 +1794,9 @@ export async function POST(
     if (!insightsOnly) {
       // If this is a voice-generated message, just persist it without calling executeAgent
       // The voice agent already handled the response via executeAgent
-      if (isVoiceMessage && messageContent) {
+      // BUG-011 FIX: Skip voice message handling in consultant mode - AI doesn't respond in that mode
+      // so there's no AI message to persist
+      if (isVoiceMessage && messageContent && !isConsultantMode) {
         // Find the last user message to link as parent
         const lastUserMessage = [...messages].reverse().find(msg => msg.senderType === 'user');
         const parentMessageId = lastUserMessage?.id ?? null;
@@ -1819,6 +1870,16 @@ export async function POST(
                   const stepIdToComplete = detectedStepId === 'CURRENT'
                     ? currentStepIdentifier
                     : detectedStepId;
+
+                  // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
+                  if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
+                    console.warn('[respond] ⚠️ Voice STEP_COMPLETE marker detected but step ID mismatch:', {
+                      detectedStepId,
+                      currentStepIdentifier,
+                      planId: plan.id,
+                      threadId: conversationThread.id,
+                    });
+                  }
 
                   if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
                     // Complete the step (summary will be generated asynchronously)
@@ -1955,6 +2016,16 @@ export async function POST(
                   ? currentStepIdentifier
                   : detectedStepId;
 
+                // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
+                if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
+                  console.warn('[respond] ⚠️ STEP_COMPLETE marker detected but step ID mismatch:', {
+                    detectedStepId,
+                    currentStepIdentifier,
+                    planId: plan.id,
+                    threadId: conversationThread.id,
+                  });
+                }
+
                 if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
                   // Complete the step (summary will be generated asynchronously)
                   // Use admin client for RLS bypass
@@ -1979,7 +2050,9 @@ export async function POST(
     } else {
       const latestAiMessage = [...messages].reverse().find(msg => msg.senderType === 'ai');
       if (latestAiMessage) {
-        latestAiResponse = latestAiMessage.content;
+        // BUG-014 FIX: In consultant mode, use empty string since AI doesn't generate responses
+        // This prevents stale AI responses from being used in insight detection
+        latestAiResponse = isConsultantMode ? '' : latestAiMessage.content;
         detectionMessageId = latestAiMessage.id;
       }
     }

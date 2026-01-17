@@ -127,18 +127,23 @@ export async function POST(
     }
 
     // Get the participant's user_id if we have a participantId
+    // BUG-013 FIX: Validate that participant belongs to THIS ask_session
     let userId: string | null = null;
     if (validatedBody.participantId) {
       const { data: participant, error: participantError } = await adminClient
         .from('ask_participants')
         .select('user_id')
         .eq('id', validatedBody.participantId)
+        .eq('ask_session_id', askSession.id) // BUG-013 FIX: Ensure participant belongs to this session
         .maybeSingle();
 
       if (participantError) {
         console.error('[SPEAKER-ASSIGNMENT] Error fetching participant:', participantError);
       } else if (participant) {
         userId = participant.user_id;
+      } else {
+        // Participant not found or doesn't belong to this session
+        console.warn('[SPEAKER-ASSIGNMENT] Participant not found or does not belong to this session:', validatedBody.participantId);
       }
     }
 

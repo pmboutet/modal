@@ -280,6 +280,47 @@ export async function getOrCreateConversationThread(
     .single<ConversationThread>();
 
   if (createError) {
+    // BUG-003 FIX: Handle race condition - if duplicate key error (23505),
+    // another concurrent request created the thread. Retry the fetch.
+    const isDuplicateKeyError = createError.code === '23505' ||
+      (createError.message?.toLowerCase().includes('duplicate') ||
+       createError.message?.toLowerCase().includes('unique'));
+
+    if (isDuplicateKeyError) {
+      console.log('[getOrCreateConversationThread] Duplicate key error detected - fetching existing thread created by concurrent request');
+
+      // Rebuild query based on thread type
+      let retryQuery = supabase
+        .from('conversation_threads')
+        .select('id, ask_session_id, user_id, is_shared, created_at')
+        .eq('ask_session_id', askSessionId);
+
+      if (useShared) {
+        retryQuery = retryQuery.is('user_id', null).eq('is_shared', true);
+      } else {
+        retryQuery = retryQuery.eq('user_id', threadUserId).eq('is_shared', false);
+      }
+
+      const { data: existingThreadsRetry, error: retryError } = await retryQuery
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      const existingThreadRetry = existingThreadsRetry?.[0] as ConversationThread | undefined;
+
+      if (retryError) {
+        console.error('[getOrCreateConversationThread] Retry fetch error:', retryError);
+        return { thread: null, error: retryError };
+      }
+
+      if (existingThreadRetry) {
+        console.log('[getOrCreateConversationThread] Successfully fetched thread after race condition:', existingThreadRetry.id);
+        return { thread: existingThreadRetry, error: null };
+      }
+
+      // If still no thread found after retry, return the original error
+      console.error('[getOrCreateConversationThread] Thread not found after retry');
+    }
+
     console.error('[getOrCreateConversationThread] Create error:', {
       code: createError.code,
       message: createError.message,

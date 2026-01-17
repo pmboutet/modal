@@ -13,7 +13,6 @@ An AI-powered insight collection platform. Users create "ASK sessions" where an 
 | I want to... | Read |
 |--------------|------|
 | Understand the database schema | [architecture/database-schema.md](architecture/database-schema.md) |
-| Debug authentication issues | [troubleshooting/auth-loop-issues.md](troubleshooting/auth-loop-issues.md) |
 | Configure an AI agent | [ai-system/agent-configuration.md](ai-system/agent-configuration.md) |
 | Understand RLS permissions | [security/rls-guide.md](security/rls-guide.md) |
 | Understand voice mode architecture | [features/voice-mode-architecture.md](features/voice-mode-architecture.md) |
@@ -77,6 +76,7 @@ An AI-powered insight collection platform. Users create "ASK sessions" where an 
 | [voice-mode-architecture.md](features/voice-mode-architecture.md) | **Voice mode** - real-time speech conversation architecture |
 | [consultant-mode.md](features/consultant-mode.md) | Consultant mode for AI-assisted interviews |
 | [step-completion-system.md](features/step-completion-system.md) | Step completion system for guided conversations |
+| [conversation-threads.md](features/conversation-threads.md) | Conversation threads and session isolation |
 | [voice-elevenlabs.md](features/voice-elevenlabs.md) | ElevenLabs voice synthesis setup |
 | [magic-link.md](features/magic-link.md) | Magic link authentication |
 | [handlebars-templates.md](features/handlebars-templates.md) | Handlebars templating guide |
@@ -86,10 +86,7 @@ An AI-powered insight collection platform. Users create "ASK sessions" where an 
 
 | File | Description |
 |------|-------------|
-| [auth-loop-issues.md](troubleshooting/auth-loop-issues.md) | Common auth loop problems |
-| [performance-profile-fetch.md](troubleshooting/performance-profile-fetch.md) | Profile fetching optimization |
-| [performance-session-token.md](troubleshooting/performance-session-token.md) | Session token performance |
-| [production-fixes.md](troubleshooting/production-fixes.md) | Production deployment fixes |
+| [conversation-system-bugs.md](troubleshooting/conversation-system-bugs.md) | **Bug audit** - Known bugs in conversation system (text/voice/consultant modes) |
 
 ### Guides
 

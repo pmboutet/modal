@@ -4,6 +4,7 @@ import { ApiResponse, Message } from '@/types';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
+import { shouldUseSharedThread } from '@/lib/asks';
 
 function isPermissionDenied(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
@@ -162,10 +163,10 @@ export async function PATCH(
       dataClient = await getAdminClient();
     }
 
-    // Get the ASK session
+    // Get the ASK session (include conversation_mode for thread isolation check)
     const { data: askRow, error: askError } = await dataClient
       .from('ask_sessions')
-      .select('id, ask_key')
+      .select('id, ask_key, conversation_mode')
       .eq('ask_key', key)
       .maybeSingle();
 
@@ -252,26 +253,37 @@ export async function PATCH(
 
     // Delete subsequent messages if requested
     if (deleteSubsequent) {
-      // Build the delete query based on conversation thread
-      let deleteQuery = dataClient
-        .from('messages')
-        .delete()
-        .eq('ask_session_id', askRow.id)
-        .gt('created_at', messageRow.created_at);
+      // BUG-005 FIX: Check thread isolation mode before deleting
+      const askConfig = { conversation_mode: askRow.conversation_mode ?? null };
+      const isIndividualMode = !shouldUseSharedThread(askConfig);
 
-      // If message has a conversation thread, only delete within that thread
-      if (messageRow.conversation_thread_id) {
-        deleteQuery = deleteQuery.eq('conversation_thread_id', messageRow.conversation_thread_id);
-      }
-
-      const { data: deletedRows, error: deleteError } = await deleteQuery.select('id');
-
-      if (deleteError) {
-        console.error('Error deleting subsequent messages:', deleteError);
-        // Don't fail the whole request, just log the error
+      // In individual_parallel mode, REQUIRE thread_id to prevent cross-thread deletion
+      if (isIndividualMode && !messageRow.conversation_thread_id) {
+        console.warn('BUG-005: Blocking delete in individual_parallel mode without thread_id to prevent cross-thread deletion');
+        // Don't delete - this would affect other participants' messages
       } else {
-        deletedCount = deletedRows?.length ?? 0;
-        console.log(`Deleted ${deletedCount} subsequent messages`);
+        // Build the delete query based on conversation thread
+        let deleteQuery = dataClient
+          .from('messages')
+          .delete()
+          .eq('ask_session_id', askRow.id)
+          .gt('created_at', messageRow.created_at);
+
+        // If message has a conversation thread, only delete within that thread
+        // In individual mode, this is REQUIRED (checked above)
+        if (messageRow.conversation_thread_id) {
+          deleteQuery = deleteQuery.eq('conversation_thread_id', messageRow.conversation_thread_id);
+        }
+
+        const { data: deletedRows, error: deleteError } = await deleteQuery.select('id');
+
+        if (deleteError) {
+          console.error('Error deleting subsequent messages:', deleteError);
+          // Don't fail the whole request, just log the error
+        } else {
+          deletedCount = deletedRows?.length ?? 0;
+          console.log(`Deleted ${deletedCount} subsequent messages`);
+        }
       }
     }
 

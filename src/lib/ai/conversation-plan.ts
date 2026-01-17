@@ -422,6 +422,26 @@ export async function completeStep(
     return null;
   }
 
+  // BUG-025 FIX: Validate that step is actually pending or active, not already completed
+  if (completedStep.status === 'completed') {
+    console.warn('[completeStep] ⚠️ Step already completed, skipping:', {
+      stepIdentifier: completedStepIdentifier,
+      currentStatus: completedStep.status,
+      planId: plan.id,
+    });
+    // Return the current plan state instead of null (step is already done)
+    return plan;
+  }
+
+  if (completedStep.status === 'skipped') {
+    console.warn('[completeStep] ⚠️ Cannot complete skipped step:', {
+      stepIdentifier: completedStepIdentifier,
+      currentStatus: completedStep.status,
+      planId: plan.id,
+    });
+    return null;
+  }
+
   // Mark the step as completed via RPC
   const { error: completeError } = await supabase.rpc('complete_plan_step', {
     p_step_id: completedStep.id,
@@ -523,9 +543,17 @@ export async function completeStep(
 
       console.log('✅ [completeStep] Summary generated successfully for step:', stepIdToSummarize);
     } catch (error) {
-      // Summary generation is REQUIRED - log and throw error
-      console.error('❌ [completeStep] CRITICAL: Failed to generate step summary:', error);
-      throw new Error(`Step summary generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Summary generation is REQUIRED - log error with detailed context
+      // Note: The step is already marked as completed in the database at this point.
+      // The error is thrown to notify the caller, but the step completion itself succeeded.
+      console.error('❌ [completeStep] CRITICAL: Failed to generate step summary:', {
+        stepId: stepIdToSummarize,
+        askSessionId,
+        conversationThreadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Rethrow with context for proper error propagation to the client
+      throw new Error(`Step ${completedStepIdentifier} completed but summary generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 

@@ -22,9 +22,17 @@ export class SpeechmaticsWebSocket {
     private auth: SpeechmaticsAuth,
     private onConnectionCallback: SpeechmaticsConnectionCallback | null,
     private onErrorCallback: SpeechmaticsErrorCallback | null,
-    handleWebSocketMessage: (data: any) => void
+    private readonly initialMessageHandler: (data: any) => void
   ) {
-    this.messageHandler = handleWebSocketMessage;
+    this.messageHandler = initialMessageHandler;
+  }
+
+  /**
+   * Update the message handler - called when reconnecting to restore the handler
+   * BUG-006 FIX: Provides a way to reinitialize the handler after disconnect
+   */
+  setMessageHandler(handler: (data: any) => void): void {
+    this.messageHandler = handler;
   }
 
   async connect(
@@ -35,16 +43,22 @@ export class SpeechmaticsWebSocket {
     if (SpeechmaticsWebSocket.globalDisconnectPromise) {
       await SpeechmaticsWebSocket.globalDisconnectPromise;
     }
-    
+
     // Wait for any instance-specific disconnect to complete
     if (disconnectPromise) {
       await disconnectPromise;
     }
-    
+
     // If there's an existing connection, disconnect it first
     if (this.ws) {
       console.log('[Speechmatics] 🔌 Disconnecting existing WebSocket before reconnecting...');
       await this.disconnect(false);
+    }
+
+    // BUG-006 FIX: Restore message handler if it was cleared during disconnect
+    // This ensures proper message routing after reconnect
+    if (!this.messageHandler && this.initialMessageHandler) {
+      this.messageHandler = this.initialMessageHandler;
     }
 
     const lastDisconnect = Math.max(
@@ -143,6 +157,14 @@ export class SpeechmaticsWebSocket {
           // Build diarization config if enabled (default: "speaker" for voice identification)
           const diarizationMode = config.sttDiarization ?? "speaker";
           const diarizationConfig: any = {};
+
+          // BUG-027 FIX: Validate sttDiarization in consultant mode
+          // Consultant mode requires speaker diarization to distinguish between participants
+          if (config.disableLLM && diarizationMode === "none") {
+            console.warn('[Speechmatics] ⚠️ WARNING: sttDiarization is set to "none" in consultant mode (disableLLM=true). ' +
+              'Speaker diarization is recommended in consultant mode to distinguish between multiple speakers. ' +
+              'Consider setting sttDiarization to "speaker" for proper speaker identification.');
+          }
 
           if (diarizationMode !== "none") {
             diarizationConfig.diarization = diarizationMode;
@@ -472,6 +494,10 @@ export class SpeechmaticsWebSocket {
         console.warn('[Speechmatics] ⚠️ Error removing WebSocket listeners:', error);
       }
     }
+
+    // Step 4c: Clear the message handler reference to prevent stale handlers on reconnect
+    // BUG-006 FIX: Ensure message handler is cleared to prevent memory leaks and routing errors
+    this.messageHandler = null;
 
     // Step 4b: Clean up reference
     if (this.ws === ws) {

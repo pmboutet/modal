@@ -47,7 +47,9 @@ export class SpeechmaticsAudio {
   // SIMPLIFIED: Immediate barge-in, no complex validation
   private bargeInPendingValidation: boolean = false;
   private bargeInValidationTimer: NodeJS.Timeout | null = null;
-  private readonly BARGE_IN_VALIDATION_TIMEOUT_MS = 300; // Reduced to 300ms for faster response
+  // BUG-018 FIX: Increased timeout from 300ms to 600ms to allow partial transcripts
+  // to arrive before canceling barge-in (300ms was too short for reliable detection)
+  private readonly BARGE_IN_VALIDATION_TIMEOUT_MS = 600;
   private currentAssistantSpeech: string = ''; // Track what assistant is currently saying (for echo detection)
 
   // Start-of-turn detection (AI-powered validation)
@@ -80,13 +82,25 @@ export class SpeechmaticsAudio {
   private spectralEnergyHistory: number[] = []; // History for spectral analysis
   private readonly SPECTRAL_HISTORY_SIZE = 5;
 
+  /**
+   * Echo detection details passed to the onEchoDetected callback
+   * BUG-008 FIX: Provide context about why echo was detected
+   */
+  public static lastEchoDetails: {
+    transcript: string;
+    matchType: 'contained' | 'fuzzy-words' | 'speaker-mismatch' | 'ai-detected' | 'none';
+    similarity: number;
+    detectedAt: number;
+  } | null = null;
+
   constructor(
     private audioDedupe: AudioChunkDedupe,
     private onAudioChunk: (chunk: Int16Array) => void,
     private ws: WebSocket | null,
     private onBargeIn?: () => void,
     private onAudioPlaybackEnd?: () => void,
-    private onEchoDetected?: () => void // Called when transcript is detected as echo and should be discarded
+    // BUG-008 FIX: Updated callback signature to include echo details
+    private onEchoDetected?: (details?: { transcript: string; matchType: string; similarity: number }) => void
   ) {
     this.instanceId = ++SpeechmaticsAudio.instanceCounter;
     this.isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox');
@@ -883,8 +897,16 @@ export class SpeechmaticsAudio {
       const echoCheckResult = this.detectLocalEcho(cleanedTranscript, this.currentAssistantSpeech, suspiciousSpeaker);
       if (echoCheckResult.isEcho) {
         this.cancelBargeInValidation();
+        // BUG-008 FIX: Store and pass echo details for UI feedback
+        const echoDetails = {
+          transcript: cleanedTranscript,
+          matchType: echoCheckResult.matchType,
+          similarity: echoCheckResult.similarity,
+          detectedAt: Date.now(),
+        };
+        SpeechmaticsAudio.lastEchoDetails = echoDetails;
         // CRITICAL: Notify parent to discard the pending transcript (it's echo, not user speech)
-        this.onEchoDetected?.();
+        this.onEchoDetected?.(echoDetails);
         return false;
       }
     }
@@ -906,8 +928,16 @@ export class SpeechmaticsAudio {
 
         if (result.isEcho) {
           this.cancelBargeInValidation();
+          // BUG-008 FIX: Store and pass echo details for UI feedback (AI-detected)
+          const echoDetails = {
+            transcript: cleanedTranscript,
+            matchType: 'ai-detected' as const,
+            similarity: 1.0, // AI determined it's echo
+            detectedAt: Date.now(),
+          };
+          SpeechmaticsAudio.lastEchoDetails = echoDetails;
           // CRITICAL: Notify parent to discard the pending transcript (it's echo, not user speech)
-          this.onEchoDetected?.();
+          this.onEchoDetected?.(echoDetails);
           return false;
         }
 
@@ -1105,8 +1135,19 @@ export class SpeechmaticsAudio {
   /**
    * Update what the assistant is currently saying (for echo detection)
    * Called by parent agent when assistant starts speaking
+   *
+   * BUG-021 FIX: Clear any pending clear timer when setting new speech
+   * This prevents echo detection from being triggered by stale speech content
    */
   setCurrentAssistantSpeech(text: string): void {
+    // BUG-021 FIX: Cancel any pending clear timer when starting new TTS
+    // This ensures we don't accidentally clear the new speech prematurely
+    if (this.clearAssistantSpeechTimer) {
+      clearTimeout(this.clearAssistantSpeechTimer);
+      this.clearAssistantSpeechTimer = null;
+    }
+
+    // Set the new assistant speech for echo detection
     this.currentAssistantSpeech = text;
   }
 }

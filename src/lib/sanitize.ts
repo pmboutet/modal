@@ -13,11 +13,16 @@ export function sanitizeOptional(value?: string | null): string | null {
 
 /**
  * Removes STEP_COMPLETE markers from message content for display.
- * Handles all formats including markdown (e.g., **STEP_COMPLETE:**, STEP_COMPLETE: step_id)
+ * Handles all formats including markdown (e.g., STEP_COMPLETE:, STEP_COMPLETE: step_id)
+ *
+ * BUG-039 FIX: The regex now matches only the marker and step ID, not trailing content.
+ * It captures: optional markdown + STEP_COMPLETE: + optional space + optional step_id
  */
 export function cleanStepCompleteMarker(content: string): string {
+  // Match STEP_COMPLETE with optional step ID (captures only the step ID, not trailing content)
+  // Pattern: optional markdown + STEP_COMPLETE: + optional space + optional step_id (word chars only) + optional markdown
   return content
-    .replace(/(\*{1,2}|_{1,2})?(STEP_COMPLETE:?\s*\w*)(\*{1,2}|_{1,2})?/gi, '')
+    .replace(/(\*{1,2}|_{1,2})?(STEP_COMPLETE:?\s*)(\w+)?(\*{1,2}|_{1,2})?/gi, '')
     .trim();
 }
 
