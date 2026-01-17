@@ -17,6 +17,10 @@ export class SpeechmaticsWebSocket {
   public static lastQuotaErrorTimestamp: number = 0; // Track last quota error to enforce longer delay (public for access from speechmatics.ts)
   private static globalDisconnectPromise: Promise<void> | null = null;
   private messageHandler: ((data: any) => void) | null = null;
+  // BUG-018 FIX: Track the most recent handler set via setMessageHandler()
+  // This is separate from messageHandler (which can be nulled on disconnect) to preserve
+  // dynamic handler changes across reconnects
+  private currentMessageHandler: ((data: any) => void) | null = null;
 
   constructor(
     private auth: SpeechmaticsAuth,
@@ -30,9 +34,13 @@ export class SpeechmaticsWebSocket {
   /**
    * Update the message handler - called when reconnecting to restore the handler
    * BUG-006 FIX: Provides a way to reinitialize the handler after disconnect
+   * BUG-018 FIX: Also tracks the handler in currentMessageHandler to preserve
+   * dynamic changes across reconnects
    */
   setMessageHandler(handler: (data: any) => void): void {
     this.messageHandler = handler;
+    // BUG-018 FIX: Store in currentMessageHandler so it survives disconnect/reconnect cycles
+    this.currentMessageHandler = handler;
   }
 
   async connect(
@@ -55,10 +63,13 @@ export class SpeechmaticsWebSocket {
       await this.disconnect(false);
     }
 
-    // BUG-006 FIX: Restore message handler if it was cleared during disconnect
-    // This ensures proper message routing after reconnect
-    if (!this.messageHandler && this.initialMessageHandler) {
-      this.messageHandler = this.initialMessageHandler;
+    // BUG-006 FIX + BUG-018 FIX: Restore message handler if it was cleared during disconnect
+    // BUG-018 FIX: Use currentMessageHandler (set via setMessageHandler) if available,
+    // otherwise fall back to initialMessageHandler. This preserves dynamic handler changes.
+    if (!this.messageHandler) {
+      // currentMessageHandler tracks the most recent handler set via setMessageHandler()
+      // This ensures dynamic handler changes are preserved across reconnects
+      this.messageHandler = this.currentMessageHandler || this.initialMessageHandler;
     }
 
     const lastDisconnect = Math.max(
@@ -66,14 +77,21 @@ export class SpeechmaticsWebSocket {
       SpeechmaticsWebSocket.lastGlobalDisconnectTimestamp
     );
 
-    // Check if we need to wait due to a recent quota error
+    // BUG-017 FIX: Check if we need to wait due to a recent quota error
+    // Only enforce delay if the quota error was within the last 15 seconds
+    // This prevents stale quota errors from one instance blocking all future instances indefinitely
     const lastQuotaError = SpeechmaticsWebSocket.lastQuotaErrorTimestamp;
+    const QUOTA_ERROR_RELEVANCE_WINDOW_MS = 15000; // 15 seconds - after this, quota error is considered stale
     if (lastQuotaError) {
       const elapsedSinceQuotaError = Date.now() - lastQuotaError;
-      if (elapsedSinceQuotaError < this.QUOTA_ERROR_DELAY_MS) {
+      // BUG-017 FIX: Only enforce delay if within relevance window
+      if (elapsedSinceQuotaError < QUOTA_ERROR_RELEVANCE_WINDOW_MS && elapsedSinceQuotaError < this.QUOTA_ERROR_DELAY_MS) {
         const waitTime = this.QUOTA_ERROR_DELAY_MS - elapsedSinceQuotaError;
         console.log(`[Speechmatics] ⏳ Waiting ${Math.round(waitTime / 1000)}s after quota error before reconnecting...`);
         await this.delay(waitTime);
+      } else if (elapsedSinceQuotaError >= QUOTA_ERROR_RELEVANCE_WINDOW_MS) {
+        // BUG-017 FIX: Clear stale quota error timestamp so it doesn't affect future checks
+        SpeechmaticsWebSocket.lastQuotaErrorTimestamp = 0;
       }
     }
 

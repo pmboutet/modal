@@ -688,11 +688,15 @@ export class SpeechmaticsVoiceAgent {
           // Reset flag before recursive call (it will be set to true again in processUserMessage)
           this.isGeneratingResponse = false;
           this.generationStartedAt = 0;
-          // Use setTimeout to avoid deep recursion and allow event loop to process
-          setTimeout(() => {
-            this.processUserMessage(nextMessage.content).catch(err => {
+          // BUG-019 FIX: Use setTimeout with async/await and try-catch at callback level
+          // This ensures both synchronous and asynchronous errors are caught
+          setTimeout(async () => {
+            try {
+              await this.processUserMessage(nextMessage.content);
+            } catch (err) {
+              // BUG-019 FIX: Catch handles both sync and async errors
               console.error('[Speechmatics] Error processing queued message:', err);
-            });
+            }
           }, 100);
         } else {
           this.isGeneratingResponse = false;

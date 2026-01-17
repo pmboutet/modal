@@ -42,6 +42,9 @@ export class SpeechmaticsAudio {
   // Timer to clear currentAssistantSpeech after grace period
   // We keep the assistant speech text for echo detection even after audio stops
   private clearAssistantSpeechTimer: NodeJS.Timeout | null = null;
+  // BUG-016 FIX: Version token to detect stale reads during race conditions
+  // Incremented when new speech is set, checked before clearing to avoid race
+  private assistantSpeechVersion: number = 0;
 
   // Semantic barge-in detection state
   // SIMPLIFIED: Immediate barge-in, no complex validation
@@ -617,6 +620,10 @@ export class SpeechmaticsAudio {
   /**
    * Schedule clearing of currentAssistantSpeech after grace period
    * This keeps the text available for echo detection while residual echo may still be captured
+   *
+   * BUG-016 FIX: Use version token to prevent race condition where echo detection
+   * reads stale content just as the clearing timer fires. The timer captures the
+   * current version and only clears if it hasn't changed (no new speech started).
    */
   private scheduleClearAssistantSpeech(): void {
     // Clear any existing timer
@@ -624,9 +631,16 @@ export class SpeechmaticsAudio {
       clearTimeout(this.clearAssistantSpeechTimer);
     }
 
+    // BUG-016 FIX: Capture current version to detect if new speech starts before timer fires
+    const versionAtSchedule = this.assistantSpeechVersion;
+
     // Schedule clearing after grace period
     this.clearAssistantSpeechTimer = setTimeout(() => {
-      this.currentAssistantSpeech = '';
+      // BUG-016 FIX: Only clear if version hasn't changed (no new speech started)
+      // This prevents clearing content that was set by a newer setCurrentAssistantSpeech() call
+      if (this.assistantSpeechVersion === versionAtSchedule) {
+        this.currentAssistantSpeech = '';
+      }
       this.clearAssistantSpeechTimer = null;
     }, this.AUDIO_PLAYBACK_GRACE_PERIOD_MS);
   }
@@ -1076,9 +1090,26 @@ export class SpeechmaticsAudio {
     }
 
     try {
-      const arrayBuffer = audioData.buffer instanceof ArrayBuffer 
-        ? audioData.buffer 
-        : new Uint8Array(audioData).buffer;
+      // BUG-029 FIX: Avoid unnecessary memory copy when creating ArrayBuffer
+      // decodeAudioData() consumes the ArrayBuffer, so we need a dedicated copy.
+      // Using slice() creates a proper copy of just the data we need, avoiding
+      // the issue where new Uint8Array(audioData).buffer could reference the
+      // original buffer if it's already an ArrayBuffer view.
+      let arrayBuffer: ArrayBuffer;
+      if (audioData.byteOffset === 0 && audioData.byteLength === audioData.buffer.byteLength) {
+        // BUG-029 FIX: View spans entire buffer - can use buffer directly
+        // But we still need a copy since decodeAudioData detaches the buffer
+        // Note: slice() on ArrayBufferLike returns ArrayBuffer, cast needed for TypeScript
+        arrayBuffer = audioData.buffer.slice(0) as ArrayBuffer;
+      } else {
+        // BUG-029 FIX: View is a subset - use slice to copy only the relevant portion
+        // This is more memory-efficient than creating a full Uint8Array wrapper
+        // Note: slice() on ArrayBufferLike returns ArrayBuffer, cast needed for TypeScript
+        arrayBuffer = audioData.buffer.slice(
+          audioData.byteOffset,
+          audioData.byteOffset + audioData.byteLength
+        ) as ArrayBuffer;
+      }
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
       return audioBuffer;
     } catch (error) {
@@ -1138,8 +1169,15 @@ export class SpeechmaticsAudio {
    *
    * BUG-021 FIX: Clear any pending clear timer when setting new speech
    * This prevents echo detection from being triggered by stale speech content
+   *
+   * BUG-016 FIX: Increment version token to invalidate any pending clear timers
+   * This prevents race conditions where echo detection reads stale content
    */
   setCurrentAssistantSpeech(text: string): void {
+    // BUG-016 FIX: Increment version to invalidate any pending clear timer
+    // The timer checks this version before clearing, ensuring atomicity
+    this.assistantSpeechVersion++;
+
     // BUG-021 FIX: Cancel any pending clear timer when starting new TTS
     // This ensures we don't accidentally clear the new speech prematurely
     if (this.clearAssistantSpeechTimer) {

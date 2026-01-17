@@ -241,6 +241,9 @@ export function ChatComponent({
     });
   };
 
+  // BUG-015 FIX: Track file upload errors for user feedback
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+
   // Handle sending messages
   const handleSendMessage = async () => {
     if (!inputValue.trim() && selectedFiles.length === 0) return;
@@ -250,34 +253,62 @@ export function ChatComponent({
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Process files with proper async/await to avoid race conditions (BUG-002)
-    if (selectedFiles.length > 0) {
-      try {
-        const filePromises = selectedFiles.map(async (fileUpload) => {
-          try {
-            let content: string;
-            if (fileUpload.type === 'image') {
-              content = await readFileAsDataURL(fileUpload.file);
-            } else {
-              // Use proper base64 conversion for non-image files (BUG-034)
-              content = await readFileAsBase64(fileUpload.file);
-            }
-            onSendMessage(content, fileUpload.type, {
-              fileName: fileUpload.file.name,
-              fileSize: fileUpload.file.size,
-              mimeType: fileUpload.file.type,
-            });
-          } catch (error) {
-            console.error(`Error reading file ${fileUpload.file.name}:`, error);
-            // Notify user of file read failure
-            throw error;
-          }
-        });
+    // BUG-015 FIX: Clear previous error
+    setFileUploadError(null);
 
-        await Promise.all(filePromises);
-      } catch (error) {
-        console.error('Error processing files:', error);
-        // Allow text message to still be sent even if file processing failed
+    // BUG-015 FIX: Process files with Promise.allSettled to handle partial failures
+    // and report errors to user before sending the text message
+    if (selectedFiles.length > 0) {
+      const filePromises = selectedFiles.map(async (fileUpload) => {
+        let content: string;
+        if (fileUpload.type === 'image') {
+          content = await readFileAsDataURL(fileUpload.file);
+        } else {
+          // Use proper base64 conversion for non-image files (BUG-034)
+          content = await readFileAsBase64(fileUpload.file);
+        }
+        return {
+          content,
+          fileUpload,
+        };
+      });
+
+      // BUG-015 FIX: Use Promise.allSettled to process all files and track failures
+      const results = await Promise.allSettled(filePromises);
+
+      const failedFiles: string[] = [];
+      const successfulFiles: Array<{ content: string; fileUpload: FileUpload }> = [];
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          successfulFiles.push(result.value);
+        } else {
+          const fileName = selectedFiles[index]?.file.name || `File ${index + 1}`;
+          console.error(`Error reading file ${fileName}:`, result.reason);
+          failedFiles.push(fileName);
+        }
+      });
+
+      // BUG-015 FIX: Report errors to user if any files failed
+      if (failedFiles.length > 0) {
+        const errorMessage = failedFiles.length === 1
+          ? `Impossible de traiter le fichier: ${failedFiles[0]}`
+          : `Impossible de traiter ${failedFiles.length} fichiers: ${failedFiles.join(', ')}`;
+        setFileUploadError(errorMessage);
+
+        // If ALL files failed, don't send anything
+        if (successfulFiles.length === 0 && !inputValue.trim()) {
+          return;
+        }
+      }
+
+      // BUG-015 FIX: Only send successfully processed files
+      for (const { content, fileUpload } of successfulFiles) {
+        onSendMessage(content, fileUpload.type, {
+          fileName: fileUpload.file.name,
+          fileSize: fileUpload.file.size,
+          mimeType: fileUpload.file.type,
+        });
       }
     }
 
@@ -744,6 +775,20 @@ export function ChatComponent({
               {recordingError && (
                 <div className="mb-2 p-2 text-sm text-red-600 bg-red-50 rounded-md border border-red-200">
                   {recordingError}
+                </div>
+              )}
+
+              {/* BUG-015 FIX: File upload error display */}
+              {fileUploadError && (
+                <div className="mb-2 p-2 text-sm text-red-600 bg-red-50 rounded-md border border-red-200 flex items-center justify-between">
+                  <span>{fileUploadError}</span>
+                  <button
+                    onClick={() => setFileUploadError(null)}
+                    className="ml-2 text-red-500 hover:text-red-700"
+                    aria-label="Fermer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
               )}
 

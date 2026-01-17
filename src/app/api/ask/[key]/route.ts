@@ -24,6 +24,7 @@ import {
 } from '@/lib/conversation-context';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { loadFullAuthContext, buildParticipantName, type AskViewer } from '@/lib/ask-session-loader';
+import { sanitizeText } from '@/lib/sanitize';
 
 interface AskSessionRow {
   id: string;
@@ -236,12 +237,13 @@ export async function GET(
       const allowAutoReg = askRow.allow_auto_registration === true;
       const hasValidAuth = authContext.profileId !== null;
 
-      // If invite token was provided but invalid, reject
+      // BUG-030 FIX: Return 401 for authentication failures (invalid token), 403 for authorization failures
+      // If invite token was provided but invalid, reject with 401 (authentication failure)
       if (inviteToken && !authContext.participantId) {
         return NextResponse.json<ApiResponse>({
           success: false,
           error: "Ce lien d'invitation n'est pas valide ou n'est pas correctement configuré."
-        }, { status: 403 });
+        }, { status: 401 });
       }
 
       // Require authentication unless session is anonymous
@@ -1312,9 +1314,12 @@ export async function POST(
       }
     }
 
+    // BUG-027 FIX: Sanitize message content to prevent XSS attacks
+    const sanitizedContent = sanitizeText(body.content);
+
     const insertPayload = {
       ask_session_id: askRow.id,
-      content: body.content,
+      content: sanitizedContent,
       message_type: body.type ?? 'text',
       sender_type: senderType,
       metadata,

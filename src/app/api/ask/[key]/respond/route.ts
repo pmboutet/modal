@@ -734,11 +734,14 @@ async function persistInsights(
   for (const incoming of incomingInsights) {
     const nowIso = new Date().toISOString();
     // BUG-013 FIX: Include thread ID in the deduplication key to prevent cross-thread matches
+    // BUG-036 FIX: Include type FIRST in the deduplication key so that insights with
+    // identical content but different types (e.g., "idea" vs "question") are not treated
+    // as duplicates. Order: type -> thread -> content -> summary
     const dedupeKey = [
+      incoming.type ?? '',
       conversationThreadId ?? 'no-thread',
       normaliseKey(incoming.content),
       normaliseKey(incoming.summary),
-      incoming.type ?? '',
     ].join('|');
 
     if (dedupeKey.trim().length > 0) {
@@ -1163,23 +1166,24 @@ async function triggerInsightDetection(
       agentId: insightAgent.id,
     });
   } catch (error: unknown) {
-    // Handle race condition: if another request created the job between our check and insert,
-    // we'll get a duplicate key error. In this case, check again and return existing insights.
-    const isDuplicateKeyError = 
-      (error && typeof error === 'object' && 'code' in error && error.code === '23505') ||
-      (error instanceof Error && (
-        error.message.includes('unique constraint') ||
-        error.message.includes('duplicate key') ||
-        error.message.includes('ai_insight_jobs_active_session_idx')
-      ));
+    // BUG-023 FIX: Use PostgreSQL error code for robust duplicate detection
+    // PostgreSQL error code 23505 = unique_violation (covers all unique constraint errors)
+    // This is more reliable than string matching on error messages which can change
+    // or be localized in different PostgreSQL configurations
+    const pgErrorCode = error && typeof error === 'object' && 'code' in error
+      ? (error as { code: unknown }).code
+      : null;
+    const isDuplicateKeyError = pgErrorCode === '23505';
 
     if (isDuplicateKeyError) {
-      // Another request created the job, check again and return existing insights
+      // Another request created the job between our check and insert (race condition).
+      // Re-check for an active job and return existing insights if found.
       const retryActiveJob = await findActiveInsightJob(supabase, options.askSessionId);
       if (retryActiveJob) {
         return existingInsights.map(mapInsightRowToInsight);
       }
-      // If still no active job, something else is wrong - rethrow
+      // If still no active job after a 23505 error, the job may have completed
+      // or been cleaned up - allow this request to continue by rethrowing
     }
     throw error;
   }

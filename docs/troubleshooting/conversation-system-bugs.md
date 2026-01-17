@@ -2,7 +2,7 @@
 
 > **Generated**: 2026-01-17
 > **Last Updated**: 2026-01-17
-> **Status**: 14/35 bugs resolved (Critical + HIGH bugs fixed)
+> **Status**: 17/35 bugs resolved (Critical + HIGH + Security MEDIUM bugs fixed)
 
 ---
 
@@ -372,9 +372,23 @@ Network issues cause step completion to fail entirely with no retry mechanism.
 **Module:** Security
 **Severity:** MEDIUM
 **File:** `src/app/api/ask/[key]/messages/route.ts:86-100`
+**Status:** ✅ RESOLVED
 
 **Description:**
-Token validation doesn't check if the authenticated user has permission to fetch ALL messages in that thread.
+Token validation didn't check if the requested threadId belongs to the ask_session, allowing cross-session message access.
+
+**Resolution:** Added thread ownership validation before fetching messages:
+```typescript
+const { data: thread } = await dataClient
+  .from('conversation_threads')
+  .select('id, ask_session_id')
+  .eq('id', threadId)
+  .maybeSingle();
+
+if (!thread || thread.ask_session_id !== askRow.id) {
+  return 403; // Thread not found or doesn't belong to this session
+}
+```
 
 ---
 
@@ -382,12 +396,17 @@ Token validation doesn't check if the authenticated user has permission to fetch
 **Module:** Security
 **Severity:** MEDIUM
 **File:** `src/app/api/ask/[key]/route.ts:815-820`
+**Status:** ✅ RESOLVED
 
 **Description:**
-User message content is inserted directly without sanitization.
+User message content was inserted directly without sanitization, risking XSS attacks.
 
-**Suggested Fix:**
-Apply `sanitizeText()` to message content before insertion.
+**Resolution:** Added sanitization using existing `sanitizeText()` function:
+```typescript
+import { sanitizeText } from '@/lib/sanitize';
+// ...
+const sanitizedContent = sanitizeText(body.content);
+```
 
 ---
 
@@ -395,9 +414,18 @@ Apply `sanitizeText()` to message content before insertion.
 **Module:** Security
 **Severity:** MEDIUM
 **File:** `src/app/api/ask/[key]/message/[messageId]/route.ts:208-215`
+**Status:** ✅ RESOLVED
 
 **Description:**
-The ownership check can be bypassed if profileId is null in certain scenarios.
+The ownership check could be bypassed if profileId was null (e.g., profile lookup failure).
+
+**Resolution:** Added explicit check for profileId before ownership verification:
+```typescript
+// BUG-028 FIX: Require valid profile for authorization
+if (!isDevBypass && !profileId) {
+  return permissionDeniedResponse();
+}
+```
 
 ---
 

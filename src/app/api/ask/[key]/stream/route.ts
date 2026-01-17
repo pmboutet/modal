@@ -530,6 +530,23 @@ export async function POST(
                   }
                 }
 
+                // BUG-022 FIX: Validate thread exists before inserting in individual_parallel mode
+                // In individual_parallel mode, messages MUST have a thread_id to maintain isolation
+                const isIndividualParallelMode = !shouldUseSharedThread({
+                  conversation_mode: askRow.conversation_mode ?? null,
+                });
+
+                if (isIndividualParallelMode && !conversationThread) {
+                  console.error('❌ [stream] BUG-022: Cannot insert message without thread in individual_parallel mode');
+                  const errorData = JSON.stringify({
+                    type: 'error',
+                    error: 'Thread required for individual_parallel mode but not available'
+                  });
+                  controller.enqueue(encoder.encode(`data: ${errorData}\n\n`));
+                  controller.close();
+                  return;
+                }
+
                 // Insert AI message via RPC wrapper to bypass RLS
                 // Pass planStepId to link message to current step (fixes context loss bug)
                 const inserted = await insertAiMessage(
@@ -593,48 +610,57 @@ export async function POST(
                             : detectedStepId;
 
                           if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
-                            // Complete the step (summary will be generated asynchronously)
+                            // BUG-024 FIX: Only send step_completed event if completeStep() succeeds
                             // Use admin client for RLS bypass
                             const adminForStepUpdate = await getAdminClient();
-                            await completeStep(
-                              adminForStepUpdate,
-                              conversationThread.id,
-                              stepIdToComplete!,
-                              undefined, // No pre-generated summary - let the async agent generate it
-                              askRow.id // Pass askSessionId to trigger async summary generation
-                            );
 
-                            // Fetch the updated plan and send step_completed event to client
-                            const updatedPlan = await getConversationPlanWithSteps(adminForStepUpdate, conversationThread.id);
-                            if (updatedPlan) {
-                              const stepCompletedEvent = JSON.stringify({
-                                type: 'step_completed',
-                                conversationPlan: updatedPlan,
-                                completedStepId: stepIdToComplete,
-                              });
-                              controller.enqueue(encoder.encode(`data: ${stepCompletedEvent}\n\n`));
-
-                              // Check if all steps are completed to trigger graph generation
-                              const steps = updatedPlan.plan_data?.steps || [];
-                              const allStepsCompleted = steps.length > 0 && steps.every(
-                                (s: { status?: string }) => s.status === 'completed' || s.status === 'skipped'
+                            try {
+                              // Complete the step (summary will be generated asynchronously)
+                              await completeStep(
+                                adminForStepUpdate,
+                                conversationThread.id,
+                                stepIdToComplete!,
+                                undefined, // No pre-generated summary - let the async agent generate it
+                                askRow.id // Pass askSessionId to trigger async summary generation
                               );
 
-                              if (allStepsCompleted && currentParticipantId) {
-                                // Trigger graph generation in background (don't block the stream)
-                                console.log(`[Stream] All steps completed for participant ${currentParticipantId}, triggering graph generation`);
-                                import('@/lib/graphRAG/generateParticipantGraph').then(({ generateParticipantGraph }) => {
-                                  generateParticipantGraph(currentParticipantId!, askRow.id, adminForStepUpdate)
-                                    .then(result => {
-                                      if (result.success) {
-                                        console.log(`[Stream] Graph generation complete: ${result.claimsCreated} claims, ${result.edgesCreated} edges`);
-                                      } else {
-                                        console.error(`[Stream] Graph generation failed: ${result.error}`);
-                                      }
-                                    })
-                                    .catch(err => console.error('[Stream] Graph generation error:', err));
+                              // Fetch the updated plan and send step_completed event to client
+                              // Only reached if completeStep() succeeded
+                              const updatedPlan = await getConversationPlanWithSteps(adminForStepUpdate, conversationThread.id);
+                              if (updatedPlan) {
+                                const stepCompletedEvent = JSON.stringify({
+                                  type: 'step_completed',
+                                  conversationPlan: updatedPlan,
+                                  completedStepId: stepIdToComplete,
                                 });
+                                controller.enqueue(encoder.encode(`data: ${stepCompletedEvent}\n\n`));
+
+                                // Check if all steps are completed to trigger graph generation
+                                const steps = updatedPlan.plan_data?.steps || [];
+                                const allStepsCompleted = steps.length > 0 && steps.every(
+                                  (s: { status?: string }) => s.status === 'completed' || s.status === 'skipped'
+                                );
+
+                                if (allStepsCompleted && currentParticipantId) {
+                                  // Trigger graph generation in background (don't block the stream)
+                                  console.log(`[Stream] All steps completed for participant ${currentParticipantId}, triggering graph generation`);
+                                  import('@/lib/graphRAG/generateParticipantGraph').then(({ generateParticipantGraph }) => {
+                                    generateParticipantGraph(currentParticipantId!, askRow.id, adminForStepUpdate)
+                                      .then(result => {
+                                        if (result.success) {
+                                          console.log(`[Stream] Graph generation complete: ${result.claimsCreated} claims, ${result.edgesCreated} edges`);
+                                        } else {
+                                          console.error(`[Stream] Graph generation failed: ${result.error}`);
+                                        }
+                                      })
+                                      .catch(err => console.error('[Stream] Graph generation error:', err));
+                                  });
+                                }
                               }
+                            } catch (stepError) {
+                              // BUG-024 FIX: Log the error but do NOT send step_completed event
+                              // This prevents UI/database state disconnect
+                              console.error('❌ [stream] BUG-024: completeStep() failed, not sending step_completed event:', stepError);
                             }
                           }
                         }

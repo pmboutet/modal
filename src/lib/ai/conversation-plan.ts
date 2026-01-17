@@ -518,30 +518,53 @@ export async function completeStep(
         || 'http://localhost:3000';
       const endpoint = `${baseUrl}/api/ask/${askSession.ask_key}/step-summary`;
 
+      // BUG-025 FIX: Add retry with exponential backoff for network resilience
       // IMPORTANT: Await the summary generation - it must succeed
       console.log('📝 [completeStep] Generating summary for step:', stepIdToSummarize);
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          stepId: stepIdToSummarize,
-          askSessionId: askSessionId,
-        }),
-      });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Summary generation failed: ${errorData.error || response.statusText}`);
+      const MAX_RETRIES = 3;
+      const BASE_DELAY_MS = 1000;
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              stepId: stepIdToSummarize,
+              askSessionId: askSessionId,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`Summary generation failed: ${errorData.error || response.statusText}`);
+          }
+
+          const result = await response.json();
+          if (!result.success) {
+            throw new Error(`Summary generation failed: ${result.error || 'Unknown error'}`);
+          }
+
+          console.log('✅ [completeStep] Summary generated successfully for step:', stepIdToSummarize);
+          lastError = null;
+          break; // Success - exit retry loop
+        } catch (retryError) {
+          lastError = retryError instanceof Error ? retryError : new Error(String(retryError));
+          if (attempt < MAX_RETRIES) {
+            const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // Exponential backoff: 1s, 2s, 4s
+            console.warn(`⚠️ [completeStep] Summary generation attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms:`, lastError.message);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
       }
 
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(`Summary generation failed: ${result.error || 'Unknown error'}`);
+      if (lastError) {
+        throw lastError;
       }
-
-      console.log('✅ [completeStep] Summary generated successfully for step:', stepIdToSummarize);
     } catch (error) {
       // Summary generation is REQUIRED - log error with detailed context
       // Note: The step is already marked as completed in the database at this point.

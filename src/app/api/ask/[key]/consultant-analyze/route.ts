@@ -61,8 +61,9 @@ function parseConsultantHelperResponse(content: string): ConsultantHelperParseRe
       .trim();
 
     if (questionText) {
+      // BUG-034 FIX: Use crypto.randomUUID() to avoid ID collisions when multiple analyses trigger within the same millisecond
       questions.push({
-        id: `q-${Date.now()}-${index}`,
+        id: `q-${crypto.randomUUID()}`,
         text: questionText,
         timestamp: new Date().toISOString(),
       });
@@ -79,8 +80,9 @@ function parseConsultantHelperResponse(content: string): ConsultantHelperParseRe
     while ((bulletMatch = bulletRegex.exec(content)) !== null && bulletIndex < 2) {
       const questionText = bulletMatch[1].trim();
       if (questionText && questionText.length > 10 && questionText.includes('?')) {
+        // BUG-034 FIX: Use crypto.randomUUID() to avoid ID collisions
         questions.push({
-          id: `q-${Date.now()}-${bulletIndex}`,
+          id: `q-${crypto.randomUUID()}`,
           text: questionText,
           timestamp: new Date().toISOString(),
         });
@@ -98,8 +100,9 @@ function parseConsultantHelperResponse(content: string): ConsultantHelperParseRe
     while ((sentenceMatch = sentenceRegex.exec(content)) !== null && sentenceIndex < 2) {
       const questionText = sentenceMatch[1].trim();
       if (questionText && questionText.length > 15) {
+        // BUG-034 FIX: Use crypto.randomUUID() to avoid ID collisions
         questions.push({
-          id: `q-${Date.now()}-${sentenceIndex}`,
+          id: `q-${crypto.randomUUID()}`,
           text: questionText,
           timestamp: new Date().toISOString(),
         });

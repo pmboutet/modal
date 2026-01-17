@@ -178,6 +178,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // ===== SPEAKER ASSIGNMENT STATES (CONSULTANT MODE) =====
   // Track speaker-to-participant mappings
   const [speakerMappings, setSpeakerMappings] = useState<SpeakerMapping[]>([]);
+  // BUG-032 FIX: Use ref to avoid unnecessary callback recreations when speakerMappings changes
+  const speakerMappingsRef = useRef<SpeakerMapping[]>([]);
   // Track which speakers we've seen (to detect new ones)
   const knownSpeakersRef = useRef<Set<string>>(new Set());
   // Queue of pending speakers for assignment (allows stacking multiple overlays)
@@ -370,6 +372,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  // BUG-032 FIX: Sync speakerMappings ref with state to avoid stale closures in callbacks
+  useEffect(() => {
+    speakerMappingsRef.current = speakerMappings;
+  }, [speakerMappings]);
 
   // ===== MISE À JOUR DYNAMIQUE DES PROMPTS =====
   // Fonction réutilisable pour mettre à jour les prompts depuis l'API
@@ -838,22 +845,29 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const role: 'user' | 'assistant' =
       rawMessage.role === 'agent' ? 'assistant' : (rawMessage.role as 'user' | 'assistant');
 
-    // In consultant mode, track the first speaker as the consultant (for display positioning)
-    if (consultantMode && speaker && !consultantSpeakerRef.current && !isInterim) {
-      consultantSpeakerRef.current = speaker;
-      console.log('[PremiumVoiceInterface] 👤 First speaker (consultant) identified:', speaker);
-    }
+    // BUG-033 FIX: Track speakers from both interim and non-interim messages for faster detection
+    // The first speaker identification and speaker order tracking now happens on interim messages too
+    // This provides faster speaker detection without waiting for the final message
+    if (consultantMode && speaker) {
+      // Track the first speaker as the consultant (for display positioning)
+      // BUG-033 FIX: Also detect from interim messages for faster identification
+      if (!consultantSpeakerRef.current) {
+        consultantSpeakerRef.current = speaker;
+        console.log('[PremiumVoiceInterface] 👤 First speaker (consultant) identified:', speaker, isInterim ? '(interim)' : '(final)');
+      }
 
-    // In consultant mode, detect new speakers and show assignment overlay
-    // This includes the first speaker (consultant) - all speakers must be assigned by user
-    if (consultantMode && speaker && !isInterim) {
-      // Check if this is a new speaker we haven't seen before
-      if (!knownSpeakersRef.current.has(speaker)) {
-        console.log('[PremiumVoiceInterface] 🆕 New speaker detected:', speaker);
-        // Assign speaker order number
-        if (!speakerOrderRef.current.has(speaker)) {
-          speakerOrderRef.current.set(speaker, speakerOrderRef.current.size + 1);
-        }
+      // BUG-033 FIX: Pre-assign speaker order from interim messages for faster tracking
+      if (!speakerOrderRef.current.has(speaker)) {
+        speakerOrderRef.current.set(speaker, speakerOrderRef.current.size + 1);
+        console.log('[PremiumVoiceInterface] 📋 Speaker order assigned:', speaker, '->', speakerOrderRef.current.get(speaker), isInterim ? '(interim)' : '(final)');
+      }
+
+      // Detect new speakers and show assignment overlay
+      // This includes the first speaker (consultant) - all speakers must be assigned by user
+      // BUG-033 FIX: Only show overlay on non-interim messages to avoid spam,
+      // but speaker is already tracked above from interim for faster detection
+      if (!isInterim && !knownSpeakersRef.current.has(speaker)) {
+        console.log('[PremiumVoiceInterface] 🆕 New speaker detected, showing overlay:', speaker);
         // Add to pending queue (allows stacking multiple speakers)
         setPendingSpeakers(prev => {
           if (!prev.includes(speaker)) {

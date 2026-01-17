@@ -206,8 +206,14 @@ export async function PATCH(
       }, { status: 404 });
     }
 
+    // BUG-028 FIX: Require valid profile for authorization (prevents bypass when profile lookup fails)
+    if (!isDevBypass && !profileId) {
+      console.error('No profile ID available for authorization - possible profile lookup failure');
+      return permissionDeniedResponse();
+    }
+
     // Verify user owns this message (only in non-dev mode)
-    if (!isDevBypass && profileId && messageRow.user_id !== profileId) {
+    if (!isDevBypass && messageRow.user_id !== profileId) {
       console.error('User does not own this message:', {
         messageUserId: messageRow.user_id,
         profileId

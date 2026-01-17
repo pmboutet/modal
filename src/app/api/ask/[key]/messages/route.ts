@@ -99,6 +99,26 @@ export async function GET(
       }
     }
 
+    // BUG-026 FIX: Validate that the requested thread belongs to this ask_session
+    // This prevents users from fetching messages from other sessions by guessing thread IDs
+    const { data: thread, error: threadError } = await dataClient
+      .from('conversation_threads')
+      .select('id, ask_session_id')
+      .eq('id', threadId)
+      .maybeSingle();
+
+    if (threadError) {
+      console.error('[messages/route] Error validating thread:', threadError);
+      throw threadError;
+    }
+
+    if (!thread || thread.ask_session_id !== askRow.id) {
+      return NextResponse.json<ApiResponse>({
+        success: false,
+        error: 'Thread not found or does not belong to this session'
+      }, { status: 403 });
+    }
+
     // Build query for messages
     let query = dataClient
       .from('messages')

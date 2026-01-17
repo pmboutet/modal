@@ -140,7 +140,8 @@ export function useRealtimeMessages({
     // Mark as processed
     processedIdsRef.current.add(row.id);
 
-    // Limit the set size to prevent memory leaks
+    // BUG-031 FIX: Limit the set size to prevent memory accumulation in long-running sessions
+    // When set exceeds 1000 IDs, keep only the last 500 most recent IDs
     if (processedIdsRef.current.size > 1000) {
       const arr = Array.from(processedIdsRef.current);
       processedIdsRef.current = new Set(arr.slice(-500));

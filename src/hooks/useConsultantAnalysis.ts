@@ -186,6 +186,8 @@ export function useConsultantAnalysis(config: ConsultantAnalysisConfig): Consult
   const mountedRef = useRef(true);
   const lastAnalyzedMessageCountRef = useRef<number>(0);
   const performAnalysisRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  // BUG-020 FIX: Use ref to track isPaused state to avoid stale closure in interval callback
+  const isPausedRef = useRef(isPaused);
 
   /**
    * Perform the analysis
@@ -283,6 +285,11 @@ export function useConsultantAnalysis(config: ConsultantAnalysisConfig): Consult
     performAnalysisRef.current = performAnalysis;
   }, [performAnalysis]);
 
+  // BUG-020 FIX: Keep isPausedRef in sync with isPaused state
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
   /**
    * Notify speaker change - triggers immediate analysis
    */
@@ -292,7 +299,14 @@ export function useConsultantAnalysis(config: ConsultantAnalysisConfig): Consult
     // Only trigger if speaker actually changed
     if (speaker !== lastSpeakerRef.current) {
       lastSpeakerRef.current = speaker;
-      performAnalysis();
+      // BUG-021 FIX: Check if analysis is already running to prevent race condition
+      // with multiple concurrent API calls when rapid speaker changes occur
+      if (!isAnalyzingRef.current) {
+        performAnalysis();
+      } else {
+        // Mark as pending so it runs after current analysis completes
+        pendingAnalysisRef.current = true;
+      }
     }
   }, [enabled, isPaused, performAnalysis]);
 
@@ -333,15 +347,17 @@ export function useConsultantAnalysis(config: ConsultantAnalysisConfig): Consult
     }
 
     // Start periodic analysis
+    // BUG-020 FIX: Use isPausedRef.current instead of isPaused to avoid stale closure
     analysisIntervalRef.current = setInterval(() => {
-      if (mountedRef.current && !isPaused) {
+      if (mountedRef.current && !isPausedRef.current) {
         performAnalysisRef.current();
       }
     }, analysisInterval);
 
     // Trigger initial analysis after a short delay (let the conversation load first)
+    // BUG-020 FIX: Use isPausedRef.current instead of isPaused to avoid stale closure
     const initialTimeout = setTimeout(() => {
-      if (mountedRef.current && !isPaused) {
+      if (mountedRef.current && !isPausedRef.current) {
         performAnalysisRef.current();
       }
     }, 2000);

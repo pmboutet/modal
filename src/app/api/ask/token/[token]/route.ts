@@ -256,6 +256,7 @@ export async function GET(
     let insightRows: TokenDataBundle["insights"] = [];
     let profileClient: SupabaseClient = supabase;
 
+    // BUG-035 FIX: SECURITY - Never log token values, use [TOKEN] placeholder in any debug/error logs
     // Attempt to fetch via RPC (preferred). Fallback to admin client if RPC unavailable or empty.
     const { data: askRows, error: askError } = await supabase
       .rpc('get_ask_session_by_token', { p_token: token });
