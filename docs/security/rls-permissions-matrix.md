@@ -52,6 +52,18 @@
 | `ai_insight_jobs` | ✅ Full | 👁️ Project jobs | 🔒 No access |
 | `documents` | ✅ Full | 👁️ Read only | 🔒 No access |
 
+## Claims & Knowledge Tables
+
+| Table | Full Admin | Moderator/Facilitator | Regular User | Service Role |
+|-------|------------|----------------------|--------------|--------------|
+| `claims` | ✅ Full | Via project access | 🔒 No access | ✅ Full |
+| `claim_entities` | ✅ Full | Via project access | 🔒 No access | ✅ Full |
+| `knowledge_entities` | ✅ Full | 👁️ Read only | 🔒 No access | ✅ Full |
+| `conversation_threads` | ✅ Full | ✅ Project threads | ✅ Own threads | ✅ Full |
+| `security_monitoring_queue` | 🔒 No access | 🔒 No access | 🔒 No access | ✅ Full |
+
+**Note:** `claims` and `claim_entities` have RLS enabled as of migration 132. The `security_monitoring_queue` is restricted to `service_role` only for security monitoring purposes.
+
 ## Access Determination Flow
 
 ### How access is determined for each role:

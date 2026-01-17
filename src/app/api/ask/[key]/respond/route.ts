@@ -9,7 +9,7 @@ import { normaliseMessageMetadata } from '@/lib/messages';
 import { executeAgent, fetchAgentBySlug, type AgentExecutionResult } from '@/lib/ai';
 import { INSIGHT_TYPES, mapInsightRowToInsight, type InsightRow } from '@/lib/insights';
 import { fetchInsightRowById, fetchInsightsForSession, fetchInsightTypeMap, fetchInsightTypesForPrompt } from '@/lib/insightQueries';
-import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep } from '@/lib/ai/conversation-plan';
+import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep, ensureConversationPlanExists } from '@/lib/ai/conversation-plan';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   buildParticipantDisplayName,
@@ -1643,11 +1643,36 @@ export async function POST(
 
     const participantSummaries = participants.map(p => ({ name: p.name, role: p.role ?? null, description: p.description ?? null }));
 
-    // Load conversation plan if thread exists
+    // Ensure conversation plan exists (creates if missing) - same as stream/route.ts
     let conversationPlan = null;
     if (conversationThread) {
-      conversationPlan = await getConversationPlanWithSteps(supabase, conversationThread.id);
+      try {
+        conversationPlan = await ensureConversationPlanExists(
+          supabase,
+          conversationThread.id,
+          {
+            askRow,
+            projectData,
+            challengeData,
+            participantSummaries,
+          }
+        );
+      } catch (planError) {
+        console.error('[respond] Failed to ensure conversation plan:', planError);
+        // Fallback to just retrieving
+        conversationPlan = await getConversationPlanWithSteps(supabase, conversationThread.id);
+      }
     }
+
+    // Find the current participant (same as stream/route.ts for DRY)
+    // Used to filter participants in individual_parallel mode
+    const resolvedUserId = currentUserId ?? lastUserUserId;
+    const currentParticipant = resolvedUserId
+      ? participants.find(p => {
+          const participantRow = (participantRows ?? []).find(r => r.id === p.id);
+          return participantRow?.user_id === resolvedUserId;
+        })
+      : null;
 
     // Fetch elapsed times using centralized helper (DRY)
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
@@ -1676,6 +1701,7 @@ export async function POST(
           challenge: challengeData,
           messages: conversationMessages,
           participants: participantSummaries,
+          currentParticipantName: currentParticipant?.name ?? null,
           conversationPlan,
           elapsedActiveSeconds,
           stepElapsedActiveSeconds,
@@ -1835,6 +1861,7 @@ export async function POST(
           challenge: challengeData,
           messages: conversationMessages,
           participants: participantSummaries,
+          currentParticipantName: currentParticipant?.name ?? null,
           conversationPlan,
           elapsedActiveSeconds,
           stepElapsedActiveSeconds,
@@ -1971,6 +1998,7 @@ export async function POST(
       challenge: challengeData,
       messages: conversationMessages,
       participants: participantSummaries,
+      currentParticipantName: currentParticipant?.name ?? null,
       conversationPlan,
       elapsedActiveSeconds,
       stepElapsedActiveSeconds,

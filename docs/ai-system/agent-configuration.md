@@ -303,6 +303,47 @@ INSERT INTO ai_agents (
 4. Monitor agent logs for errors
 5. Validate model configuration
 
+## Rapport & Synthesis Agents
+
+The system includes specialized agents for generating structured reports and analyses from project data.
+
+### Agent Categories and Naming Convention
+
+Agents follow a prefix-based naming convention:
+- **`ask-*`**: Conversation and insight-related agents (e.g., `ask-conversation-response`, `ask-insight-detection`)
+- **`rapport-*`**: Report generation and data synthesis agents (e.g., `rapport-narrative-synthesis`, `rapport-claim-extraction`)
+- **`challenge-*`**: Challenge building and revision agents (e.g., `challenge-revision-planner`)
+
+### Rapport Agents
+
+| Slug | Purpose | Input Variables | Output |
+|------|---------|-----------------|--------|
+| `rapport-narrative-synthesis` | Generate executive summaries and section overviews | `project_name`, `participant_count`, `claim_count`, `community_count`, `problems_summary`, `findings_summary`, `recommendations_summary`, `tensions_summary`, `risks_summary` | JSON with `executive_summary`, `key_takeaways`, `section_overviews` |
+| `rapport-claim-extraction` | Extract claims from insights | `content`, `summary`, `type`, `category`, `ask_question`, `project_name`, `challenge_name` | JSON with `claims[]` and `claim_relations[]` |
+| `rapport-claim-comparison` | Compare two claims for SUPPORTS/CONTRADICTS/NEUTRAL | `claim1`, `claim2` | JSON with `relation`, `confidence`, `reasoning` |
+| `rapport-participant-claims` | Extract claims from all participant insights at once | `project_name`, `project_description`, `challenge_context`, `insights_context`, `insight_count` | JSON with `claims[]`, `entities[]`, `claim_relations[]` |
+
+### Creating Rapport Agents
+
+```sql
+-- Example: Create a rapport agent
+INSERT INTO ai_agents (
+  slug,
+  name,
+  description,
+  system_prompt,
+  user_prompt,
+  available_variables
+) VALUES (
+  'rapport-narrative-synthesis',
+  'Generateur de Synthese Narrative',
+  'Genere le resume executif et les apercus de section pour une synthese projet',
+  '$$Tu es un expert en synthese strategique...$$',
+  '$$Projet: {{project_name}}...$$',
+  ARRAY['project_name', 'participant_count', 'claim_count', ...]
+);
+```
+
 ## Future Enhancements
 
 - **Agent versioning** for prompt evolution

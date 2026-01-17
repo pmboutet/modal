@@ -179,7 +179,116 @@ Le système **ASK** utilise un workflow en deux étapes pour les sessions de con
 - **challenge-builder**: Ancien agent legacy (remplacé par le V2 en 3 phases)
 
 ### Agents Challenge Builder V2
-- **challenge-revision-planner**: Planification globale des révisions
-- **challenge-detailed-updater**: Mise à jour détaillée des challenges
-- **challenge-detailed-creator**: Création détaillée de nouveaux challenges
+- **challenge-revision-planner**: Planification globale des revisions
+- **challenge-detailed-updater**: Mise a jour detaillee des challenges
+- **challenge-detailed-creator**: Creation detaillee de nouveaux challenges
+
+### Agents Rapport & Synthese
+- **rapport-narrative-synthesis**: Generation de syntheses narratives Markdown pour projets
+- **rapport-claim-extraction**: Extraction de claims (findings, recommendations, etc.) depuis les insights
+- **rapport-claim-comparison**: Comparaison de deux claims (SUPPORTS/CONTRADICTS/NEUTRAL)
+- **rapport-participant-claims**: Extraction globale des claims d'un participant (tous insights)
+
+## Enchaînement Logique : Workflow Synthese Narrative
+
+Le systeme de **Synthese Narrative** genere des rapports Markdown structures a partir des donnees du projet.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Etape 1: COLLECTE DES DONNEES                               │
+│ - Fetch claims, insights, participants                      │
+│ - Build knowledge graph (graphology)                        │
+│ - Detect communities (Louvain algorithm)                    │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Etape 2: ANALYSE & STRUCTURATION                            │
+│ - buildProblemSpace() : Problemes et risques                │
+│ - buildFindings() : Decouvertes cles (avec convergence)     │
+│ - buildSolutions() : Recommandations priorisees             │
+│ - buildTensions() : Points de desaccord entre participants  │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Etape 3: GENERATION AI                                      │
+│ Agent: rapport-narrative-synthesis                          │
+│ Role: Generer resume executif, points cles, aperçus section │
+│ Input: Stats, summaries de chaque section                   │
+│ Output: JSON {executive_summary, key_takeaways, ...}        │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Etape 4: ASSEMBLAGE MARKDOWN                                │
+│ - Combine AI summaries + structured data                    │
+│ - Generate tables, lists, stats                             │
+│ - Save to project_syntheses table                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Detail du Workflow
+
+**Fichier principal**: `src/lib/graphRAG/narrativeSynthesis.ts`
+
+**Fonction**: `generateNarrativeSynthesis(projectId, challengeId?)`
+
+1. **Collecte**: Fetch claims, insights, participants count
+2. **Graph**: Build graphology graph, detect communities via Louvain
+3. **Convergence**: Build map of claim support (cross-participant agreement)
+4. **Sections**: Build problem space, findings, solutions, tensions, risks
+5. **AI Summary**: Call `rapport-narrative-synthesis` agent
+6. **Markdown**: Assemble final document with stats, tables, summaries
+
+**Particularites**:
+- **Convergence boosting**: Evidence strength augmentee de +10% par claim supportant
+- **Community detection**: Claims groupes par theme via algorithme Louvain
+- **Severity calculation**: Problemes priorises par evidence strength
+- **Tension detection**: Edges CONTRADICTS entre claims identifies
+
+## Enchaînement Logique : Workflow Extraction Claims
+
+Le systeme extrait des **claims** (affirmations structurees) depuis les insights.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Trigger: Nouvel insight cree ou interview terminee          │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ EXTRACTION (par insight ou par participant)                 │
+│ Agent: rapport-claim-extraction (single insight)            │
+│    OU: rapport-participant-claims (all insights at once)    │
+│ Input: Content, context (project, challenge, ask question)  │
+│ Output: claims[], claim_relations[], key_entities[]         │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ STOCKAGE                                                    │
+│ - Store claims in `claims` table with embeddings            │
+│ - Link claims to entities via `claim_entities`              │
+│ - Create internal edges (SUPPORTS, CONTRADICTS)             │
+└─────────────────────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ COMPARAISON CROSS-PARTICIPANTS                              │
+│ Agent: rapport-claim-comparison                             │
+│ Process: Pre-filter by embedding similarity (>0.6)          │
+│          Then AI analysis for relationship type             │
+│ Output: SUPPORTS/CONTRADICTS edges in knowledge_graph_edges │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Types de Claims
+
+| Type | Description |
+|------|-------------|
+| `finding` | Constat factuel observe |
+| `hypothesis` | Supposition a valider |
+| `recommendation` | Suggestion d'action |
+| `observation` | Note generale |
+
+### Fichiers Cles
+
+- `src/lib/graphRAG/extractClaims.ts`: Extraction single-insight
+- `src/lib/graphRAG/generateParticipantGraph.ts`: Extraction participant complet
+- `src/lib/graphRAG/compareClaimsCross.ts`: Comparaison cross-participant
 

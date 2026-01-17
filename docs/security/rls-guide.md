@@ -416,12 +416,58 @@ This hierarchy determines access:
 - **Moderators:** Access via `project_members`
 - **Users:** Access via `ask_participants`
 
+## Recent Security Updates
+
+### Migration 131: Security Fixes - RLS and Search Path
+
+This migration addresses security vulnerabilities in SQL functions and adds proper RLS policies for new tables.
+
+**Key Changes:**
+1. **search_path Security**: All helper functions now use `SET search_path = public` to prevent search_path injection attacks
+2. **Conversation Threads**: Added RLS policy for authenticated users to manage their conversation threads
+3. **Updated `is_ask_participant()`**: Function now checks `allow_auto_registration` instead of deprecated `is_anonymous` column
+4. **Vector Search Functions**: Fixed `find_similar_insights()`, `find_similar_entities()`, `find_similar_syntheses()` with proper search_path
+5. **Token Access Functions**: Updated `get_ask_session_by_token()`, `get_ask_participants_by_token()`, `get_ask_messages_by_token()` with security fixes
+
+### Migration 132: Enable RLS on Claims Tables
+
+**Problem:** The `claims` and `claim_entities` tables had RLS policies defined but RLS was not enabled on the tables themselves.
+
+**Solution:**
+```sql
+ALTER TABLE public.claims ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.claim_entities ENABLE ROW LEVEL SECURITY;
+```
+
+Also fixed the `security_monitoring_queue` policy which was incorrectly assigned to the `public` role instead of `service_role`.
+
+### Migration 133: Secure User Signup (handle_new_user Trigger)
+
+**Problem:** When an admin creates a profile without a password (auth_id = NULL), and the user later signs up themselves, the trigger caught the unique_violation and silently returned. This created an orphaned auth user without a linked profile.
+
+**Security Risk:** Auto-linking profiles would allow an attacker to sign up with a victim's email and inherit their profile/role.
+
+**Solution:** On unique_violation, the function now raises an error to fail the signup transaction:
+```sql
+WHEN unique_violation THEN
+  RAISE EXCEPTION 'A profile with this email already exists. Please sign in or use password reset.'
+    USING ERRCODE = 'unique_violation';
+```
+
+### Session Isolation for Individual Parallel Mode
+
+The `GET /api/ask/[key]` endpoint now enforces strict message isolation for `individual_parallel` conversation mode:
+- In individual_parallel mode, users only see messages from their own conversation thread
+- Legacy messages without a thread ID are not shown to maintain isolation
+- Shared/collaborative modes retain backward compatibility with legacy messages
+
 ## Support & Maintenance
 
 For issues or questions:
 1. Check this guide first
 2. Review the policy definitions in `014_enable_rls_security.sql`
-3. Test using the troubleshooting queries above
-4. Check Supabase/PostgreSQL documentation
-5. Contact your database administrator
+3. Review recent security migrations (131-133)
+4. Test using the troubleshooting queries above
+5. Check Supabase/PostgreSQL documentation
+6. Contact your database administrator
 

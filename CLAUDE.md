@@ -9,6 +9,18 @@ Pour tester l'application en local (avec `NEXT_PUBLIC_IS_DEV=false`):
 - **Role**: `full_admin`
 - **Client**: `TechCorp Demo`
 
+## Documentation
+
+Technical documentation is in `/docs/`.
+
+**Entry point**: Always read [/docs/INDEX.md](docs/INDEX.md) first for any technical question.
+
+Key documents:
+- Database: `docs/architecture/database-schema.md`
+- Security/RLS: `docs/security/rls-guide.md`
+- AI Agents: `docs/ai-system/agent-configuration.md`
+- Troubleshooting: `docs/troubleshooting/`
+
 ## Development Workflow
 
 ### Before Each Commit
