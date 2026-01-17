@@ -63,9 +63,10 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Allow /auth/callback to process the OAuth flow without redirecting
-  if (pathname === '/auth/callback') {
-    console.log('[Middleware] /auth/callback - allowing through')
+  // Allow /auth/callback/* routes to process the OAuth flow without redirecting
+  // This includes /auth/callback, /auth/callback/token/[token], /auth/callback/key/[key]
+  if (pathname.startsWith('/auth/callback')) {
+    console.log('[Middleware] Auth callback route - allowing through')
     return response
   }
 
