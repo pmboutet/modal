@@ -1402,37 +1402,52 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         startAudioVisualization();
 
         // If no messages exist, generate and speak initial welcome message (DRY with text mode)
-        if (!consultantMode && messages.length === 0 && askKey) {
-          console.log('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
-          try {
-            const headers: HeadersInit = { 'Content-Type': 'application/json' };
-            if (inviteToken) {
-              headers['x-invite-token'] = inviteToken;
-            }
-
-            // Use respond endpoint to generate initial AI message (same as text mode)
-            const response = await fetch(`/api/ask/${askKey}/respond`, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({
-                content: '', // Empty content triggers initial greeting
-                senderType: 'system', // System-triggered initial message
-              }),
-            });
-
-            if (response.ok) {
-              const result = await response.json();
-              if (result.success && result.data?.aiResponse) {
-                // Speak the initial message via TTS
-                await agent.speakInitialMessage(result.data.aiResponse);
-                console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+        // Also speak existing initial message if it's the only one (created by text mode but never spoken)
+        if (!consultantMode && askKey) {
+          if (messages.length === 0) {
+            // No messages at all - generate and speak initial message via /respond endpoint
+            console.log('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
+            try {
+              const headers: HeadersInit = { 'Content-Type': 'application/json' };
+              if (inviteToken) {
+                headers['x-invite-token'] = inviteToken;
               }
-            } else {
-              console.warn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
+
+              // Use respond endpoint to generate initial AI message (same as text mode)
+              const response = await fetch(`/api/ask/${askKey}/respond`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  content: '', // Empty content triggers initial greeting
+                  senderType: 'system', // System-triggered initial message
+                }),
+              });
+
+              if (response.ok) {
+                const result = await response.json();
+                if (result.success && result.data?.aiResponse) {
+                  // Speak the initial message via TTS
+                  await agent.speakInitialMessage(result.data.aiResponse);
+                  console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+                }
+              } else {
+                console.warn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
+              }
+            } catch (error) {
+              console.error('[PremiumVoiceInterface] Error generating initial message:', error);
+              // Don't fail - voice session can still work without initial message
             }
-          } catch (error) {
-            console.error('[PremiumVoiceInterface] Error generating initial message:', error);
-            // Don't fail - voice session can still work without initial message
+          } else if (messages.length === 1 && messages[0].role === 'assistant') {
+            // Initial message already exists (created by GET /api/ask/[key]) but never spoken
+            // This happens when user enters voice mode after page load in individual_parallel mode
+            console.log('[PremiumVoiceInterface] 🎤 Initial message exists - speaking via TTS');
+            try {
+              await agent.speakInitialMessage(messages[0].content);
+              console.log('[PremiumVoiceInterface] ✅ Existing initial message spoken');
+            } catch (error) {
+              console.error('[PremiumVoiceInterface] Error speaking existing initial message:', error);
+              // Don't fail - voice session can still work without initial message
+            }
           }
         }
       } else {

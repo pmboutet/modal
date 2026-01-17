@@ -20,6 +20,7 @@ interface TimerResponse {
   participantId: string;
   stepElapsedSeconds?: number;
   currentStepId?: string;
+  timerResetAt?: string | null;
 }
 
 function isPermissionDenied(error: unknown): boolean {
@@ -148,6 +149,7 @@ export async function GET(
           data: {
             elapsedActiveSeconds: participant.elapsed_active_seconds ?? 0,
             participantId: participant.participant_id,
+            timerResetAt: participant.timer_reset_at ?? null,
             ...stepTimerData,
           }
         });
@@ -203,10 +205,10 @@ export async function GET(
 
     const askRow = { id: askRpcData.ask_session_id };
 
-    // Get participant's elapsed time
+    // Get participant's elapsed time and reset timestamp
     let participantQuery = dataClient
       .from('ask_participants')
-      .select('id, elapsed_active_seconds')
+      .select('id, elapsed_active_seconds, timer_reset_at')
       .eq('ask_session_id', askRow.id);
 
     if (profileId) {
@@ -244,6 +246,7 @@ export async function GET(
       data: {
         elapsedActiveSeconds: participant.elapsed_active_seconds ?? 0,
         participantId: participant.id,
+        timerResetAt: participant.timer_reset_at ?? null,
         ...stepTimerData,
       }
     });

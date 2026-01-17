@@ -2,7 +2,7 @@
 
 > **Generated**: 2026-01-17
 > **Last Updated**: 2026-01-17
-> **Status**: 17/35 bugs resolved (Critical + HIGH + Security MEDIUM bugs fixed)
+> **Status**: 35/35 Phase 1 bugs resolved | 60 Phase 2 bugs identified (by conversation type)
 
 ---
 
@@ -13,6 +13,12 @@
 3. [Medium Severity Bugs](#medium-severity-bugs)
 4. [Low Severity Bugs](#low-severity-bugs)
 5. [Summary by Module](#summary-by-module)
+6. [Phase 2: Bugs by Conversation Type](#phase-2-bugs-by-conversation-type)
+   - [Individual Parallel Mode](#individual-parallel-mode)
+   - [Shared Thread Mode](#shared-thread-mode)
+   - [Voice Mode (Extended)](#voice-mode-extended)
+   - [Consultant Mode (Extended)](#consultant-mode-extended)
+   - [Conversation Plan & Steps](#conversation-plan--steps)
 
 ---
 
@@ -514,39 +520,738 @@ Type is included at the end of deduplication key. Two insights with identical co
 
 ---
 
-## Summary by Module
+## Summary by Module (Phase 1 - All Resolved ✅)
 
-| Module | Critical | High | Medium | Low | Total |
-|--------|----------|------|--------|-----|-------|
-| Text Chat | 1 | 2 | 1 | 2 | 6 |
-| Voice Mode | 1 | 2 | 4 | 1 | 8 |
-| Consultant Mode | 0 | 2 | 2 | 3 | 7 |
-| Conversation Threads | 1 | 2 | 4 | 1 | 8 |
-| Security | 2 | 1 | 2 | 1 | 6 |
-| **Total** | **5** | **9** | **13** | **8** | **35** |
+| Module | Critical | High | Medium | Low | Total | Status |
+|--------|----------|------|--------|-----|-------|--------|
+| Text Chat | 1 | 2 | 1 | 2 | 6 | ✅ |
+| Voice Mode | 1 | 2 | 4 | 1 | 8 | ✅ |
+| Consultant Mode | 0 | 2 | 2 | 3 | 7 | ✅ |
+| Conversation Threads | 1 | 2 | 4 | 1 | 8 | ✅ |
+| Security | 2 | 1 | 2 | 1 | 6 | ✅ |
+| **Total** | **5** | **9** | **13** | **8** | **35** | ✅ |
+
+> All Phase 1 bugs have been resolved. See Phase 2 section for newly identified bugs organized by conversation type.
 
 ---
 
-## Priority Action Items
+## Priority Action Items (Phase 1 - All Completed ✅)
+
+### Immediate (P0) - ✅ COMPLETED
+1. ~~**BUG-001**: Missing JSON error handling in POST route~~
+2. ~~**BUG-002**: Missing await in consultant mode processUserMessage~~
+3. ~~**BUG-003**: Race condition in shared thread creation~~
+4. ~~**BUG-004**: Participant data exposure via RPC~~ (Reviewed - Not a bug)
+5. ~~**BUG-005**: Message isolation bypass~~
+
+### Short-term (P1) - ✅ COMPLETED
+6. ~~**BUG-006**: Missing await on validateBargeInWithTranscript~~ (Intentional)
+7. ~~**BUG-007**: Logic error in findIndex for error recovery~~
+8. ~~**BUG-011**: Insight thread ID override~~
+9. ~~**BUG-012**: Missing thread isolation in insight retrieval~~
+10. ~~**BUG-013**: Unvalidated participant ID in speaker assignment~~
+
+### Medium-term (P2) - ✅ COMPLETED
+11. ~~All remaining HIGH severity bugs~~
+12. ~~Security-related MEDIUM bugs (BUG-026, BUG-027, BUG-028)~~
+13. ~~Voice mode stability bugs (BUG-016 to BUG-019, BUG-029)~~
+
+> **See Phase 2 section below for newly identified bugs.**
+
+---
+
+## Phase 2: Bugs by Conversation Type
+
+> **Analysis Date**: 2026-01-17
+> **Total Bugs Found**: 61 (2 Critical, 19 High, 31 Medium, 9 Low)
+> **Resolved**: 1 (BUG-IP-009)
+
+---
+
+### Individual Parallel Mode
+
+Bugs related to `individual_parallel` conversation mode where each participant has their own isolated thread.
+
+#### BUG-IP-001: Voice Agent Init Uses Wrong Thread Resolution
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/voice-agent/init/route.ts:82-100`
+**Status:** 🔴 OPEN
+
+**Description:**
+The voice agent init route uses `resolveThreadUserId()` which falls back to the "first participant" in dev mode. Unlike `stream` and `respond` routes which use `getLastUserMessageThread()`, voice init picks the first participant, violating thread isolation.
+
+**Impact:** Voice messages may be saved to the wrong participant's thread.
+
+---
+
+#### BUG-IP-002: Missing Thread Ownership Validation in Messages Route
+**Severity:** CRITICAL
+**File:** `src/app/api/ask/[key]/messages/route.ts:102-120`
+**Status:** 🔴 OPEN
+
+**Description:**
+The route validates thread belongs to ask_session (BUG-026 FIX) but does NOT validate that the requesting user/participant owns that specific thread. A user could fetch messages from another participant's thread by guessing the thread ID.
+
+**Impact:** Thread isolation vulnerability - Participant A could fetch Participant B's messages.
+
+---
+
+#### BUG-IP-003: Potential NULL Thread ID in AI Message Insert
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/respond/route.ts:1823-1830`
+**Status:** 🔴 OPEN
+
+**Description:**
+The route doesn't validate that `conversationThread` is set before calling `insertAiMessage()`. If thread resolution fails silently, AI messages get inserted with `conversation_thread_id = NULL`, breaking isolation.
+
+---
+
+#### BUG-IP-004: Inconsistent Insight Isolation Logic
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/route.ts:663-693` vs `respond/route.ts:1620-1639`
+**Status:** 🔴 OPEN
+
+**Description:**
+The insight filtering logic differs between `route.ts` (GET) and `respond/route.ts`. The conditional order is confusing and error-prone, potentially causing insight leakage.
+
+---
+
+#### BUG-IP-005: Step Complete Uses Wrong Thread Resolution
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/step-complete/route.ts:91-104`
+**Status:** 🔴 OPEN
+
+**Description:**
+Uses `resolveThreadUserId()` instead of `getLastUserMessageThread()` to find thread before completing a step. Could mark steps complete in the wrong participant's thread.
+
+---
+
+#### BUG-IP-006: Missing Thread Ownership Check in GET Endpoint
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/route.ts:315-350`
+**Status:** 🔴 OPEN
+
+**Description:**
+GET endpoint determines thread using `resolveThreadUserId()` but doesn't validate that the requesting user owns that thread.
+
+---
+
+#### BUG-IP-007: Realtime Subscription Doesn't Check Thread Ownership
+**Severity:** MEDIUM
+**File:** `src/hooks/useRealtimeMessages.ts:169-181`
+**Status:** 🔴 OPEN
+
+**Description:**
+Realtime subscription subscribes to thread by ID without validating user authorization to listen to that thread.
+
+---
+
+#### BUG-IP-008: Conversation Plan Isolation Not Enforced
+**Severity:** MEDIUM
+**File:** `src/lib/ai/conversation-plan.ts:237-240`
+**Status:** 🔴 OPEN
+
+**Description:**
+Plan data doesn't include thread validation. If a user obtains another participant's thread ID, they can fetch that participant's entire conversation plan.
+
+---
+
+#### BUG-IP-009: Initial Message Not Spoken in Voice Mode
+**Severity:** HIGH
+**File:** `src/components/chat/PremiumVoiceInterface.tsx:1405-1452`
+**Status:** ✅ RESOLVED
+
+**Description:**
+In individual_parallel mode with voice mode (STT + TTS), when a user activates voice mode after page load, the initial welcome message already exists (created by `GET /api/ask/[key]`) but was never spoken via TTS. The condition `messages.length === 0` was false because the initial message was already created server-side.
+
+**Impact:** Users in individual_parallel mode would enter voice mode and hear silence instead of the welcome message.
+
+**Resolution:** Added logic to detect and speak the existing initial message:
+```typescript
+// If initial message already exists (created by GET /api/ask/[key]) but never spoken
+if (messages.length === 1 && messages[0].role === 'assistant') {
+  await agent.speakInitialMessage(messages[0].content);
+}
+```
+
+---
+
+### Shared Thread Mode
+
+Bugs related to `shared` conversation mode where all participants use a single shared thread.
+
+#### BUG-SH-001: Missing Thread ID in Realtime Subscription
+**Severity:** HIGH
+**File:** `src/hooks/useRealtimeMessages.ts:170-182`
+**Status:** 🔴 OPEN
+
+**Description:**
+If a shared thread hasn't been initialized yet, the subscription fails. The hook assumes `conversationThreadId` is always provided with no fallback for pre-thread sessions.
+
+---
+
+#### BUG-SH-002: Participant Context Loss - User ID Exposure
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/route.ts:302-313`
+**Status:** 🔴 OPEN
+
+**Description:**
+In truly shared mode (collaborative, group_reporter), participant's individual user_id is exposed in AskParticipant response. Shared mode should mask individual identities.
+
+---
+
+#### BUG-SH-003: Thread Initialization Race Condition
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/route.ts:315-349`
+**Status:** 🔴 OPEN
+
+**Description:**
+If multiple participants hit GET endpoint simultaneously before a thread exists, multiple threads could be created. No guarantee all requests use the SAME shared thread.
+
+---
+
+#### BUG-SH-004: Insight Thread Attribution Bug
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/route.ts:701-718`
+**Status:** 🔴 OPEN
+
+**Description:**
+In shared mode, ALL insights are assigned the current thread ID, even if originally created in a different thread. Loses original context for legacy messages.
+
+---
+
+#### BUG-SH-005: Realtime Filter Vulnerability
+**Severity:** MEDIUM
+**File:** `src/hooks/useRealtimeMessages.ts:169-182`
+**Status:** 🔴 OPEN
+
+**Description:**
+Realtime subscription filter on `conversation_thread_id` has no validation that thread belongs to current ask_session.
+
+---
+
+#### BUG-SH-006: Missing Thread Type Validation in Polling
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/messages/route.ts:102-120`
+**Status:** 🔴 OPEN
+
+**Description:**
+Endpoint validates ask_session ownership but not thread type (shared vs individual). User could request messages from another user's individual thread.
+
+---
+
+#### BUG-SH-007: Voice AI Response to Wrong Thread
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/respond/route.ts:1818-1830`
+**Status:** 🔴 OPEN
+
+**Description:**
+In shared mode with multiple voice participants, if voice mode creates a user-specific thread, AI response gets saved to individual thread instead of shared thread.
+
+---
+
+#### BUG-SH-008: SenderId Exposes Identity in Shared Mode
+**Severity:** MEDIUM
+**File:** `src/hooks/useRealtimeMessages.ts:86-103`
+**Status:** 🔴 OPEN
+
+**Description:**
+`formatDatabaseMessage()` exposes `user_id` as `senderId`. In shared/consultant mode, this defeats the purpose of shared mode where speaker identity should be maintained via voice diarization, not user_id.
+
+---
+
+### Voice Mode (Extended)
+
+Additional bugs found in voice mode beyond the original Phase 1 findings.
+
+#### BUG-VM-001: Audio Playback State Race Condition
+**Severity:** HIGH
+**File:** `src/lib/ai/speechmatics-audio.ts:510-551`
+**Status:** 🔴 OPEN
+
+**Description:**
+Multiple queued audio chunks could arrive while `isPlayingAudio` is being set to false. Next chunk could start playing before onended handler fires, causing chunks to be skipped or double-played.
+
+---
+
+#### BUG-VM-002: Unhandled AudioContext State After Resume
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-audio.ts:162-165`
+**Status:** 🔴 OPEN
+
+**Description:**
+After `audioContext.resume()`, there's no verification that the context actually resumed successfully.
+
+---
+
+#### BUG-VM-003: Missing WebSocket Check in Audio Sending
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-audio.ts:223-288`
+**Status:** 🔴 OPEN
+
+**Description:**
+WebSocket could close between the OPEN check (line 223) and actual send (line 287) due to async timing.
+
+---
+
+#### BUG-VM-004: Barge-in Validation Timeout Never Fires
+**Severity:** HIGH
+**File:** `src/lib/ai/speechmatics-audio.ts:833-835, 1079-1085`
+**Status:** 🔴 OPEN
+
+**Description:**
+If `validateBargeInWithTranscript()` is never called (e.g., VAD not triggering), the pending validation hangs forever, blocking future barge-ins.
+
+---
+
+#### BUG-VM-005: Microphone Permission Error Not Handled
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-audio.ts:153-155`
+**Status:** 🔴 OPEN
+
+**Description:**
+`getUserMedia()` can throw with NotAllowedError, NotFoundError, or TypeError. Error is propagated without specific handling; microphone state may be partially initialized.
+
+---
+
+#### BUG-VM-006: TTS Stream Reading Never Completes
+**Severity:** HIGH
+**File:** `src/lib/ai/speechmatics.ts:627-628`
+**Status:** 🔴 OPEN
+
+**Description:**
+TTS stream reading loop (`streamToUint8Array`) has no timeout. If ElevenLabs API hangs, the request stays pending forever.
+
+---
+
+#### BUG-VM-007: Transcript Queue Doubles Messages on Error
+**Severity:** HIGH
+**File:** `src/lib/ai/speechmatics.ts:684-708`
+**Status:** 🔴 OPEN
+
+**Description:**
+When `processUserMessage()` throws after callback fires, transcript is queued again but also removed from history, causing duplicate/out-of-order processing.
+
+---
+
+#### BUG-VM-008: AudioWorklet Handler Active After Disconnect
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-audio.ts:323-326`
+**Status:** 🔴 OPEN
+
+**Description:**
+`postMessage()` called AFTER setting `onmessage = null`. AudioWorklet might have queued messages that fire after cleanup.
+
+---
+
+#### BUG-VM-009: Generation State Not Reset on Barge-in
+**Severity:** HIGH
+**File:** `src/lib/ai/speechmatics.ts:971-995`
+**Status:** 🔴 OPEN
+
+**Description:**
+`abortResponse()` doesn't reset `isGeneratingResponse = false` immediately. If abort fires before processing completes, agent becomes unresponsive.
+
+---
+
+#### BUG-VM-010: Semantic Turn Detection Never Cancels
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-transcription.ts:514-528`
+**Status:** 🔴 OPEN
+
+**Description:**
+If semantic detector API hangs, `semanticEvaluationInFlight` never resets, blocking subsequent evaluations indefinitely.
+
+---
+
+#### BUG-VM-011: WebSocket Handler Cleared But Messages Arrive
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-websocket.ts:516-518`
+**Status:** 🔴 OPEN
+
+**Description:**
+Message handler set to null BEFORE WebSocket close event fires. Server's final messages after EndOfStream arrive as orphaned messages.
+
+---
+
+#### BUG-VM-012: Connection Token Overflow
+**Severity:** LOW
+**File:** `src/lib/ai/speechmatics.ts:186-189`
+**Status:** 🔴 OPEN
+
+**Description:**
+`globalConnectionToken` increments forever. After ~2^31 connections, it overflows in JavaScript, causing connection validation to fail.
+
+---
+
+#### BUG-VM-013: isDisconnected Doesn't Prevent All Callbacks
+**Severity:** LOW
+**File:** `src/lib/ai/speechmatics.ts:311-319`
+**Status:** 🔴 OPEN
+
+**Description:**
+Check for `isDisconnected` exists in `handleWebSocketMessage()`, but other callbacks like `onConnectionCallback()` still fire after disconnect due to async timing.
+
+---
+
+#### BUG-VM-014: Multiple Concurrent Disconnects
+**Severity:** LOW
+**File:** `src/lib/ai/speechmatics.ts:737-740`
+**Status:** 🔴 OPEN
+
+**Description:**
+Calling `disconnect()` from different code paths (user close, error handler, timeout) could start multiple disconnection sequences, causing resources to be cleaned up multiple times.
+
+---
+
+#### BUG-VM-015: Echo Detection Race with Speech Clearing
+**Severity:** MEDIUM
+**File:** `src/lib/ai/speechmatics-audio.ts:628-645, 1176-1190`
+**Status:** 🔴 OPEN
+
+**Description:**
+Even with BUG-016 fix using version tokens, if `scheduleClearAssistantSpeech()` fires after version increment but BEFORE new content is set, version check passes and clears wrong content.
+
+---
+
+### Consultant Mode (Extended)
+
+Additional bugs found in consultant mode beyond the original Phase 1 findings.
+
+#### BUG-CM-001: Questions Update Not Checked
+**Severity:** MEDIUM
+**File:** `src/hooks/useConsultantAnalysis.ts:237-241`
+**Status:** 🔴 OPEN
+
+**Description:**
+If API returns empty questions array `[]`, local state retains old questions but no callback fires. UI shows stale questions.
+
+---
+
+#### BUG-CM-002: Insights Update Not Checked
+**Severity:** MEDIUM
+**File:** `src/hooks/useConsultantAnalysis.ts:243-247`
+**Status:** 🔴 OPEN
+
+**Description:**
+Same as CM-001 but for insights. Empty arrays don't trigger state updates or callbacks.
+
+---
+
+#### BUG-CM-003: Pending Analysis Race Condition
+**Severity:** HIGH
+**File:** `src/hooks/useConsultantAnalysis.ts:266-277`
+**Status:** 🔴 OPEN
+
+**Description:**
+Code checks `!isPaused` instead of `isPausedRef.current`, using stale closure value. Analysis may run when user has paused.
+
+---
+
+#### BUG-CM-004: Questions Parsing Silent Limit
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:53-72`
+**Status:** 🔴 OPEN
+
+**Description:**
+Regex extraction limits to 2 questions max (`index < 2`) without documentation or warning. Questions beyond the second are silently ignored.
+
+---
+
+#### BUG-CM-005: No Analysis on Empty Conversations
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:481-487`
+**Status:** 🔴 OPEN
+
+**Description:**
+Returns empty questions immediately if no messages. AI should provide initial guidance/opening questions even when conversation is empty.
+
+---
+
+#### BUG-CM-006: Current User ID Not Propagated
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:161-233, 532-541`
+**Status:** 🔴 OPEN
+
+**Description:**
+`currentUserId` is identified but NOT passed to consultant helper agent variables. Agent can't provide personalized suggestions.
+
+---
+
+#### BUG-CM-007: Insight Detection Called Without Context
+**Severity:** LOW
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:562-574`
+**Status:** 🔴 OPEN
+
+**Description:**
+Fetch to `/api/ask/[key]/respond` with `detectInsights: true` doesn't set consultant mode context. Insights detection unaware there's no AI response.
+
+---
+
+#### BUG-CM-008: Missing Error Handling in Callbacks
+**Severity:** LOW
+**File:** `src/hooks/useConsultantAnalysis.ts:250-252`
+**Status:** 🔴 OPEN
+
+**Description:**
+`onStepCompleted` callback isn't wrapped in try-catch. If parent's callback throws, it breaks analysis flow.
+
+---
+
+#### BUG-CM-009: Speaker Change Bypasses Debounce
+**Severity:** MEDIUM
+**File:** `src/hooks/useConsultantAnalysis.ts:302-310`
+**Status:** 🔴 OPEN
+
+**Description:**
+`notifySpeakerChange()` calls `performAnalysis()` immediately, bypassing MIN_ANALYSIS_GAP debounce. Rapid speaker changes trigger excessive API calls.
+
+---
+
+#### BUG-CM-010: Step Completion Async Timing
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:620-626`
+**Status:** 🔴 OPEN
+
+**Description:**
+Response returns BEFORE step summary is generated (async operation). UI reflects step completion before summary is ready.
+
+---
+
+#### BUG-CM-011: No Validation of Agent Response
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:593-597`
+**Status:** 🔴 OPEN
+
+**Description:**
+If `helperResult.content` is null/empty, parser returns empty results with no error logging. Silent failure.
+
+---
+
+#### BUG-CM-012: Thread Identification Fails Silently
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:222-233`
+**Status:** 🔴 OPEN
+
+**Description:**
+If `currentUserId` is null, endpoint warns but continues with shared thread fallback. Returns 200 OK instead of 401 Unauthorized. Consultant sees no questions because looking at empty shared thread.
+
+---
+
+#### BUG-CM-013: Empty Results Not Distinguished
+**Severity:** MEDIUM
+**File:** `src/hooks/useConsultantAnalysis.ts:237-247`
+**Status:** 🔴 OPEN
+
+**Description:**
+Parent component can't distinguish between "questions were analyzed and found to be empty" vs "not analyzed at all".
+
+---
+
+#### BUG-CM-014: Parallel Calls Return Misaligned Data
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:551-589`
+**Status:** 🔴 OPEN
+
+**Description:**
+Consultant helper and insight detection run in parallel. If one takes longer, API returns results from different "moments" in time with no timestamp coordination.
+
+---
+
+#### BUG-CM-015: Missing Null Safety in Message Count
+**Severity:** LOW
+**File:** `src/hooks/useConsultantAnalysis.ts:201-204`
+**Status:** 🔴 OPEN
+
+**Description:**
+If `messageCount` is undefined or NaN, comparison behaves unexpectedly. No validation that messageCount is a valid positive integer.
+
+---
+
+#### BUG-CM-016: isPaused Stale in notifySpeakerChange
+**Severity:** MEDIUM
+**File:** `src/hooks/useConsultantAnalysis.ts:296-311`
+**Status:** 🔴 OPEN
+
+**Description:**
+`notifySpeakerChange` uses `isPaused` from closure instead of `isPausedRef.current`, causing stale state.
+
+---
+
+#### BUG-CM-017: Analysis Too Frequent
+**Severity:** LOW
+**File:** `src/hooks/useConsultantAnalysis.ts:21-26`
+**Status:** 🔴 OPEN
+
+**Description:**
+Default analysis interval is 10 seconds with 3-second debounce. For frequent conversations, this causes high API load and rapid token consumption.
+
+---
+
+#### BUG-CM-018: No Staleness Indicator
+**Severity:** LOW
+**File:** `src/hooks/useConsultantAnalysis.ts`
+**Status:** 🔴 OPEN
+
+**Description:**
+Hook returns `isAnalyzing` but no `lastAnalyzedAt` timestamp. UI can't show how old current questions are.
+
+---
+
+#### BUG-CM-019: RLS Bypass Silent Failure
+**Severity:** HIGH
+**File:** `src/app/api/ask/[key]/consultant-analyze/route.ts:168-260`
+**Status:** 🔴 OPEN
+
+**Description:**
+If RPC function has bugs or service role is misconfigured, lookup fails silently. If both token AND auth lookups fail, `currentUserId` becomes null and analysis runs against fallback thread returning no data.
+
+---
+
+### Conversation Plan & Steps
+
+Bugs related to conversation plan and step management.
+
+#### BUG-PS-001: Race Condition in Step Completion
+**Severity:** CRITICAL
+**File:** `src/lib/ai/conversation-plan.ts:445-580`
+**Status:** 🔴 OPEN
+
+**Description:**
+`completeStep()` marks step as completed in DB (line 446), then attempts summary generation (lines 531-563). If summary fails and throws, step is already marked complete with no summary - inconsistent state.
+
+---
+
+#### BUG-PS-002: Missing activated_at on Plan Start
+**Severity:** MEDIUM
+**File:** `migrations/105_create_conversation_plan_rpc.sql:65-81`
+**Status:** 🔴 OPEN
+
+**Description:**
+Only first active step gets `activated_at` set in RPC. TypeScript code doesn't explicitly set it for active step, causing NULL value that affects elapsed time calculation.
+
+---
+
+#### BUG-PS-003: current_step_id vs Active Step Mismatch
+**Severity:** MEDIUM
+**File:** `src/lib/ai/conversation-plan.ts:699-714, 378-397`
+**Status:** 🔴 OPEN
+
+**Description:**
+`current_step_id` field can become out of sync with actual active step status. `getCurrentStep()` uses `current_step_id`, `getActiveStep()` queries by `status = 'active'` - different sources of truth.
+
+---
+
+#### BUG-PS-004: Step Summary Silent Failure
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/step-summary/route.ts:88-125`
+**Status:** 🔴 OPEN
+
+**Description:**
+If AI summarizer returns null/empty, endpoint stores `[ERREUR]` prefix message in summary field but still returns success. Callers think summary was generated when it actually failed.
+
+---
+
+#### BUG-PS-005: Step Messages Filtering Fails Silently
+**Severity:** MEDIUM
+**File:** `src/lib/ai/conversation-agent.ts:150-180, 352-363`
+**Status:** 🔴 OPEN
+
+**Description:**
+`formatStepMessages()` expects `currentStepId` (identifier like "step_1") but filters by UUID. If step record not found, falls back to all messages instead of step-specific messages.
+
+---
+
+#### BUG-PS-006: No Locking on Simultaneous Completions
+**Severity:** HIGH
+**File:** `src/lib/ai/conversation-plan.ts:404-584`
+**Status:** 🔴 OPEN
+
+**Description:**
+`completeStep()` has no database-level locking or transaction. Two simultaneous requests can both pass the completion check, causing duplicate summary generation and step completed twice.
+
+---
+
+#### BUG-PS-007: Step Elapsed Time Not Reset
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/timer/route.ts:429-481`
+**Status:** 🔴 OPEN
+
+**Description:**
+When step is activated via `activate_plan_step()` RPC, `elapsed_active_seconds` is NOT reset to 0. Time tracking starts from incorrect baseline.
+
+---
+
+#### BUG-PS-008: Plan State Stale When Fetch Fails
+**Severity:** MEDIUM
+**File:** `src/app/api/ask/[key]/respond/route.ts:2007-2049`
+**Status:** 🔴 OPEN
+
+**Description:**
+If `getConversationPlanWithSteps()` fails or returns null, code continues with potentially stale plan data. Step completion might target wrong step.
+
+---
+
+#### BUG-PS-009: No Overtime Tracking Across Steps
+**Severity:** MEDIUM
+**File:** `src/lib/pacing.ts` (referenced in timer)
+**Status:** 🔴 OPEN
+
+**Description:**
+No mechanism to mark a step as "overtime", track cumulative overtime across steps, prevent further steps if overtime exceeded, or alert AI agent that plan is behind schedule.
+
+---
+
+#### BUG-PS-010: NULL activated_at in Duration Calculation
+**Severity:** MEDIUM
+**File:** `src/lib/ai/conversation-plan.ts:656-664`
+**Status:** 🔴 OPEN
+
+**Description:**
+Line 657 falls back to `created_at` if `activated_at` is NULL. But `created_at` might be hours before step actually started, making duration calculation invalid.
+
+---
+
+## Phase 2 Summary by Conversation Type
+
+| Conversation Type | Critical | High | Medium | Low | Total | Resolved |
+|-------------------|----------|------|--------|-----|-------|----------|
+| Individual Parallel | 1 | 5 | 3 | 0 | 9 | 1 ✅ |
+| Shared Thread | 0 | 4 | 4 | 0 | 8 | 0 |
+| Voice Mode (Extended) | 0 | 5 | 6 | 4 | 15 | 0 |
+| Consultant Mode (Extended) | 0 | 4 | 10 | 5 | 19 | 0 |
+| Plan & Steps | 1 | 1 | 8 | 0 | 10 | 0 |
+| **Total** | **2** | **19** | **31** | **9** | **61** | **1** |
+
+---
+
+## Phase 2 Priority Action Items
 
 ### Immediate (P0)
-1. **BUG-001**: Missing JSON error handling in POST route
-2. **BUG-002**: Missing await in consultant mode processUserMessage
-3. **BUG-003**: Race condition in shared thread creation
-4. **BUG-004**: Participant data exposure via RPC
-5. **BUG-005**: Message isolation bypass
+1. **BUG-IP-002**: Thread ownership validation in messages route (CRITICAL)
+2. **BUG-PS-001**: Race condition in step completion/summary (CRITICAL)
 
-### Short-term (P1)
-6. **BUG-006**: Missing await on validateBargeInWithTranscript
-7. **BUG-007**: Logic error in findIndex for error recovery
-8. **BUG-011**: Insight thread ID override
-9. **BUG-012**: Missing thread isolation in insight retrieval
-10. **BUG-013**: Unvalidated participant ID in speaker assignment
+### Short-term (P1 - HIGH)
+3. **BUG-IP-001**: Voice agent init wrong thread resolution
+4. **BUG-IP-003**: NULL thread ID in AI message insert
+5. **BUG-IP-005**: Step complete wrong thread resolution
+6. **BUG-SH-001**: Missing thread ID in realtime subscription
+7. **BUG-SH-003**: Thread initialization race condition
+8. **BUG-SH-004**: Insight thread attribution bug
+9. **BUG-SH-007**: Voice AI response to wrong thread
+10. **BUG-VM-001**: Audio playback state race condition
+11. **BUG-VM-004**: Barge-in validation timeout
+12. **BUG-VM-006**: TTS stream reading timeout
+13. **BUG-VM-007**: Transcript queue doubles messages
+14. **BUG-VM-009**: Generation state not reset
+15. **BUG-CM-003**: Pending analysis race condition
+16. **BUG-CM-005**: No analysis on empty conversations
+17. **BUG-CM-012**: Thread identification fails silently
+18. **BUG-CM-019**: RLS bypass silent failure
+19. **BUG-PS-006**: No locking on simultaneous completions
 
-### Medium-term (P2)
-11. All remaining HIGH severity bugs
-12. Security-related MEDIUM bugs (BUG-026, BUG-027, BUG-028)
-13. Voice mode stability bugs
+### Medium-term (P2 - MEDIUM)
+20. All remaining MEDIUM severity bugs in each category
 
 ---
 

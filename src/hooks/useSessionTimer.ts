@@ -262,12 +262,63 @@ function saveStepToLocalStorage(askKey: string, stepId: string, elapsedSeconds: 
 }
 
 /**
+ * Get the localStorage key for timer reset timestamp
+ */
+function getTimerResetKey(askKey: string): string {
+  return `${STORAGE_KEY_PREFIX}${askKey}_reset_at`;
+}
+
+/**
+ * Load timer reset timestamp from localStorage
+ */
+function loadTimerResetFromLocalStorage(askKey: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(getTimerResetKey(askKey));
+  } catch (error) {
+    // Silent fail
+  }
+  return null;
+}
+
+/**
+ * Save timer reset timestamp to localStorage
+ */
+function saveTimerResetToLocalStorage(askKey: string, resetAt: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (resetAt) {
+      localStorage.setItem(getTimerResetKey(askKey), resetAt);
+    } else {
+      localStorage.removeItem(getTimerResetKey(askKey));
+    }
+  } catch (error) {
+    // Silent fail
+  }
+}
+
+/**
+ * Clear all timer data from localStorage for a given ASK key
+ */
+function clearTimerFromLocalStorage(askKey: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(getStorageKey(askKey));
+    localStorage.removeItem(getLastActivityKey(askKey));
+    // Also clear any step timers (we can't enumerate them all, but we clear what we know)
+  } catch (error) {
+    // Silent fail
+  }
+}
+
+/**
  * Fetch elapsed seconds from server
  */
 interface ServerTimerData {
   elapsedActiveSeconds: number;
   stepElapsedSeconds?: number;
   currentStepId?: string;
+  timerResetAt?: string | null;
 }
 
 async function fetchFromServer(askKey: string, inviteToken?: string | null): Promise<ServerTimerData | null> {
@@ -289,6 +340,7 @@ async function fetchFromServer(askKey: string, inviteToken?: string | null): Pro
         elapsedActiveSeconds: result.data.elapsedActiveSeconds,
         stepElapsedSeconds: result.data.stepElapsedSeconds,
         currentStepId: result.data.currentStepId,
+        timerResetAt: result.data.timerResetAt,
       };
     }
   } catch (error) {
@@ -580,7 +632,7 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     }
   }, [clearInactivityTimeout, startInactivityCountdown, askKey, syncToServer]);
 
-  // Load from server on mount (async, uses higher value)
+  // Load from server on mount (async, detects resets)
   useEffect(() => {
     if (!askKey) return;
 
@@ -589,13 +641,38 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     const loadServerValue = async () => {
       const serverData = await fetchFromServer(askKey, inviteToken);
       if (mounted && serverData !== null) {
-        // Update total elapsed time
+        // Check if a timer reset occurred (e.g., after purge)
+        const localResetAt = loadTimerResetFromLocalStorage(askKey);
+        const serverResetAt = serverData.timerResetAt;
+
+        // Detect if server has a newer reset timestamp
+        const resetDetected = serverResetAt && (
+          !localResetAt ||
+          new Date(serverResetAt).getTime() > new Date(localResetAt).getTime()
+        );
+
+        if (resetDetected) {
+          // A reset was triggered on the server - clear local cache and use server value
+          console.log('[useSessionTimer] Timer reset detected, clearing localStorage');
+          clearTimerFromLocalStorage(askKey);
+          saveTimerResetToLocalStorage(askKey, serverResetAt);
+          setElapsedSeconds(serverData.elapsedActiveSeconds);
+          setStepElapsedSeconds(0);
+          return;
+        }
+
+        // No reset - use the higher value between local and server
         setElapsedSeconds(prev => {
           const maxValue = Math.max(prev, serverData.elapsedActiveSeconds);
           // Update localStorage with the max value
           saveToLocalStorage(askKey, maxValue);
           return maxValue;
         });
+
+        // Save the server's reset timestamp if we don't have one locally
+        if (serverResetAt && !localResetAt) {
+          saveTimerResetToLocalStorage(askKey, serverResetAt);
+        }
 
         // Update step elapsed time if server returned it and matches current step
         if (

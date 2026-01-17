@@ -292,6 +292,7 @@ Junction table for participants in ASK sessions.
 | is_spokesperson | boolean | YES | false | Group spokesperson flag |
 | invite_token | varchar | YES | | UNIQUE - Auto-generated token for invite links |
 | elapsed_active_seconds | integer | YES | 0 | Accumulated active session time |
+| timer_reset_at | timestamptz | YES | NULL | Timestamp of last timer reset (e.g., via purge). Client uses this to detect resets and clear localStorage cache. |
 
 **Unique Constraint:** (ask_session_id, user_id)
 

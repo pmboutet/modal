@@ -172,11 +172,16 @@ export async function POST(
     result.deletedConversationThreads = threadsDeleted ?? 0;
 
     // Step 8: Reset session timers for all participants
+    // Set timer_reset_at timestamp so client-side can detect the reset and clear localStorage
+    // We update ALL participants (not just those with elapsed > 0) to ensure the reset signal
+    // reaches everyone who might have localStorage data
     const { count: timersReset } = await adminSupabase
       .from("ask_participants")
-      .update({ elapsed_active_seconds: 0 }, { count: "exact" })
-      .in("ask_session_id", askSessionIds)
-      .gt("elapsed_active_seconds", 0);
+      .update({
+        elapsed_active_seconds: 0,
+        timer_reset_at: new Date().toISOString()
+      }, { count: "exact" })
+      .in("ask_session_id", askSessionIds);
     result.timersReset = timersReset ?? 0;
 
     // Step 9: Clear AI challenge builder results from project
