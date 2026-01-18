@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
+import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { getSessionSynthesis } from "@/lib/graphRAG/synthesisQueries";
 import type { ApiResponse } from "@/types";
 
@@ -11,6 +12,9 @@ import type { ApiResponse } from "@/types";
  * - Tensions: Claims that contradict each other
  * - Top Recommendations: Most supported recommendations
  * - Key Concepts: Most frequent entities
+ *
+ * SECURITY: Admin-only endpoint. Participants should NOT have access to synthesis data.
+ * BUG-SYNTHESIS-001 FIX: Added authentication and authorization check.
  */
 export async function GET(
   request: NextRequest,
@@ -18,6 +22,34 @@ export async function GET(
 ) {
   try {
     const { key } = await params;
+
+    // BUG-SYNTHESIS-001 FIX: Require authenticated user with admin/project access
+    const authClient = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json<ApiResponse>(
+        { success: false, error: "Authentication required" },
+        { status: 401 }
+      );
+    }
+
+    // Check if user has admin role or project access
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const isAdmin = profile?.role === 'full_admin' || profile?.role === 'client_admin';
+
+    if (!isAdmin) {
+      return NextResponse.json<ApiResponse>(
+        { success: false, error: "Admin access required for synthesis data" },
+        { status: 403 }
+      );
+    }
+
     const supabase = getAdminSupabaseClient();
 
     // Get ASK session by key

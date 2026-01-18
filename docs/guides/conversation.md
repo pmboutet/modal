@@ -146,10 +146,37 @@ La détection d'insights se fait quelque soit le mode et le canal.
 
 ---
 
+## AUDIT #2 (18/01/2026 - Session 2)
+
+### Résultats par section
+
+| Section | Status | Notes |
+|---------|--------|-------|
+| A - Accès | ✅ CONFORME | Token 32-char hex, magic link, allow_auto_registration OK |
+| B - Thread | ✅ CONFORME | Individual/shared threads, contrainte unique OK |
+| C - Plan | ✅ CONFORME | Plan generation pour tous modes/canaux OK |
+| D - Init message | ✅ CONFORME | Consultant exclu correctement |
+| E - Questions suggérées | ✅ CONFORME | is_spokesperson + consultant mode OK |
+| F - Timing | ⚠️ PARTIEL | Timing OK, group sync NON implémenté |
+| G - Step complete | ✅ CONFORME | STEP_COMPLETE parsing + summary OK |
+| H - Insights | ✅ CONFORME | Thread filtering OK, attribution tous modes OK |
+| I - Fin interview | ✅ CONFORME | Graph trigger OK, endpoint protégé |
+
+### CORRECTIONS APPLIQUÉES (Audit #2)
+
+| Bug ID | Section | Correction | Fichier |
+|--------|---------|------------|---------|
+| BUG-SYNTHESIS-001 | I | Auth check ajouté (admin only) | synthesis/route.ts |
+| BUG-H-GROUP | H | Attribution @group implémentée (message poster) | respond/route.ts |
+| BUG-H-RAPPORTEUR | H | Attribution @groupRapporteur implémentée (fallback message poster, TODO diarisation) | respond/route.ts |
+
+---
+
 ## AMÉLIORATIONS FUTURES (non bloquantes)
 
 | Item | Priorité | Description |
 |------|----------|-------------|
+| Diarisation voice | 🟡 | Intégrer diarisation voice pour @groupRapporteur (identification speaker) |
 | BUG-PS-001 | 🟡 | Race condition step completion (ajouter état `completing`) |
 | BUG-PS-006 | 🟡 | Locking DB sur completions simultanées |
 | Synchro @group | 🟡 | Hook `useTypingBroadcast` pour mode @group multi-utilisateurs |

@@ -1722,12 +1722,17 @@ export async function POST(
         })
       : null;
 
-    // BUG-SECTION-H FIX: In consultant mode, insights must be attributed to the user who posted
-    // the message, NOT to the consultant (is_spokesperson). If currentUserId is the consultant,
-    // use lastUserUserId instead for insight attribution.
+    // BUG-SECTION-H FIX: Insight attribution based on conversation mode
+    // - @consultant: Attribute to message author, NOT the consultant (is_spokesperson)
+    // - @group (collaborative): Attribute to whoever posted the message (brought it to debate)
+    // - @groupRapporteur (group_reporter): Attribute to speaker (diarization if voice, else message author)
+    // - @individual_parallel: Attribute to current user (default)
+    const conversationMode = askRow.conversation_mode;
     let insightAuthorFallbackId: string | null = currentUserId;
+
     if (isConsultantMode && currentUserId) {
-      // Check if currentUserId is the spokesperson (consultant)
+      // BUG-SECTION-H FIX (@consultant): If currentUserId is the spokesperson (consultant),
+      // use lastUserUserId instead for insight attribution.
       const currentUserParticipant = (participantRows ?? []).find(
         row => row.user_id === currentUserId
       );
@@ -1737,13 +1742,33 @@ export async function POST(
       if (isCurrentUserSpokesperson && lastUserUserId && lastUserUserId !== currentUserId) {
         // The consultant is logged in, but we should attribute insights to the actual message author
         insightAuthorFallbackId = lastUserUserId;
-        console.log('[respond] BUG-SECTION-H FIX: Using lastUserUserId for insight attribution in consultant mode:', {
+        console.log('[respond] BUG-SECTION-H FIX (@consultant): Using lastUserUserId for insight attribution:', {
           currentUserId,
           lastUserUserId,
           isCurrentUserSpokesperson,
         });
       }
+    } else if (conversationMode === 'collaborative') {
+      // BUG-H-GROUP FIX (@group): Attribute to whoever posted the message (brought it to debate)
+      // Use lastUserUserId which represents the message poster
+      if (lastUserUserId) {
+        insightAuthorFallbackId = lastUserUserId;
+        console.log('[respond] BUG-H-GROUP FIX (@collaborative): Attributing insight to message poster:', {
+          lastUserUserId,
+        });
+      }
+    } else if (conversationMode === 'group_reporter') {
+      // BUG-H-RAPPORTEUR FIX (@groupRapporteur): Attribute to speaker (diarization if voice, else message author)
+      // TODO: Integrate voice diarization to identify speaker in voice messages
+      // For now, fall back to message poster (lastUserUserId) as best approximation
+      if (lastUserUserId) {
+        insightAuthorFallbackId = lastUserUserId;
+        console.log('[respond] BUG-H-RAPPORTEUR FIX (@group_reporter): Attributing insight to message poster (diarization not yet integrated):', {
+          lastUserUserId,
+        });
+      }
     }
+    // For individual_parallel mode, default attribution to currentUserId is correct
 
     // Fetch elapsed times using centralized helper (DRY)
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
