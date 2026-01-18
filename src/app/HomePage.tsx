@@ -35,6 +35,7 @@ type TokenSessionPayload = {
   challenges?: Challenge[];
   conversationPlan?: import('@/types').ConversationPlan | null;
   conversationThreadId?: string | null;
+  isInitializing?: boolean; // True when plan/message generation is in progress (async)
   viewer?: {
     participantId?: string | null;
     profileId?: string | null;
@@ -334,6 +335,7 @@ function MobileLayout({
                   conversationPlan={sessionData.conversationPlan}
                   onSendMessage={onSendMessage}
                   isLoading={sessionData.isLoading}
+                  isInitializing={sessionData.isInitializing}
                   onHumanTyping={onUserTyping}
                   currentParticipantName={currentParticipantName}
                   currentUserId={currentUserId}
@@ -1136,6 +1138,9 @@ export default function HomePage() {
       const hasPersistedMessages = (data.data?.messages ?? []).length > 0;
       hasPostedMessageSinceRefreshRef.current = hasPersistedMessages;
 
+      // Check if async initialization is in progress
+      const isInitializing = data.data?.isInitializing === true;
+
       setSessionData(prev => {
         const messagesFromApi = (data.data?.messages ?? []).map(message => {
           const existing = prev.messages.find(prevMessage => prevMessage.id === message.id);
@@ -1175,9 +1180,56 @@ export default function HomePage() {
           conversationPlan: data.data?.conversationPlan ?? null,
           conversationThreadId: data.data?.conversationThreadId ?? null,
           isLoading: false,
+          isInitializing, // Track async initialization state
           error: null,
         };
       });
+
+      // If async initialization is in progress, poll until complete
+      if (isInitializing) {
+        console.log('[HomePage] Async initialization in progress, starting polling...');
+        const pollForInitialization = async () => {
+          const POLL_INTERVAL = 2000; // 2 seconds
+          const MAX_POLLS = 15; // Max 30 seconds
+          let pollCount = 0;
+
+          const poll = async () => {
+            pollCount++;
+            if (pollCount > MAX_POLLS) {
+              console.warn('[HomePage] Initialization polling timeout');
+              setSessionData(prev => ({ ...prev, isInitializing: false }));
+              return;
+            }
+
+            try {
+              const pollResponse = await fetch(`/api/ask/token/${encodeURIComponent(token)}`);
+              const pollData: ApiResponse<TokenSessionPayload> = await pollResponse.json();
+
+              if (pollData.success && !pollData.data?.isInitializing) {
+                // Initialization complete - update state with new data
+                console.log('[HomePage] Initialization complete, updating state');
+                setSessionData(prev => ({
+                  ...prev,
+                  messages: pollData.data?.messages ?? prev.messages,
+                  conversationPlan: pollData.data?.conversationPlan ?? prev.conversationPlan,
+                  isInitializing: false,
+                }));
+                return;
+              }
+
+              // Still initializing, poll again
+              setTimeout(poll, POLL_INTERVAL);
+            } catch {
+              // Error polling, retry
+              setTimeout(poll, POLL_INTERVAL);
+            }
+          };
+
+          setTimeout(poll, POLL_INTERVAL);
+        };
+
+        pollForInitialization();
+      }
 
       // Fallback chain: viewer name > viewer email > URL param > auth user name
       const viewerName = data.data?.viewer?.name ?? data.data?.viewer?.email ?? derivedParticipantName ?? authUserName ?? null;
@@ -2765,6 +2817,7 @@ export default function HomePage() {
                   conversationPlan={sessionData.conversationPlan}
                   onSendMessage={handleSendMessage}
                   isLoading={sessionData.isLoading}
+                  isInitializing={sessionData.isInitializing}
                   onHumanTyping={sessionTimer.notifyUserTyping}
                   currentParticipantName={currentParticipantName}
                   currentUserId={currentUserId}

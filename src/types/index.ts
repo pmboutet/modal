@@ -216,6 +216,7 @@ export interface SessionData {
   conversationPlan?: ConversationPlan | null;
   conversationThreadId?: string | null; // Thread ID for realtime subscriptions
   isLoading: boolean;
+  isInitializing?: boolean; // True when plan/message generation is in progress (async)
   error: string | null;
 }
 
@@ -343,6 +344,7 @@ export interface ChatComponentProps {
   conversationPlan?: ConversationPlan | null;
   onSendMessage: (content: string, type?: Message['type'], metadata?: Message['metadata']) => void;
   isLoading: boolean;
+  isInitializing?: boolean; // True when async plan/message generation is in progress
   onHumanTyping?: (isTyping: boolean) => void;
   currentParticipantName?: string | null;
   currentUserId?: string | null;

@@ -672,146 +672,33 @@ export async function GET(
       if (conversationThread) {
         conversationPlan = await getConversationPlanWithSteps(adminClient, conversationThread.id);
 
-        // Generate plan if it doesn't exist
-        if (!conversationPlan) {
-          try {
-            // Use centralized function for plan generation variables
-            // Note: Token route has limited access to system prompts, but the centralized
-            // function handles null values gracefully
-            const planGenerationVariables = buildConversationAgentVariables({
-              ask: {
-                ask_key: askRow.ask_key,
-                question: askRow.question,
-                description: askRow.description,
-                system_prompt: null,
-              },
-              project: null,
-              challenge: null,
-              messages: [],
-              participants: participants.map(p => ({ name: p.name, role: p.role ?? null, description: null })),
-              conversationPlan: null,
-            });
+        // Check if plan or initial message needs to be generated
+        const needsPlan = !conversationPlan;
+        const needsInitialMessage = messages.length === 0 && askRow.conversation_mode !== 'consultant';
 
-            const planData = await generateConversationPlan(
-              adminClient,
-              askRow.ask_session_id,
-              planGenerationVariables
-            );
+        if (needsPlan || needsInitialMessage) {
+          // Trigger async initialization - fire and forget
+          // This allows the response to return immediately while generation happens in background
+          console.log(`🚀 [token route] Triggering async initialization (needsPlan: ${needsPlan}, needsInitialMessage: ${needsInitialMessage})`);
 
-            conversationPlan = await createConversationPlan(
-              adminClient,
-              conversationThread.id,
-              planData
-            );
-          } catch (planError) {
-            // Log the error for debugging with full details
-            const errorDetails = planError instanceof Error
-              ? { message: planError.message, stack: planError.stack }
-              : typeof planError === 'object'
-                ? JSON.stringify(planError, null, 2)
-                : String(planError);
-            console.error('❌ [token route] Plan generation failed:', errorDetails);
-            // Continue without the plan - it's an enhancement, not a requirement
-          }
-        }
+          // Build the init URL
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL
+            || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+            || 'http://localhost:3000';
+          const initUrl = `${baseUrl}/api/ask/token/${encodeURIComponent(token)}/init`;
 
-        // Generate initial message if no messages exist (SEPARATE from plan generation)
-        // Skip in consultant mode - AI doesn't respond automatically, only suggests questions
-        if (messages.length === 0 && askRow.conversation_mode !== 'consultant') {
-          try {
-            // Fetch elapsed times using centralized helper (DRY - same as stream route)
-            // IMPORTANT: Pass participantRows to use fallback when profileId doesn't match
-            const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
-              supabase: adminClient,
+          // Fire and forget - don't await
+          fetch(initUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
               askSessionId: askRow.ask_session_id,
-              profileId: participantInfo?.user_id ?? null,
-              conversationPlan,
-              participantRows: participantRows ?? [],
-            });
-
-            // Use centralized function for initial message variables
-            const agentVariables = buildConversationAgentVariables({
-              ask: {
-                ask_key: askRow.ask_key,
-                question: askRow.question,
-                description: askRow.description,
-                system_prompt: null,
-              },
-              project: null,
-              challenge: null,
-              messages: [],
-              participants: participants.map(p => ({ name: p.name, role: p.role ?? null, description: null })),
-              conversationPlan,
-              elapsedActiveSeconds,
-              stepElapsedActiveSeconds,
-            });
-
-            const agentResult = await executeAgent({
-              supabase: adminClient,
-              agentSlug: 'ask-conversation-response',
-              askSessionId: askRow.ask_session_id,
-              interactionType: 'ask.chat.response',
-              variables: agentVariables,
-              toolContext: {
-                projectId: askRow.project_id,
-                challengeId: askRow.challenge_id,
-              },
-            });
-
-            if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
-              const aiResponse = agentResult.content.trim();
-
-              // Get active step ID if plan exists
-              const activeStepId = conversationPlan?.steps?.find(s => s.status === 'active')?.id ?? null;
-
-              // Insert the initial AI message using RPC to bypass RLS
-              // Must include p_plan_step_id to avoid PostgreSQL function overload ambiguity
-              const { data: inserted, error: insertError } = await adminClient.rpc('insert_ai_message', {
-                p_ask_session_id: askRow.ask_session_id,
-                p_conversation_thread_id: conversationThread.id,
-                p_content: aiResponse,
-                p_sender_name: 'Agent',
-                p_plan_step_id: activeStepId,
-              });
-
-              if (insertError) {
-                console.error('❌ [token route] Failed to insert initial message:', insertError.message, insertError.details, insertError.hint);
-              }
-              if (!insertError && inserted) {
-                const initialMessage: Message = {
-                  id: inserted.id,
-                  askKey: askRow.ask_key,
-                  askSessionId: inserted.ask_session_id,
-                  conversationThreadId: inserted.conversation_thread_id ?? null,
-                  content: inserted.content,
-                  type: (inserted.message_type as Message['type']) ?? 'text',
-                  senderType: 'ai',
-                  senderId: inserted.user_id ?? null,
-                  senderName: 'Agent',
-                  timestamp: inserted.created_at ?? new Date().toISOString(),
-                  metadata: normaliseMessageMetadata(inserted.metadata as Record<string, unknown> | null),
-                };
-                // Add to messages array so it's included in the response
-                messages.push({
-                  id: initialMessage.id,
-                  askKey: askRow.ask_key,
-                  askSessionId: askRow.ask_session_id,
-                  content: initialMessage.content,
-                  type: initialMessage.type,
-                  senderType: initialMessage.senderType,
-                  senderId: initialMessage.senderId,
-                  senderName: initialMessage.senderName ?? 'Agent',
-                  timestamp: initialMessage.timestamp,
-                  metadata: inserted.metadata as Record<string, unknown> || {},
-                  clientId: initialMessage.id,
-                });
-              }
-            }
-          } catch (initMsgError) {
-            // Log the error for debugging
-            console.error('❌ [token route] Initial message generation failed:', initMsgError instanceof Error ? initMsgError.message : initMsgError);
-            // Continue without initial message - user can still interact
-          }
+              conversationThreadId: conversationThread.id,
+              conversationMode: askRow.conversation_mode,
+            }),
+          }).catch(err => {
+            console.error('❌ [token route] Failed to trigger async init:', err instanceof Error ? err.message : err);
+          });
         }
       }
     } catch (threadPlanError) {
@@ -819,6 +706,9 @@ export async function GET(
       console.error('❌ [token route] Thread/plan setup failed:', threadPlanError instanceof Error ? threadPlanError.message : threadPlanError);
       // Continue without the plan - it's an enhancement, not a requirement
     }
+
+    // Determine if async initialization is in progress (plan or initial message being generated)
+    const needsInit = !conversationPlan || (messages.length === 0 && askRow.conversation_mode !== 'consultant');
 
     return NextResponse.json<ApiResponse>({
       success: true,
@@ -846,6 +736,8 @@ export async function GET(
         viewer,
         conversationPlan,
         conversationThreadId,
+        // Flag to indicate async initialization is in progress
+        isInitializing: needsInit,
       }
     });
   } catch (error) {

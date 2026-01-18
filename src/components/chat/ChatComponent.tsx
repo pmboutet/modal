@@ -41,6 +41,7 @@ export function ChatComponent({
   conversationPlan,
   onSendMessage,
   isLoading,
+  isInitializing = false,
   onHumanTyping,
   currentParticipantName,
   currentUserId,
@@ -724,7 +725,24 @@ export function ChatComponent({
         </div>
 
         <AnimatePresence>
-          {showAgentTyping && (
+          {isInitializing && (
+            <motion.div
+              key="initializing-indicator"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.2 }}
+              className="mb-3 flex items-center gap-2 pl-1 text-xs text-muted-foreground/80"
+              aria-live="polite"
+            >
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500/30" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500/40" />
+              </span>
+              <span className="italic">Préparation de la conversation...</span>
+            </motion.div>
+          )}
+          {showAgentTyping && !isInitializing && (
             <motion.div
               key="agent-typing-indicator"
               initial={{ opacity: 0, y: 4 }}
