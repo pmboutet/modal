@@ -2,7 +2,7 @@
 
 > **Generated**: 2026-01-17
 > **Last Updated**: 2026-01-17
-> **Status**: 35/35 Phase 1 bugs resolved | 60 Phase 2 bugs identified (by conversation type)
+> **Status**: 35/35 Phase 1 bugs resolved | 62 Phase 2 bugs identified (2 resolved)
 
 ---
 
@@ -563,8 +563,8 @@ Type is included at the end of deduplication key. Two insights with identical co
 ## Phase 2: Bugs by Conversation Type
 
 > **Analysis Date**: 2026-01-17
-> **Total Bugs Found**: 61 (2 Critical, 19 High, 31 Medium, 9 Low)
-> **Resolved**: 1 (BUG-IP-009)
+> **Total Bugs Found**: 62 (2 Critical, 20 High, 31 Medium, 9 Low)
+> **Resolved**: 2 (BUG-IP-009, BUG-IP-010)
 
 ---
 
@@ -671,6 +671,31 @@ In individual_parallel mode with voice mode (STT + TTS), when a user activates v
 // If initial message already exists (created by GET /api/ask/[key]) but never spoken
 if (messages.length === 1 && messages[0].role === 'assistant') {
   await agent.speakInitialMessage(messages[0].content);
+}
+```
+
+---
+
+#### BUG-IP-010: Token Route Insights Not Filtered by Thread
+**Severity:** HIGH
+**File:** `src/app/api/ask/token/[token]/route.ts:293, 465-488`
+**Status:** ✅ RESOLVED
+
+**Description:**
+In individual_parallel mode, the token route (`GET /api/ask/token/[token]`) correctly filtered messages by thread but did NOT filter insights. The RPC `get_ask_insights_by_token` fetched ALL insights for the entire session, causing participants to see insights from other participants' conversations.
+
+**Impact:** Insight isolation violation - Participant A could see insights generated from Participant B's conversation thread.
+
+**Resolution:** Added insight filtering using `getInsightsForThread()` after message filtering:
+```typescript
+// BUG FIX: Also filter insights by thread in individual_parallel mode
+if (conversationThread && !shouldUseSharedThread(askConfig)) {
+  const { insights: threadInsights } = await getInsightsForThread(
+    adminClient,
+    conversationThread.id
+  );
+  // Rebuild insights array with filtered thread insights
+  insights = threadInsights.map((row) => ({ ... }));
 }
 ```
 
@@ -1216,12 +1241,12 @@ Line 657 falls back to `created_at` if `activated_at` is NULL. But `created_at` 
 
 | Conversation Type | Critical | High | Medium | Low | Total | Resolved |
 |-------------------|----------|------|--------|-----|-------|----------|
-| Individual Parallel | 1 | 5 | 3 | 0 | 9 | 1 ✅ |
+| Individual Parallel | 1 | 6 | 3 | 0 | 10 | 2 ✅ |
 | Shared Thread | 0 | 4 | 4 | 0 | 8 | 0 |
 | Voice Mode (Extended) | 0 | 5 | 6 | 4 | 15 | 0 |
 | Consultant Mode (Extended) | 0 | 4 | 10 | 5 | 19 | 0 |
 | Plan & Steps | 1 | 1 | 8 | 0 | 10 | 0 |
-| **Total** | **2** | **19** | **31** | **9** | **61** | **1** |
+| **Total** | **2** | **20** | **31** | **9** | **62** | **2** |
 
 ---
 

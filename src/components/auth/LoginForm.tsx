@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 
@@ -83,6 +84,14 @@ export function LoginForm({ redirectTo = "/admin" }: LoginFormProps) {
           >
             {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
           </button>
+        </div>
+        <div className="mt-2 text-right">
+          <Link
+            href="/auth/forgot-password"
+            className="text-sm text-slate-400 hover:text-neon-cyan transition-colors"
+          >
+            Mot de passe oublié ?
+          </Link>
         </div>
       </div>
 

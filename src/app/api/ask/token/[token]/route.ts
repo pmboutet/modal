@@ -3,7 +3,7 @@ import { type SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
 import { type ApiResponse, type Message, type AskConversationMode } from "@/types";
-import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread } from "@/lib/asks";
+import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread, getInsightsForThread } from "@/lib/asks";
 import {
   getConversationPlanWithSteps,
   generateConversationPlan,
@@ -462,7 +462,7 @@ export async function GET(
       }
     }
 
-    const insights = (insightRows ?? []).map((row: any) => ({
+    let insights = (insightRows ?? []).map((row: any) => ({
       id: row.insight_id,
       askId: askRow.ask_key,
       askSessionId: askRow.ask_session_id,
@@ -609,13 +609,71 @@ export async function GET(
 
           console.log(`[token route] Individual thread mode: filtered ${messages.length} messages for thread ${conversationThread.id}`);
         }
+
+        // BUG FIX: Also filter insights by thread in individual_parallel mode
+        // This ensures participants only see insights from their own conversation
+        const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
+          adminClient,
+          conversationThread.id
+        );
+
+        if (!threadInsightsError && threadInsights) {
+          // Get insight authors for filtered insights
+          const filteredInsightIds = threadInsights.map(row => row.id);
+          let filteredInsightAuthorsById: Record<string, any[]> = {};
+
+          if (filteredInsightIds.length > 0) {
+            const { data: filteredAuthors } = await adminClient
+              .from('insight_authors')
+              .select('insight_id, user_id, display_name')
+              .in('insight_id', filteredInsightIds);
+
+            if (filteredAuthors) {
+              filteredAuthors.forEach(author => {
+                if (!filteredInsightAuthorsById[author.insight_id]) {
+                  filteredInsightAuthorsById[author.insight_id] = [];
+                }
+                filteredInsightAuthorsById[author.insight_id].push(author);
+              });
+            }
+          }
+
+          // Rebuild insights array with filtered thread insights
+          insights = threadInsights.map((row: any) => ({
+            id: row.id,
+            askId: askRow.ask_key,
+            askSessionId: askRow.ask_session_id,
+            challengeId: row.challenge_id,
+            authorId: null,
+            authorName: null,
+            authors: (filteredInsightAuthorsById[row.id] ?? []).map((author: any) => ({
+              id: author.user_id || '',
+              userId: author.user_id,
+              name: author.display_name,
+            })),
+            content: row.content,
+            summary: row.summary,
+            type: (row.insight_type_name || row.type || 'pain') as any,
+            category: row.category ?? null,
+            status: row.status || 'new',
+            priority: null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            relatedChallengeIds: row.challenge_id ? [row.challenge_id] : [],
+            kpis: [],
+            sourceMessageId: null,
+            conversationThreadId: row.conversation_thread_id ?? conversationThread.id,
+          }));
+
+          console.log(`[token route] Individual thread mode: filtered ${insights.length} insights for thread ${conversationThread.id}`);
+        }
       }
 
       if (conversationThread) {
         conversationPlan = await getConversationPlanWithSteps(adminClient, conversationThread.id);
 
-        // Generate plan if it doesn't exist and conversation is empty
-        if (!conversationPlan && messages.length === 0) {
+        // Generate plan if it doesn't exist
+        if (!conversationPlan) {
           try {
             // Use centralized function for plan generation variables
             // Note: Token route has limited access to system prompts, but the centralized
@@ -645,104 +703,114 @@ export async function GET(
               conversationThread.id,
               planData
             );
-
-            // Generate initial message right after plan creation
-            // Skip in consultant mode - AI doesn't respond automatically, only suggests questions
-            if (askRow.conversation_mode !== 'consultant') {
-              try {
-              // Fetch elapsed times using centralized helper (DRY - same as stream route)
-              // IMPORTANT: Pass participantRows to use fallback when profileId doesn't match
-              const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
-                supabase: adminClient,
-                askSessionId: askRow.ask_session_id,
-                profileId: participantInfo?.user_id ?? null,
-                conversationPlan,
-                participantRows: participantRows ?? [],
-              });
-
-              // Use centralized function for initial message variables
-              const agentVariables = buildConversationAgentVariables({
-                ask: {
-                  ask_key: askRow.ask_key,
-                  question: askRow.question,
-                  description: askRow.description,
-                  system_prompt: null,
-                },
-                project: null,
-                challenge: null,
-                messages: [],
-                participants: participants.map(p => ({ name: p.name, role: p.role ?? null, description: null })),
-                conversationPlan,
-                elapsedActiveSeconds,
-                stepElapsedActiveSeconds,
-              });
-
-              const agentResult = await executeAgent({
-                supabase: adminClient,
-                agentSlug: 'ask-conversation-response',
-                askSessionId: askRow.ask_session_id,
-                interactionType: 'ask.chat.response',
-                variables: agentVariables,
-                toolContext: {
-                  projectId: askRow.project_id,
-                  challengeId: askRow.challenge_id,
-                },
-              });
-
-              if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
-                const aiResponse = agentResult.content.trim();
-
-                // Insert the initial AI message using RPC to bypass RLS
-                const { data: inserted, error: insertError } = await adminClient.rpc('insert_ai_message', {
-                  p_ask_session_id: askRow.ask_session_id,
-                  p_conversation_thread_id: conversationThread.id,
-                  p_content: aiResponse,
-                  p_sender_name: 'Agent',
-                });
-
-                if (insertError) {
-                  console.error('❌ [token route] Failed to insert initial message:', insertError.message, insertError.details, insertError.hint);
-                }
-                if (!insertError && inserted) {
-                  const initialMessage: Message = {
-                    id: inserted.id,
-                    askKey: askRow.ask_key,
-                    askSessionId: inserted.ask_session_id,
-                    conversationThreadId: inserted.conversation_thread_id ?? null,
-                    content: inserted.content,
-                    type: (inserted.message_type as Message['type']) ?? 'text',
-                    senderType: 'ai',
-                    senderId: inserted.user_id ?? null,
-                    senderName: 'Agent',
-                    timestamp: inserted.created_at ?? new Date().toISOString(),
-                    metadata: normaliseMessageMetadata(inserted.metadata as Record<string, unknown> | null),
-                  };
-                  // Add to messages array so it's included in the response
-                  messages.push({
-                    id: initialMessage.id,
-                    askKey: askRow.ask_key,
-                    askSessionId: askRow.ask_session_id,
-                    content: initialMessage.content,
-                    type: initialMessage.type,
-                    senderType: initialMessage.senderType,
-                    senderId: initialMessage.senderId,
-                    senderName: initialMessage.senderName ?? 'Agent',
-                    timestamp: initialMessage.timestamp,
-                    metadata: inserted.metadata as Record<string, unknown> || {},
-                    clientId: initialMessage.id,
-                  });
-                }
-              }
-            } catch (initMsgError) {
-              // Log the error for debugging
-              console.error('❌ [token route] Initial message generation failed:', initMsgError instanceof Error ? initMsgError.message : initMsgError);
-              // Continue without initial message - user can still interact
-            }
-            } // end non-consultant mode
           } catch (planError) {
-            // Log the error for debugging
-            console.error('❌ [token route] Plan generation failed:', planError instanceof Error ? planError.message : planError);
+            // Log the error for debugging with full details
+            const errorDetails = planError instanceof Error
+              ? { message: planError.message, stack: planError.stack }
+              : typeof planError === 'object'
+                ? JSON.stringify(planError, null, 2)
+                : String(planError);
+            console.error('❌ [token route] Plan generation failed:', errorDetails);
             // Continue without the plan - it's an enhancement, not a requirement
+          }
+        }
+
+        // Generate initial message if no messages exist (SEPARATE from plan generation)
+        // Skip in consultant mode - AI doesn't respond automatically, only suggests questions
+        if (messages.length === 0 && askRow.conversation_mode !== 'consultant') {
+          try {
+            // Fetch elapsed times using centralized helper (DRY - same as stream route)
+            // IMPORTANT: Pass participantRows to use fallback when profileId doesn't match
+            const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
+              supabase: adminClient,
+              askSessionId: askRow.ask_session_id,
+              profileId: participantInfo?.user_id ?? null,
+              conversationPlan,
+              participantRows: participantRows ?? [],
+            });
+
+            // Use centralized function for initial message variables
+            const agentVariables = buildConversationAgentVariables({
+              ask: {
+                ask_key: askRow.ask_key,
+                question: askRow.question,
+                description: askRow.description,
+                system_prompt: null,
+              },
+              project: null,
+              challenge: null,
+              messages: [],
+              participants: participants.map(p => ({ name: p.name, role: p.role ?? null, description: null })),
+              conversationPlan,
+              elapsedActiveSeconds,
+              stepElapsedActiveSeconds,
+            });
+
+            const agentResult = await executeAgent({
+              supabase: adminClient,
+              agentSlug: 'ask-conversation-response',
+              askSessionId: askRow.ask_session_id,
+              interactionType: 'ask.chat.response',
+              variables: agentVariables,
+              toolContext: {
+                projectId: askRow.project_id,
+                challengeId: askRow.challenge_id,
+              },
+            });
+
+            if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
+              const aiResponse = agentResult.content.trim();
+
+              // Get active step ID if plan exists
+              const activeStepId = conversationPlan?.steps?.find(s => s.status === 'active')?.id ?? null;
+
+              // Insert the initial AI message using RPC to bypass RLS
+              // Must include p_plan_step_id to avoid PostgreSQL function overload ambiguity
+              const { data: inserted, error: insertError } = await adminClient.rpc('insert_ai_message', {
+                p_ask_session_id: askRow.ask_session_id,
+                p_conversation_thread_id: conversationThread.id,
+                p_content: aiResponse,
+                p_sender_name: 'Agent',
+                p_plan_step_id: activeStepId,
+              });
+
+              if (insertError) {
+                console.error('❌ [token route] Failed to insert initial message:', insertError.message, insertError.details, insertError.hint);
+              }
+              if (!insertError && inserted) {
+                const initialMessage: Message = {
+                  id: inserted.id,
+                  askKey: askRow.ask_key,
+                  askSessionId: inserted.ask_session_id,
+                  conversationThreadId: inserted.conversation_thread_id ?? null,
+                  content: inserted.content,
+                  type: (inserted.message_type as Message['type']) ?? 'text',
+                  senderType: 'ai',
+                  senderId: inserted.user_id ?? null,
+                  senderName: 'Agent',
+                  timestamp: inserted.created_at ?? new Date().toISOString(),
+                  metadata: normaliseMessageMetadata(inserted.metadata as Record<string, unknown> | null),
+                };
+                // Add to messages array so it's included in the response
+                messages.push({
+                  id: initialMessage.id,
+                  askKey: askRow.ask_key,
+                  askSessionId: askRow.ask_session_id,
+                  content: initialMessage.content,
+                  type: initialMessage.type,
+                  senderType: initialMessage.senderType,
+                  senderId: initialMessage.senderId,
+                  senderName: initialMessage.senderName ?? 'Agent',
+                  timestamp: initialMessage.timestamp,
+                  metadata: inserted.metadata as Record<string, unknown> || {},
+                  clientId: initialMessage.id,
+                });
+              }
+            }
+          } catch (initMsgError) {
+            // Log the error for debugging
+            console.error('❌ [token route] Initial message generation failed:', initMsgError instanceof Error ? initMsgError.message : initMsgError);
+            // Continue without initial message - user can still interact
           }
         }
       }
