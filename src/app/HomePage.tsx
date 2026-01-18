@@ -1194,9 +1194,25 @@ export default function HomePage() {
         };
       });
 
-      // If async initialization is in progress, poll until complete
-      if (isInitializing) {
-        console.log('[HomePage] Async initialization in progress, starting polling...');
+      // If async initialization is needed, trigger it from frontend and poll until complete
+      // Note: We trigger from frontend because fire-and-forget doesn't work reliably in serverless
+      if (isInitializing && data.data?.conversationThreadId) {
+        console.log('[HomePage] Triggering initialization from frontend...');
+
+        // Trigger /init - fire and forget (the atomic lock prevents duplicates)
+        fetch(`/api/ask/token/${encodeURIComponent(token)}/init`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            askSessionId: data.data.ask?.askSessionId,
+            conversationThreadId: data.data.conversationThreadId,
+            conversationMode: data.data.ask?.conversationMode,
+          }),
+        }).catch(err => {
+          console.error('[HomePage] Failed to trigger init:', err);
+        });
+
+        // Start polling for completion
         const pollForInitialization = async () => {
           const POLL_INTERVAL = 2000; // 2 seconds
           const MAX_POLLS = 15; // Max 30 seconds

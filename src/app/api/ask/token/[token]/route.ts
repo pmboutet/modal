@@ -679,37 +679,10 @@ export async function GET(
         // Check the is_initializing flag from the thread to see if another process is already working on it
         const threadIsInitializing = (conversationThread as any).is_initializing === true;
 
-        // Only trigger /init if:
-        // 1. Not a poll request (polls should just check status, not trigger generation)
-        // 2. Thread is not already initializing (atomic lock prevents duplicates)
-        // 3. Actually needs initialization
-        if (!isPoll && !threadIsInitializing && (needsPlan || needsInitialMessage)) {
-          // Trigger async initialization - fire and forget
-          // This allows the response to return immediately while generation happens in background
-          console.log(`🚀 [token route] Triggering async initialization (needsPlan: ${needsPlan}, needsInitialMessage: ${needsInitialMessage})`);
-
-          // Build the init URL
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL
-            || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
-            || 'http://localhost:3000';
-          const initUrl = `${baseUrl}/api/ask/token/${encodeURIComponent(token)}/init`;
-
-          // Fire and forget - don't await
-          fetch(initUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              askSessionId: askRow.ask_session_id,
-              conversationThreadId: conversationThread.id,
-              conversationMode: askRow.conversation_mode,
-            }),
-          }).catch(err => {
-            console.error('❌ [token route] Failed to trigger async init:', err instanceof Error ? err.message : err);
-          });
-        } else if (isPoll) {
-          console.log(`📊 [token route] Poll request - not triggering init`);
-        } else if (threadIsInitializing) {
-          console.log(`⏳ [token route] Thread is already initializing - not triggering init`);
+        // Log initialization status - frontend will trigger /init if needed
+        // (fire-and-forget from backend doesn't work reliably in serverless)
+        if (needsPlan || needsInitialMessage) {
+          console.log(`📋 [token route] Needs initialization (needsPlan: ${needsPlan}, needsInitialMessage: ${needsInitialMessage}, isInitializing: ${threadIsInitializing})`);
         }
       }
     } catch (threadPlanError) {
