@@ -98,13 +98,19 @@ export async function POST(
           planGenerationVariables
         );
 
-        conversationPlan = await createConversationPlan(
-          adminClient,
-          conversationThreadId,
-          planData
-        );
-
-        console.log(`✅ [init route] Plan created with ${planData.steps.length} steps`);
+        // Double-check for plan before creating to prevent race condition
+        const existingPlan = await getConversationPlanWithSteps(adminClient, conversationThreadId);
+        if (existingPlan) {
+          console.log(`⚠️ [init route] Plan already exists (race condition prevented), skipping creation`);
+          conversationPlan = existingPlan;
+        } else {
+          conversationPlan = await createConversationPlan(
+            adminClient,
+            conversationThreadId,
+            planData
+          );
+          console.log(`✅ [init route] Plan created with ${planData.steps.length} steps`);
+        }
       } catch (planError) {
         const errorMsg = planError instanceof Error ? planError.message : String(planError);
         console.error('❌ [init route] Plan generation failed:', errorMsg);
@@ -168,18 +174,30 @@ export async function POST(
           const aiResponse = agentResult.content.trim();
           const activeStepId = conversationPlan?.steps?.find(s => s.status === 'active')?.id ?? null;
 
-          const { error: insertError } = await adminClient.rpc('insert_ai_message', {
-            p_ask_session_id: askSessionId,
-            p_conversation_thread_id: conversationThreadId,
-            p_content: aiResponse,
-            p_sender_name: 'Agent',
-            p_plan_step_id: activeStepId,
-          });
+          // Double-check for messages before insert to prevent race condition
+          // Another init request might have already created the message while we were generating
+          const { data: messagesBeforeInsert } = await adminClient
+            .from('messages')
+            .select('id')
+            .eq('conversation_thread_id', conversationThreadId)
+            .limit(1);
 
-          if (insertError) {
-            console.error('❌ [init route] Failed to insert initial message:', insertError.message);
+          if (messagesBeforeInsert && messagesBeforeInsert.length > 0) {
+            console.log(`⚠️ [init route] Message already exists (race condition prevented), skipping insert`);
           } else {
-            console.log(`✅ [init route] Initial message created`);
+            const { error: insertError } = await adminClient.rpc('insert_ai_message', {
+              p_ask_session_id: askSessionId,
+              p_conversation_thread_id: conversationThreadId,
+              p_content: aiResponse,
+              p_sender_name: 'Agent',
+              p_plan_step_id: activeStepId,
+            });
+
+            if (insertError) {
+              console.error('❌ [init route] Failed to insert initial message:', insertError.message);
+            } else {
+              console.log(`✅ [init route] Initial message created`);
+            }
           }
         }
       } catch (msgError) {
