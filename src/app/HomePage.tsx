@@ -113,6 +113,8 @@ interface MobileLayoutProps {
   isHeaderHidden: boolean;
   /** Handler for chat scroll events */
   onChatScroll: (scrollTop: number, scrollDelta: number) => void;
+  /** Callback when speaker changes (consultant mode diarization) */
+  onSpeakerChange?: (speaker: string) => void;
 }
 
 /**
@@ -153,6 +155,7 @@ function MobileLayout({
   currentUserId,
   isHeaderHidden,
   onChatScroll,
+  onSpeakerChange,
 }: MobileLayoutProps) {
   const [panelWidth, setPanelWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -347,6 +350,7 @@ function MobileLayout({
                   onVoiceModeChange={setIsVoiceModeActive}
                   onEditMessage={onEditMessage}
                   consultantMode={sessionData.ask?.conversationMode === 'consultant'}
+                  onSpeakerChange={onSpeakerChange}
                   elapsedMinutes={sessionElapsedMinutes}
                   isTimerPaused={isSessionTimerPaused}
                   onTogglePause={onToggleTimerPause}
@@ -872,9 +876,12 @@ export default function HomePage() {
 
   const scheduleResponseTimer = useCallback(() => {
     cancelResponseTimer();
+    // Spec: 5 secondes total après arrêt de frappe
+    // ChatComponent détecte l'arrêt de frappe après 1500ms, donc on attend 3500ms ici
+    // Total: 1500ms + 3500ms = 5000ms
     responseTimerRef.current = setTimeout(() => {
       triggerAiResponse();
-    }, 3000);
+    }, 3500);
   }, [cancelResponseTimer, triggerAiResponse]);
 
   const triggerInsightDetection = useCallback(async () => {
@@ -986,15 +993,12 @@ export default function HomePage() {
 
   // Initialize session from URL parameters
   useEffect(() => {
-    // Try multiple ways to get the key or token
-    const keyFromSearchParams = searchParams.get('key');
+    // Get token or ask param from URL
     const tokenFromSearchParams = searchParams.get('token');
     const askFromSearchParams = searchParams.get('ask');
-    const keyFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('key') : null;
     const tokenFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') : null;
     const askFromURL = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('ask') : null;
 
-    const key = keyFromSearchParams || keyFromURL;
     const token = tokenFromSearchParams || tokenFromURL;
     const askKey = askFromSearchParams || askFromURL;
 
@@ -1042,9 +1046,8 @@ export default function HomePage() {
       return;
     }
 
-    // If we have a token, use it; otherwise use key
+    // Token-based link (unique per participant) - this is the only supported access mode
     if (token) {
-      // Token-based link (unique per participant)
       setSessionData(prev => ({
         ...prev,
         askKey: '', // Will be set after loading
@@ -1061,40 +1064,12 @@ export default function HomePage() {
       loadSessionDataByToken(token);
       return;
     }
-    
-    if (!key) {
-      setSessionData(prev => ({
-        ...prev,
-        error: 'No ASK key or token provided in URL. Please use a valid ASK link.'
-      }));
-      return;
-    }
 
-    // Use enhanced validation with detailed error messages
-    const validation = validateAskKey(key);
-    if (!validation.isValid) {
-      setSessionData(prev => ({
-        ...prev,
-        error: `${validation.error}${validation.suggestion ? `. ${validation.suggestion}` : ''}`
-      }));
-      return;
-    }
-
+    // No valid access parameter provided
     setSessionData(prev => ({
       ...prev,
-      askKey: key,
-      ask: null,
-      messages: [],
-      insights: [],
-      challenges: [],
-      isLoading: true,
-      error: null
+      error: 'No ASK token provided in URL. Please use a valid ASK link.'
     }));
-
-    hasPostedMessageSinceRefreshRef.current = false;
-
-    // Load session data from external backend or test endpoint
-    loadSessionData(key);
   }, [searchParams]);
 
   const handleHumanTyping = useCallback((isTyping: boolean) => {
@@ -2073,6 +2048,8 @@ export default function HomePage() {
       }
 
       startAwaitingAiResponse();
+      // Spec: 2 secondes de délai après POST message avant de déclencher la réponse AI
+      await new Promise(resolve => setTimeout(resolve, 2000));
       const insightsCapturedDuringStream = await handleStreamingResponse(content);
 
       // Programmer la détection d'insights seulement si aucune donnée n'a été envoyée pendant le streaming
@@ -2380,10 +2357,10 @@ export default function HomePage() {
                 >
                   <p className="text-sm font-medium mb-2 text-indigo-400">Expected URL format:</p>
                   <code className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-300 block">
-                    https://your-domain.com/?key=your-ask-key-123
+                    https://your-domain.com/?token=your-invite-token
                   </code>
                   <p className="text-xs text-slate-400 mt-2 text-center">
-                    For testing: add <span className="font-mono bg-slate-700 px-1 rounded">&mode=test</span>
+                    Use the link provided in your invitation email.
                   </p>
                 </motion.div>
               )}
@@ -2758,6 +2735,7 @@ export default function HomePage() {
           currentUserId={currentUserId}
           isHeaderHidden={isMobileHeaderHidden}
           onChatScroll={handleMobileChatScroll}
+          onSpeakerChange={consultantAnalysis.notifySpeakerChange}
         />
       ) : (
         <main className={`flex overflow-hidden gap-6 p-6 min-w-0 transition-all duration-200 ${isHeaderCompact ? 'h-[calc(100dvh-48px)]' : 'h-[calc(100dvh-88px)]'}`}>
@@ -2803,6 +2781,7 @@ export default function HomePage() {
                   onVoiceModeChange={handleVoiceModeChange}
                   onEditMessage={handleEditMessage}
                   consultantMode={sessionData.ask?.conversationMode === 'consultant'}
+                  onSpeakerChange={consultantAnalysis.notifySpeakerChange}
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
                   onTogglePause={handleToggleTimerPause}

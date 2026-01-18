@@ -28,19 +28,18 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
     return `${baseUrl}/?ask=${askKey}`;
   };
 
-  // Dynamically import to avoid SSR issues
-  const generateMagicLinkUrl = (email: string, askKey: string, participantToken?: string | null): string => {
+  // Generate participant link URL - token is required
+  const generateMagicLinkUrl = (email: string, askKey: string, participantToken?: string | null): string | null => {
+    if (!participantToken) {
+      // Token is required - return null if not available
+      return null;
+    }
+
     const baseUrl = typeof window !== "undefined"
       ? (process.env.NEXT_PUBLIC_APP_URL || window.location.origin)
       : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-    // If we have a participant token, use it for a unique link per participant
-    if (participantToken) {
-      return `${baseUrl}/?token=${participantToken}`;
-    }
-
-    // Otherwise, use the askKey (backward compatible)
-    return `${baseUrl}/?key=${askKey}`;
+    return `${baseUrl}/?token=${participantToken}`;
   };
 
   const handleSendInvites = async () => {
@@ -278,9 +277,10 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
                   <div className="mt-2 space-y-3">
                     {ask.participants.map(participant => {
                       const participantEmail = participant.email;
-                      const magicLink = participantEmail
-                        ? generateMagicLinkUrl(participantEmail, ask.askKey, participant.inviteToken)
-                        : (participant.inviteToken ? generateMagicLinkUrl("", ask.askKey, participant.inviteToken) : null);
+                      // Token is required for participant links
+                      const magicLink = participant.inviteToken
+                        ? generateMagicLinkUrl(participantEmail || "", ask.askKey, participant.inviteToken)
+                        : null;
                       const isCopied = copiedLinks.has(participant.id);
 
                       return (

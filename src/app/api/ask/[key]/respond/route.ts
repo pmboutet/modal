@@ -1722,6 +1722,29 @@ export async function POST(
         })
       : null;
 
+    // BUG-SECTION-H FIX: In consultant mode, insights must be attributed to the user who posted
+    // the message, NOT to the consultant (is_spokesperson). If currentUserId is the consultant,
+    // use lastUserUserId instead for insight attribution.
+    let insightAuthorFallbackId: string | null = currentUserId;
+    if (isConsultantMode && currentUserId) {
+      // Check if currentUserId is the spokesperson (consultant)
+      const currentUserParticipant = (participantRows ?? []).find(
+        row => row.user_id === currentUserId
+      );
+      const isCurrentUserSpokesperson = currentUserParticipant?.is_spokesperson === true ||
+                                         currentUserParticipant?.role === 'spokesperson';
+
+      if (isCurrentUserSpokesperson && lastUserUserId && lastUserUserId !== currentUserId) {
+        // The consultant is logged in, but we should attribute insights to the actual message author
+        insightAuthorFallbackId = lastUserUserId;
+        console.log('[respond] BUG-SECTION-H FIX: Using lastUserUserId for insight attribution in consultant mode:', {
+          currentUserId,
+          lastUserUserId,
+          isCurrentUserSpokesperson,
+        });
+      }
+    }
+
     // Fetch elapsed times using centralized helper (DRY)
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
       supabase,
@@ -1774,7 +1797,7 @@ export async function POST(
             projectId: askRow.project_id ?? null,
           },
           insightRows,
-          currentUserId,
+          insightAuthorFallbackId, // BUG-SECTION-H FIX: Use message author, not consultant
         );
 
         return NextResponse.json<ApiResponse<{ insights: Insight[] }>>({
@@ -2101,7 +2124,7 @@ export async function POST(
             projectId: askRow.project_id ?? null,
           },
           insightRows,
-          currentUserId,
+          insightAuthorFallbackId, // BUG-SECTION-H FIX: Use message author, not consultant
         );
       } catch (error) {
         // For voice messages, don't fail the entire request if insight detection fails

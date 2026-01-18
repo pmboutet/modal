@@ -3,7 +3,7 @@
  * Magic link URL generation - no database dependencies
  */
 
-import { generateMagicLinkUrl } from '../magicLink';
+import { generateMagicLinkUrl, generateEmailRedirectUrl } from '../magicLink';
 
 // ============================================================================
 // generateMagicLinkUrl TESTS
@@ -60,38 +60,19 @@ describe('generateMagicLinkUrl', () => {
     });
   });
 
-  describe('without participant token (using askKey)', () => {
-    it('should generate URL with key parameter when no participantToken', () => {
+  describe('without participant token (throws error)', () => {
+    it('should throw error when participantToken is undefined', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-ask-key');
-
-      expect(result).toBe('https://app.example.com/?key=my-ask-key');
+      expect(() => generateMagicLinkUrl('user@example.com', 'my-ask-key'))
+        .toThrow('participantToken is required to generate a magic link URL');
     });
 
-    it('should use askKey when participantToken is undefined', () => {
+    it('should throw error when participantToken is empty string', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
-      const result = generateMagicLinkUrl('user@example.com', 'project-2024', undefined);
-
-      expect(result).toBe('https://app.example.com/?key=project-2024');
-    });
-
-    it('should use askKey when participantToken is empty string', () => {
-      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
-
-      // Empty string is falsy, so should fall back to askKey
-      const result = generateMagicLinkUrl('user@example.com', 'my-key', '');
-
-      expect(result).toBe('https://app.example.com/?key=my-key');
-    });
-
-    it('should handle askKey with dots and dashes', () => {
-      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
-
-      const result = generateMagicLinkUrl('user@example.com', 'project-2024.v1');
-
-      expect(result).toBe('https://app.example.com/?key=project-2024.v1');
+      expect(() => generateMagicLinkUrl('user@example.com', 'my-key', ''))
+        .toThrow('participantToken is required to generate a magic link URL');
     });
   });
 
@@ -99,7 +80,7 @@ describe('generateMagicLinkUrl', () => {
     it('should use NEXT_PUBLIC_APP_URL when set', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://production.example.com';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
       expect(result).toStartWith('https://production.example.com/');
     });
@@ -107,34 +88,33 @@ describe('generateMagicLinkUrl', () => {
     it('should fallback to localhost:3000 when NEXT_PUBLIC_APP_URL is not set', () => {
       delete process.env.NEXT_PUBLIC_APP_URL;
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
-      expect(result).toBe('http://localhost:3000/?key=my-key');
+      expect(result).toBe('http://localhost:3000/?token=mytoken');
     });
 
     it('should fallback to localhost:3000 when NEXT_PUBLIC_APP_URL is empty', () => {
       process.env.NEXT_PUBLIC_APP_URL = '';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
-      expect(result).toBe('http://localhost:3000/?key=my-key');
+      expect(result).toBe('http://localhost:3000/?token=mytoken');
     });
 
     it('should handle base URL with trailing slash', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com/';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
-      // Note: This might result in double slash, but that's valid
-      expect(result).toContain('key=my-key');
+      expect(result).toContain('token=mytoken');
     });
 
     it('should handle base URL with path', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com/app';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
-      expect(result).toBe('https://app.example.com/app/?key=my-key');
+      expect(result).toBe('https://app.example.com/app/?token=mytoken');
     });
   });
 
@@ -142,7 +122,7 @@ describe('generateMagicLinkUrl', () => {
     it('should accept email but not include it in URL', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
-      const result = generateMagicLinkUrl('user@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
       expect(result).not.toContain('email');
       expect(result).not.toContain('user@example.com');
@@ -152,38 +132,100 @@ describe('generateMagicLinkUrl', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
       // These should all work - email is just for display
-      expect(() => generateMagicLinkUrl('simple@example.com', 'key')).not.toThrow();
-      expect(() => generateMagicLinkUrl('user+tag@example.com', 'key')).not.toThrow();
-      expect(() => generateMagicLinkUrl('user.name@subdomain.example.com', 'key')).not.toThrow();
+      expect(() => generateMagicLinkUrl('simple@example.com', 'key', 'token1')).not.toThrow();
+      expect(() => generateMagicLinkUrl('user+tag@example.com', 'key', 'token2')).not.toThrow();
+      expect(() => generateMagicLinkUrl('user.name@subdomain.example.com', 'key', 'token3')).not.toThrow();
     });
   });
 
   describe('edge cases', () => {
-    it('should handle empty askKey', () => {
+    it('should handle special characters in token', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
-      const result = generateMagicLinkUrl('user@example.com', '');
+      // Tokens should be URL-safe
+      const result = generateMagicLinkUrl('user@example.com', 'key', 'token_with-special.chars');
 
-      expect(result).toBe('https://app.example.com/?key=');
-    });
-
-    it('should handle special characters in askKey', () => {
-      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
-
-      // Note: askKey should be validated elsewhere, but function should not crash
-      const result = generateMagicLinkUrl('user@example.com', 'key_with-special.chars');
-
-      expect(result).toContain('key=key_with-special.chars');
+      expect(result).toContain('token=token_with-special.chars');
     });
 
     it('should handle unicode in email', () => {
       process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
 
       // Unicode email (for display purposes)
-      const result = generateMagicLinkUrl('用户@example.com', 'my-key');
+      const result = generateMagicLinkUrl('user@example.com', 'my-key', 'mytoken');
 
       // Should work - email is not included in URL
-      expect(result).toBe('https://app.example.com/?key=my-key');
+      expect(result).toBe('https://app.example.com/?token=mytoken');
+    });
+  });
+});
+
+// ============================================================================
+// generateEmailRedirectUrl TESTS
+// ============================================================================
+
+describe('generateEmailRedirectUrl', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv };
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  describe('with participant token', () => {
+    it('should generate callback URL with token in path', () => {
+      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+
+      const result = generateEmailRedirectUrl('my-ask-key', 'abc123token');
+
+      expect(result).toBe('https://app.example.com/auth/callback/token/abc123token');
+    });
+
+    it('should ignore askKey when participantToken is provided', () => {
+      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+
+      const result = generateEmailRedirectUrl('my-ask-key', 'mytoken');
+
+      expect(result).not.toContain('key');
+      expect(result).toContain('/token/mytoken');
+    });
+  });
+
+  describe('without participant token (throws error)', () => {
+    it('should throw error when participantToken is undefined', () => {
+      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+
+      expect(() => generateEmailRedirectUrl('my-ask-key'))
+        .toThrow('participantToken is required for email redirect URL');
+    });
+
+    it('should throw error when participantToken is empty string', () => {
+      process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+
+      expect(() => generateEmailRedirectUrl('my-ask-key', ''))
+        .toThrow('participantToken is required for email redirect URL');
+    });
+  });
+
+  describe('base URL resolution', () => {
+    it('should use NEXT_PUBLIC_APP_URL when set', () => {
+      process.env.NEXT_PUBLIC_APP_URL = 'https://production.example.com';
+
+      const result = generateEmailRedirectUrl('my-key', 'mytoken');
+
+      expect(result).toStartWith('https://production.example.com/');
+    });
+
+    it('should fallback to localhost:3000 when NEXT_PUBLIC_APP_URL is not set', () => {
+      delete process.env.NEXT_PUBLIC_APP_URL;
+
+      const result = generateEmailRedirectUrl('my-key', 'mytoken');
+
+      expect(result).toBe('http://localhost:3000/auth/callback/token/mytoken');
     });
   });
 });

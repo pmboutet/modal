@@ -559,7 +559,8 @@ export async function GET(
     }
 
     // If no messages exist, initiate conversation with agent
-    if (messages.length === 0) {
+    // Note: Consultant mode does NOT get an initialization message (spec requirement)
+    if (messages.length === 0 && askRow.conversation_mode !== 'consultant') {
       try {
         console.log('💬 GET /api/ask/[key]: No messages found, initiating conversation with agent');
 

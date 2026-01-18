@@ -153,7 +153,7 @@ export async function POST(
     // 1. Invite Token (header X-Invite-Token) → contient user_id dans ask_participants
     //    Utilisé quand accès via ?token=xxx
     // 2. Auth Cookie → session Supabase → profile.id
-    //    Utilisé quand accès via ?key=xxx avec user connecté
+    //    Utilisé comme fallback si le token ne contient pas de user_id
     //
     // IMPORTANT: Si aucune méthode ne fonctionne, currentUserId sera null et on
     // tombera sur un thread partagé (fallback) qui sera probablement VIDE.
@@ -227,7 +227,6 @@ export async function POST(
     if (!currentUserId) {
       console.warn('⚠️ [CONSULTANT-ANALYZE] No user identified! This will likely result in empty messages.');
       console.warn('⚠️ [CONSULTANT-ANALYZE] Possible causes:');
-      console.warn('   - Accès via ?key= sans être connecté');
       console.warn('   - Accès via ?token= mais le token n\'a pas de user_id lié');
       console.warn('   - Cookie de session expiré');
     }

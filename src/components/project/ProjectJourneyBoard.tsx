@@ -1967,14 +1967,6 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         return { href: null, canAnswer: false };
       }
 
-      // In production, only expose the participant-specific link for the connected user
-      if (!isProdEnvironment) {
-        return {
-          href: `/?key=${encodeURIComponent(ask.askKey)}`,
-          canAnswer: true,
-        };
-      }
-
       if (!currentProfileId) {
         return { href: null, canAnswer: false };
       }
@@ -1986,14 +1978,15 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         return { href: null, canAnswer: false };
       }
 
+      // Token is required for participant access
       const token = participant.inviteToken?.trim();
-      const href = token
-        ? `/?token=${encodeURIComponent(token)}`
-        : `/?key=${encodeURIComponent(ask.askKey)}`;
+      if (!token) {
+        return { href: null, canAnswer: false };
+      }
 
-      return { href, canAnswer: true };
+      return { href: `/?token=${encodeURIComponent(token)}`, canAnswer: true };
     },
-    [currentProfileId, isProdEnvironment],
+    [currentProfileId],
   );
 
   const availableUsers = boardData?.availableUsers ?? [];

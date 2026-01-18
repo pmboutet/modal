@@ -195,6 +195,18 @@ export async function POST(
 
     let usersById = fetchedUsersById;
 
+    // BUG-GRAPH-001 FIX: Lookup participant ID for non-token auth
+    // currentParticipantId is only set when authenticating via invite token (line 113).
+    // For users authenticated via Supabase session, dev bypass, or auto-registration,
+    // we need to find their participant ID from participantRows using profileId.
+    if (!currentParticipantId && profileId) {
+      const matchingParticipant = participantRows?.find(p => p.user_id === profileId);
+      if (matchingParticipant) {
+        currentParticipantId = matchingParticipant.id;
+        console.log('[Stream] BUG-GRAPH-001 FIX: Found participant ID from profile:', currentParticipantId);
+      }
+    }
+
     // Build participants with extra fields needed by this route
     const participants = (participantRows ?? []).map((row, index) => {
       const user = row.user_id ? usersById[row.user_id] ?? null : null;

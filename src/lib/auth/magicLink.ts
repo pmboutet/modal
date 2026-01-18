@@ -21,9 +21,10 @@ function getBaseUrl(): string {
  * This can be used to display links that admins can copy/paste.
  *
  * @param email - Email address for the participant (optional, for display purposes)
- * @param askKey - Ask session key for the redirect URL
- * @param participantToken - Optional unique token for the participant (if provided, uses token instead of key)
+ * @param askKey - Ask session key (kept for backward compatibility but not used in URL)
+ * @param participantToken - Unique token for the participant (required for URL generation)
  * @returns The magic link URL
+ * @throws Error if participantToken is not provided
  */
 export function generateMagicLinkUrl(
   email: string,
@@ -32,23 +33,23 @@ export function generateMagicLinkUrl(
 ): string {
   const baseUrl = getBaseUrl();
 
-  // If we have a participant token, use it for a unique link per participant
-  if (participantToken) {
-    return `${baseUrl}/?token=${participantToken}`;
+  // Token is required for participant access
+  if (!participantToken) {
+    throw new Error('participantToken is required to generate a magic link URL');
   }
 
-  // Otherwise, use the askKey (backward compatible)
-  return `${baseUrl}/?key=${askKey}`;
+  return `${baseUrl}/?token=${participantToken}`;
 }
 
 /**
  * Generates the email redirect URL for Supabase auth.
  * This URL goes through /auth/callback to exchange the code for a session,
- * then redirects to the final destination with the ASK token/key.
+ * then redirects to the final destination with the ASK token.
  *
- * @param askKey - Ask session key
- * @param participantToken - Optional unique token for the participant
- * @returns The auth callback URL with token/key preserved
+ * @param askKey - Ask session key (kept for backward compatibility but not used)
+ * @param participantToken - Unique token for the participant (required)
+ * @returns The auth callback URL with token preserved
+ * @throws Error if participantToken is not provided
  */
 export function generateEmailRedirectUrl(
   askKey: string,
@@ -56,13 +57,14 @@ export function generateEmailRedirectUrl(
 ): string {
   const baseUrl = getBaseUrl();
 
-  // Use path-based token to avoid Supabase stripping query params
-  // The callback will extract the token from the path and redirect to /?token=XXX
-  if (participantToken) {
-    return `${baseUrl}/auth/callback/token/${participantToken}`;
+  // Token is required for email redirect
+  if (!participantToken) {
+    throw new Error('participantToken is required for email redirect URL');
   }
 
-  return `${baseUrl}/auth/callback/key/${askKey}`;
+  // Use path-based token to avoid Supabase stripping query params
+  // The callback will extract the token from the path and redirect to /?token=XXX
+  return `${baseUrl}/auth/callback/token/${participantToken}`;
 }
 
 /**

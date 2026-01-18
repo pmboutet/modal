@@ -2,14 +2,13 @@
 
 ## Architecture
 
-Le système de magic links utilise des **URLs basées sur le chemin** (path-based) pour préserver les tokens/keys lors du flow OAuth. Cette approche a été adoptée car Supabase supprimait les paramètres de requête (`?token=xxx`) des URLs `emailRedirectTo`.
+Le système de magic links utilise des **URLs basées sur le chemin** (path-based) pour préserver les tokens lors du flow OAuth. Cette approche a été adoptée car Supabase supprimait les paramètres de requête (`?token=xxx`) des URLs `emailRedirectTo`.
 
 ### Routes de callback
 
 ```
 /auth/callback                     # Callback générique (legacy + OAuth providers)
 /auth/callback/token/[token]       # Callback avec participant token
-/auth/callback/key/[key]           # Callback avec ask key
 ```
 
 ### Fichiers clés
@@ -17,15 +16,14 @@ Le système de magic links utilise des **URLs basées sur le chemin** (path-base
 - `src/lib/auth/magicLink.ts` - Génération des URLs et envoi des emails
 - `src/app/auth/callback/route.ts` - Callback OAuth générique
 - `src/app/auth/callback/token/[token]/route.ts` - Callback path-based pour tokens
-- `src/app/auth/callback/key/[key]/route.ts` - Callback path-based pour keys
 - `src/middleware.ts` - Autorise toutes les routes `/auth/callback/*`
 
 ## Flux d'authentification
 
-### Flux avec participant token (recommandé)
+### Flux avec participant token (via magic link email)
 
 ```
-1. Admin envoie un email → sendMagicLink() appelé
+1. Admin envoie un email → sendMagicLink() appelé avec participantToken
 2. sendMagicLink() génère: emailRedirectTo = /auth/callback/token/[token]
 3. Supabase envoie un email avec lien vers son domaine + code
 4. Utilisateur clique → Supabase authentifie
@@ -36,19 +34,6 @@ Le système de magic links utilise des **URLs basées sur le chemin** (path-base
 9. L'utilisateur accède à l'ASK
 ```
 
-### Flux avec ask key (backward compatible)
-
-```
-1. Admin envoie un email → sendMagicLink() appelé (sans participantToken)
-2. sendMagicLink() génère: emailRedirectTo = /auth/callback/key/[key]
-3. Supabase envoie un email avec lien vers son domaine + code
-4. Utilisateur clique → Supabase authentifie
-5. Supabase redirige vers: /auth/callback/key/[key]?code=XXX
-6. Callback échange le code pour une session
-7. Callback redirige vers: /?key=[key]
-8. L'utilisateur accède à l'ASK
-```
-
 ### Flux avec lien direct (copié-collé)
 
 ```
@@ -56,6 +41,14 @@ Le système de magic links utilise des **URLs basées sur le chemin** (path-base
 2. Utilisateur colle le lien → Accès direct
 3. Si l'ASK est anonyme: accès immédiat
 4. Sinon: authentification requise pour participer
+```
+
+### Flux d'inscription publique (via ask key)
+
+```
+1. L'URL /?ask=xxx permet l'inscription publique à une ASK session
+2. Ce flux est distinct de l'accès direct - il ne donne pas accès automatique
+3. L'utilisateur doit s'inscrire pour recevoir son propre token
 ```
 
 ## Configuration
@@ -85,45 +78,43 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
    http://localhost:3000/**
    ```
 
-**Important:** Le wildcard `/**` est requis pour autoriser les routes path-based `/auth/callback/token/*` et `/auth/callback/key/*`.
+**Important:** Le wildcard `/**` est requis pour autoriser les routes path-based `/auth/callback/token/*`.
 
 ## API Reference
 
 ### generateMagicLinkUrl
 
-Génère une URL directe (pour copier-coller, sans authentification Supabase).
+Generates a direct URL (for copy-paste, without Supabase authentication).
 
 ```typescript
 import { generateMagicLinkUrl } from "@/lib/auth/magicLink";
 
-// Avec participant token (recommandé)
+// participantToken is required
 const url = generateMagicLinkUrl("user@example.com", "my-ask-key", "participant-token-123");
 // → https://app-modal.com/?token=participant-token-123
 
-// Avec ask key uniquement (backward compatible)
-const url = generateMagicLinkUrl("user@example.com", "my-ask-key");
-// → https://app-modal.com/?key=my-ask-key
+// Throws an error if participantToken is not provided
+generateMagicLinkUrl("user@example.com", "my-ask-key"); // Error!
 ```
 
 ### generateEmailRedirectUrl
 
-Génère l'URL de callback pour le flow OAuth (utilisée par `sendMagicLink`).
+Generates the callback URL for the OAuth flow (used by `sendMagicLink`).
 
 ```typescript
 import { generateEmailRedirectUrl } from "@/lib/auth/magicLink";
 
-// Avec participant token
+// participantToken is required
 const url = generateEmailRedirectUrl("my-ask-key", "participant-token-123");
 // → https://app-modal.com/auth/callback/token/participant-token-123
 
-// Avec ask key uniquement
-const url = generateEmailRedirectUrl("my-ask-key");
-// → https://app-modal.com/auth/callback/key/my-ask-key
+// Throws an error if participantToken is not provided
+generateEmailRedirectUrl("my-ask-key"); // Error!
 ```
 
 ### sendMagicLink
 
-Envoie un email magic link via Supabase Auth.
+Sends a magic link email via Supabase Auth. Requires a participantToken.
 
 ```typescript
 import { sendMagicLink } from "@/lib/auth/magicLink";
@@ -132,7 +123,7 @@ const result = await sendMagicLink(
   "user@example.com",
   "my-ask-key",
   "project-id-optional",
-  "participant-token-optional"
+  "participant-token-required"  // This is required for email redirect
 );
 
 if (result.success) {
@@ -154,7 +145,7 @@ if (pathname.startsWith('/auth/callback')) {
 }
 ```
 
-Cela permet aux routes `/auth/callback/token/[token]` et `/auth/callback/key/[key]` de traiter le code OAuth sans être redirigées.
+Cela permet aux routes `/auth/callback/token/[token]` de traiter le code OAuth sans être redirigées.
 
 ## Problèmes connus et solutions
 

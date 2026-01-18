@@ -202,7 +202,8 @@ export async function POST(
     });
 
     // If no messages exist, initiate conversation with agent
-    if (!hasMessages) {
+    // Note: Consultant mode does NOT get an initialization message (spec requirement)
+    if (!hasMessages && askRow.conversation_mode !== 'consultant') {
       try {
         // Execute agent to get initial response
         // Use 'ask.chat.response' for initial message (same as text mode)

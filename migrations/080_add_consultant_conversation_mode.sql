@@ -3,7 +3,7 @@
 -- - AI listens to conversation via STT with diarization
 -- - AI suggests questions to consultant (no TTS)
 -- - AI can trigger STEP_COMPLETE automatically
--- - Individual thread for consultant (like individual_parallel)
+-- - Shared thread for consultant (consultant shares thread with participants)
 
 BEGIN;
 

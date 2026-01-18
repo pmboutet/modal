@@ -337,11 +337,16 @@ The agent triggers step completion when:
 
 ### Empty Messages in Thread
 
-In consultant mode, each user has their own thread (individual isolation). If you see empty messages:
+In consultant mode, all participants share the same thread (shared thread). Speaker identification is handled via:
+- **Voice mode:** Diarization labels (S1, S2, S3, etc.) are assigned by Speechmatics STT
+- **Text mode:** Message metadata contains the participant identifier
+
+If you see empty messages:
 
 1. Verify user identification (invite token or auth cookie)
-2. Check that `currentUserId` matches the thread's `user_id`
-3. See API logs for "No user identified" warnings
+2. Check speaker mapping for diarization labels in voice mode
+3. Verify message metadata contains correct participant info in text mode
+4. See API logs for "No user identified" warnings
 
 ### Analysis Not Triggering
 
