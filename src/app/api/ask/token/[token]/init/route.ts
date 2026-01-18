@@ -44,6 +44,40 @@ export async function POST(
 
     const adminClient = getAdminSupabaseClient();
 
+    // Try to acquire the initialization lock atomically
+    // UPDATE ... WHERE is_initializing = false will only succeed if no other process has the lock
+    const { data: lockAcquired, error: lockError } = await adminClient
+      .from('conversation_threads')
+      .update({ is_initializing: true })
+      .eq('id', conversationThreadId)
+      .eq('is_initializing', false)
+      .select('id')
+      .maybeSingle();
+
+    if (lockError) {
+      console.error('❌ [init route] Failed to acquire lock:', lockError.message);
+      return NextResponse.json<ApiResponse>({
+        success: false,
+        error: 'Failed to acquire initialization lock'
+      }, { status: 500 });
+    }
+
+    if (!lockAcquired) {
+      // Another process already has the lock or is_initializing was already true
+      console.log(`⏳ [init route] Initialization already in progress for thread ${conversationThreadId}, skipping`);
+      return NextResponse.json<ApiResponse>({
+        success: true,
+        data: {
+          skipped: true,
+          reason: 'initialization_already_in_progress',
+        }
+      });
+    }
+
+    console.log(`🔒 [init route] Lock acquired for thread ${conversationThreadId}`);
+
+    // Wrap in try-finally to ensure we always release the lock
+    try {
     // Fetch ask session data
     const { data: askRow, error: askError } = await adminClient
       .from('ask_sessions')
@@ -219,6 +253,19 @@ export async function POST(
         durationMs: duration,
       }
     });
+    } finally {
+      // Always release the lock when done (success or error within the lock block)
+      const { error: unlockError } = await adminClient
+        .from('conversation_threads')
+        .update({ is_initializing: false })
+        .eq('id', conversationThreadId);
+
+      if (unlockError) {
+        console.error('❌ [init route] Failed to release lock:', unlockError.message);
+      } else {
+        console.log(`🔓 [init route] Lock released for thread ${conversationThreadId}`);
+      }
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('❌ [init route] Unexpected error:', errorMsg);

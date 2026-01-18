@@ -5,6 +5,7 @@ export interface ConversationThread {
   ask_session_id: string;
   user_id: string | null;
   is_shared: boolean;
+  is_initializing: boolean;
   created_at: string;
 }
 
@@ -189,7 +190,7 @@ export async function getOrCreateConversationThread(
   // because NULL values are considered distinct. We use .limit(1) to handle potential duplicates.
   let query = supabase
     .from('conversation_threads')
-    .select('id, ask_session_id, user_id, is_shared, created_at')
+    .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
     .eq('ask_session_id', askSessionId);
 
   if (useShared) {
@@ -202,7 +203,7 @@ export async function getOrCreateConversationThread(
       // Use .limit(1) to handle potential duplicates due to NULL uniqueness
       const { data: sharedThreads, error: sharedError } = await supabase
         .from('conversation_threads')
-        .select('id, ask_session_id, user_id, is_shared, created_at')
+        .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
         .eq('ask_session_id', askSessionId)
         .is('user_id', null)
         .eq('is_shared', true)
@@ -222,7 +223,7 @@ export async function getOrCreateConversationThread(
           user_id: null,
           is_shared: true,
         })
-        .select('id, ask_session_id, user_id, is_shared, created_at')
+        .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
         .single<ConversationThread>();
 
       if (createSharedError) {
@@ -276,7 +277,7 @@ export async function getOrCreateConversationThread(
       user_id: threadUserId,
       is_shared: useShared,
     })
-    .select('id, ask_session_id, user_id, is_shared, created_at')
+    .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
     .single<ConversationThread>();
 
   if (createError) {
@@ -292,7 +293,7 @@ export async function getOrCreateConversationThread(
       // Rebuild query based on thread type
       let retryQuery = supabase
         .from('conversation_threads')
-        .select('id, ask_session_id, user_id, is_shared, created_at')
+        .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
         .eq('ask_session_id', askSessionId);
 
       if (useShared) {

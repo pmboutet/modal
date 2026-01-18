@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Clock, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock } from "lucide-react";
+import { AlertCircle, Clock, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock, Loader2 } from "lucide-react";
 import { ChatComponent } from "@/components/chat/ChatComponent";
 import { InsightPanel } from "@/components/insight/InsightPanel";
 import { SuggestedQuestionsPanel } from "@/components/consultant/SuggestedQuestionsPanel";
@@ -457,6 +457,7 @@ export default function HomePage() {
   const responseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const insightDetectionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasPostedMessageSinceRefreshRef = useRef(false);
+  const loadingTokenRef = useRef<string | null>(null); // Track which token is currently being loaded to prevent duplicates
   const [awaitingAiResponse, setAwaitingAiResponse] = useState(false);
   const activeAiResponsesRef = useRef(0);
   const [isDetectingInsights, setIsDetectingInsights] = useState(false);
@@ -472,6 +473,7 @@ export default function HomePage() {
   const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
   // Mode selection state - null means not yet selected, 'voice' or 'text' means selected
   const [selectedInputMode, setSelectedInputMode] = useState<'voice' | 'text' | null>(null);
+  const [pendingModeSelection, setPendingModeSelection] = useState<'voice' | 'text' | null>(null); // Track user selection while init is in progress
   // Track if voice config is loading
   const [isVoiceConfigLoading, setIsVoiceConfigLoading] = useState(false);
 
@@ -1050,6 +1052,13 @@ export default function HomePage() {
 
     // Token-based link (unique per participant) - this is the only supported access mode
     if (token) {
+      // Prevent duplicate loading for the same token (React Strict Mode, multiple renders)
+      if (loadingTokenRef.current === token) {
+        console.log('[HomePage] Already loading token, skipping duplicate request');
+        return;
+      }
+      loadingTokenRef.current = token;
+
       setSessionData(prev => ({
         ...prev,
         askKey: '', // Will be set after loading
@@ -1202,7 +1211,8 @@ export default function HomePage() {
             }
 
             try {
-              const pollResponse = await fetch(`/api/ask/token/${encodeURIComponent(token)}`);
+              // Use poll=true to skip triggering /init during polling
+              const pollResponse = await fetch(`/api/ask/token/${encodeURIComponent(token)}?poll=true`);
               const pollData: ApiResponse<TokenSessionPayload> = await pollResponse.json();
 
               if (pollData.success && !pollData.data?.isInitializing) {
@@ -1803,6 +1813,21 @@ export default function HomePage() {
       setSelectedInputMode('text');
     }
   }, [sessionData.ask, isVoiceConfigLoading, selectedInputMode, voiceModeConfig?.systemPrompt]);
+
+  // Apply pending mode selection when initialization completes
+  useEffect(() => {
+    // Only run when:
+    // - User has made a pending selection (while init was in progress)
+    // - Initialization is now complete
+    if (pendingModeSelection && !sessionData.isInitializing) {
+      console.log('[HomePage] Initialization complete, applying pending mode selection:', pendingModeSelection);
+      setSelectedInputMode(pendingModeSelection);
+      if (pendingModeSelection === 'voice') {
+        setIsVoiceModeActive(true);
+      }
+      setPendingModeSelection(null);
+    }
+  }, [pendingModeSelection, sessionData.isInitializing]);
 
   // Handle streaming AI response
   const handleStreamingResponse = useCallback(async (latestUserMessageContent?: string): Promise<boolean> => {
@@ -2577,15 +2602,31 @@ export default function HomePage() {
             )}
           </motion.div>
 
-          {/* Mode selection prompt */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="text-center text-slate-300 mb-4"
-          >
-            Comment voulez-vous répondre ?
-          </motion.p>
+          {/* Mode selection prompt or loading message */}
+          {pendingModeSelection ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center mb-4 space-y-3"
+            >
+              <div className="flex items-center justify-center gap-2 text-slate-300">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Préparation de la conversation...</span>
+              </div>
+              <p className="text-slate-400 text-sm">
+                Vous avez choisi le mode {pendingModeSelection === 'voice' ? 'voix' : 'texte'}. Veuillez patienter.
+              </p>
+            </motion.div>
+          ) : (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="text-center text-slate-300 mb-4"
+            >
+              Comment voulez-vous répondre ?
+            </motion.p>
+          )}
 
           {/* Mode selection buttons */}
           <div className="space-y-3">
@@ -2594,18 +2635,41 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={!pendingModeSelection ? { scale: 1.02 } : {}}
+              whileTap={!pendingModeSelection ? { scale: 0.98 } : {}}
               onClick={() => {
-                setSelectedInputMode('voice');
-                setIsVoiceModeActive(true);
+                if (sessionData.isInitializing) {
+                  // Store selection and wait for init to complete
+                  setPendingModeSelection('voice');
+                } else {
+                  setSelectedInputMode('voice');
+                  setIsVoiceModeActive(true);
+                }
               }}
-              className="w-full bg-white hover:bg-gray-50 rounded-2xl p-5 flex items-center gap-4 shadow-lg hover:shadow-xl transition-all duration-200 group"
+              disabled={!!pendingModeSelection}
+              className={`w-full rounded-2xl p-5 flex items-center gap-4 shadow-lg transition-all duration-200 group ${
+                pendingModeSelection === 'voice'
+                  ? 'bg-pink-50 border-2 border-pink-300'
+                  : pendingModeSelection
+                    ? 'bg-gray-100 opacity-50 cursor-not-allowed'
+                    : 'bg-white hover:bg-gray-50 hover:shadow-xl'
+              }`}
             >
-              <div className="w-12 h-12 bg-gradient-to-br from-pink-100 to-rose-100 rounded-xl flex items-center justify-center group-hover:from-pink-200 group-hover:to-rose-200 transition-colors">
-                <Mic className="h-6 w-6 text-pink-600" />
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
+                pendingModeSelection === 'voice'
+                  ? 'bg-gradient-to-br from-pink-200 to-rose-200'
+                  : 'bg-gradient-to-br from-pink-100 to-rose-100 group-hover:from-pink-200 group-hover:to-rose-200'
+              }`}>
+                {pendingModeSelection === 'voice' ? (
+                  <Loader2 className="h-6 w-6 text-pink-600 animate-spin" />
+                ) : (
+                  <Mic className="h-6 w-6 text-pink-600" />
+                )}
               </div>
               <span className="text-lg font-semibold text-slate-700">Voix</span>
+              {pendingModeSelection === 'voice' && (
+                <span className="ml-auto text-sm text-pink-600">Sélectionné</span>
+              )}
             </motion.button>
 
             {/* Text mode button */}
@@ -2613,17 +2677,40 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.6 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={!pendingModeSelection ? { scale: 1.02 } : {}}
+              whileTap={!pendingModeSelection ? { scale: 0.98 } : {}}
               onClick={() => {
-                setSelectedInputMode('text');
+                if (sessionData.isInitializing) {
+                  // Store selection and wait for init to complete
+                  setPendingModeSelection('text');
+                } else {
+                  setSelectedInputMode('text');
+                }
               }}
-              className="w-full bg-white hover:bg-gray-50 rounded-2xl p-5 flex items-center gap-4 shadow-lg hover:shadow-xl transition-all duration-200 group"
+              disabled={!!pendingModeSelection}
+              className={`w-full rounded-2xl p-5 flex items-center gap-4 shadow-lg transition-all duration-200 group ${
+                pendingModeSelection === 'text'
+                  ? 'bg-pink-50 border-2 border-pink-300'
+                  : pendingModeSelection
+                    ? 'bg-gray-100 opacity-50 cursor-not-allowed'
+                    : 'bg-white hover:bg-gray-50 hover:shadow-xl'
+              }`}
             >
-              <div className="w-12 h-12 bg-gradient-to-br from-pink-100 to-rose-100 rounded-xl flex items-center justify-center group-hover:from-pink-200 group-hover:to-rose-200 transition-colors">
-                <MessageSquareText className="h-6 w-6 text-pink-600" />
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
+                pendingModeSelection === 'text'
+                  ? 'bg-gradient-to-br from-pink-200 to-rose-200'
+                  : 'bg-gradient-to-br from-pink-100 to-rose-100 group-hover:from-pink-200 group-hover:to-rose-200'
+              }`}>
+                {pendingModeSelection === 'text' ? (
+                  <Loader2 className="h-6 w-6 text-pink-600 animate-spin" />
+                ) : (
+                  <MessageSquareText className="h-6 w-6 text-pink-600" />
+                )}
               </div>
               <span className="text-lg font-semibold text-slate-700">Texte</span>
+              {pendingModeSelection === 'text' && (
+                <span className="ml-auto text-sm text-pink-600">Sélectionné</span>
+              )}
             </motion.button>
           </div>
         </motion.div>

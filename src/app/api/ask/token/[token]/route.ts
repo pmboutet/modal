@@ -232,11 +232,12 @@ async function loadTokenDataWithAdmin(token: string): Promise<TokenDataBundle | 
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
     const { token } = await params;
+    const isPoll = request.nextUrl.searchParams.get('poll') === 'true';
 
     if (!token || token.trim().length === 0) {
       return NextResponse.json<ApiResponse>({
@@ -675,8 +676,14 @@ export async function GET(
         // Check if plan or initial message needs to be generated
         const needsPlan = !conversationPlan;
         const needsInitialMessage = messages.length === 0 && askRow.conversation_mode !== 'consultant';
+        // Check the is_initializing flag from the thread to see if another process is already working on it
+        const threadIsInitializing = (conversationThread as any).is_initializing === true;
 
-        if (needsPlan || needsInitialMessage) {
+        // Only trigger /init if:
+        // 1. Not a poll request (polls should just check status, not trigger generation)
+        // 2. Thread is not already initializing (atomic lock prevents duplicates)
+        // 3. Actually needs initialization
+        if (!isPoll && !threadIsInitializing && (needsPlan || needsInitialMessage)) {
           // Trigger async initialization - fire and forget
           // This allows the response to return immediately while generation happens in background
           console.log(`🚀 [token route] Triggering async initialization (needsPlan: ${needsPlan}, needsInitialMessage: ${needsInitialMessage})`);
@@ -699,6 +706,10 @@ export async function GET(
           }).catch(err => {
             console.error('❌ [token route] Failed to trigger async init:', err instanceof Error ? err.message : err);
           });
+        } else if (isPoll) {
+          console.log(`📊 [token route] Poll request - not triggering init`);
+        } else if (threadIsInitializing) {
+          console.log(`⏳ [token route] Thread is already initializing - not triggering init`);
         }
       }
     } catch (threadPlanError) {
@@ -707,8 +718,32 @@ export async function GET(
       // Continue without the plan - it's an enhancement, not a requirement
     }
 
-    // Determine if async initialization is in progress (plan or initial message being generated)
-    const needsInit = !conversationPlan || (messages.length === 0 && askRow.conversation_mode !== 'consultant');
+    // Determine if async initialization is in progress
+    // This is true if:
+    // 1. The thread has is_initializing flag set (another process is generating)
+    // 2. OR plan doesn't exist yet AND we just triggered /init
+    // 3. OR initial message doesn't exist yet AND we just triggered /init
+    // We need to check if conversationThread has is_initializing set
+    let isInitializing = false;
+    if (conversationThreadId) {
+      // Re-fetch the thread to get the current is_initializing state
+      // (it might have been set by the /init we just triggered)
+      const adminClient = getAdminSupabaseClient();
+      const { data: threadState } = await adminClient
+        .from('conversation_threads')
+        .select('is_initializing')
+        .eq('id', conversationThreadId)
+        .single();
+
+      if (threadState?.is_initializing) {
+        isInitializing = true;
+      } else {
+        // If not initializing but still missing plan/message, it needs init
+        const needsPlan = !conversationPlan;
+        const needsInitialMessage = messages.length === 0 && askRow.conversation_mode !== 'consultant';
+        isInitializing = needsPlan || needsInitialMessage;
+      }
+    }
 
     return NextResponse.json<ApiResponse>({
       success: true,
@@ -737,7 +772,7 @@ export async function GET(
         conversationPlan,
         conversationThreadId,
         // Flag to indicate async initialization is in progress
-        isInitializing: needsInit,
+        isInitializing,
       }
     });
   } catch (error) {
