@@ -918,6 +918,33 @@ export async function fetchConversationContext(
         conversationThread = existingThread;
       }
     }
+
+    // BUG FIX: If no user message found, try to find the thread from ANY message (including AI messages)
+    // This handles the case where AI sent an initial greeting but user hasn't responded yet
+    // Without this, voice mode would get a different (shared) thread and lose the conversation context
+    if (!conversationThread) {
+      const { data: lastAnyMessage } = await dataClient
+        .from('messages')
+        .select('conversation_thread_id')
+        .eq('ask_session_id', askSession.id)
+        .not('conversation_thread_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastAnyMessage?.conversation_thread_id) {
+        console.log('[fetchConversationContext] No user message found, using thread from last AI message:', lastAnyMessage.conversation_thread_id);
+        const { data: existingThread } = await dataClient
+          .from('conversation_threads')
+          .select('id, is_shared')
+          .eq('id', lastAnyMessage.conversation_thread_id)
+          .single();
+
+        if (existingThread) {
+          conversationThread = existingThread;
+        }
+      }
+    }
   }
 
   // Fallback: create/get thread based on conversation mode

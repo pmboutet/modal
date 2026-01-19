@@ -357,6 +357,7 @@ function MobileLayout({
                   elapsedMinutes={sessionElapsedMinutes}
                   isTimerPaused={isSessionTimerPaused}
                   onTogglePause={onToggleTimerPause}
+                  expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   onChatScroll={onChatScroll}
                 />
               </div>
@@ -2949,6 +2950,7 @@ export default function HomePage() {
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
                   onTogglePause={handleToggleTimerPause}
+                  expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   onChatScroll={handleMobileChatScroll}
                 />
               </div>

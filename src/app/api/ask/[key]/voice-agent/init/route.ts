@@ -133,11 +133,13 @@ export async function POST(
     }
 
     // Check if there are any messages in the thread
+    // BUG FIX: Use adminClient instead of supabase to bypass RLS
+    // In voice mode, there's often no authenticated user context, so RLS blocks the query
     let hasMessages = false;
     let messageRows: MessageRow[] = [];
     if (conversationThread) {
       const { messages: threadMessages } = await getMessagesForThread(
-        supabase,
+        adminClient,
         conversationThread.id
       );
       messageRows = (threadMessages ?? []) as MessageRow[];
