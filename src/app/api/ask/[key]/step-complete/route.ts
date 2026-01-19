@@ -50,12 +50,12 @@ export async function POST(
     // Create Supabase client
     const supabase = await createServerSupabaseClient();
 
-    // Get ASK session
+    // Get ASK session (use admin client to bypass RLS - voice mode doesn't have session auth)
     const { row: askRow, error: askError } = await getAskSessionByKey<{
       id: string;
       conversation_mode: string | null;
       project_id: string | null;
-    }>(supabase, key, 'id, conversation_mode, project_id');
+    }>(adminClient, key, 'id, conversation_mode, project_id');
 
     if (askError || !askRow) {
       console.error('[step-complete] ASK session not found:', key);

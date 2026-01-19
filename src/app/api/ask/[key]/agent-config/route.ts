@@ -128,7 +128,8 @@ export async function GET(
     });
 
     // Pass the complete promptVariables directly - no manual subset
-    const agentConfig = await getAgentConfigForAsk(supabase, askSession.id, promptVariables, token);
+    // Use adminClient to bypass RLS - we've already verified access above
+    const agentConfig = await getAgentConfigForAsk(adminClient, askSession.id, promptVariables, token);
 
     return NextResponse.json({
       success: true,

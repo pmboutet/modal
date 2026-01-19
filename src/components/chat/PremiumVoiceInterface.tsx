@@ -400,13 +400,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     try {
       const response = await fetch(`/api/ask/${askKey}/agent-config`);
       if (!response.ok) {
-        console.error('[PremiumVoiceInterface] ❌ Failed to fetch agent config:', reason);
+        console.error(`[PremiumVoiceInterface] ❌ Failed to fetch agent config (${reason}):`, response.status, response.statusText);
         return;
       }
 
       const result = await response.json();
       if (!result.success || !result.data) {
-        console.error('[PremiumVoiceInterface] ❌ Invalid agent config response:', reason);
+        console.error(`[PremiumVoiceInterface] ❌ Invalid agent config response (${reason}):`, result);
         return;
       }
 

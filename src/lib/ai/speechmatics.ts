@@ -111,6 +111,10 @@ export class SpeechmaticsVoiceAgent {
   // Track if ANY partial transcript was received during LLM generation
   // This flag is only reset when generation completes, not when processing starts
   private receivedPartialDuringGeneration: boolean = false;
+  // Timestamp of when we last received a partial during generation (for staleness check)
+  private lastPartialDuringGenerationTimestamp: number = 0;
+  // Maximum age of receivedPartialDuringGeneration flag before it's considered stale (3 seconds)
+  private readonly PARTIAL_FLAG_STALENESS_MS = 3000;
   // Last processed user message (to detect new content during response)
   private lastSentUserMessage: string = '';
   // Deduplication: Track last successfully processed message to avoid duplicate processing
@@ -362,6 +366,7 @@ export class SpeechmaticsVoiceAgent {
         // This flag is used to drop the LLM response if user was speaking
         if (this.isGeneratingResponse) {
           this.receivedPartialDuringGeneration = true;
+          this.lastPartialDuringGenerationTimestamp = Date.now();
         }
 
         // ABORT-ON-CONTINUE: If response is being generated OR audio is playing and user continues speaking,
@@ -440,6 +445,14 @@ export class SpeechmaticsVoiceAgent {
       // Just mark that we received it, but don't process yet
       // The silence timeout will handle processing after the configured delay
       this.transcriptionManager?.markEndOfUtterance();
+
+      // BUG-FIX: Reset the "received partial during generation" flag when user finishes speaking
+      // This prevents the LLM response from being dropped when the user has already stopped talking
+      // We only reset if VAD also confirms user is not speaking (belt and suspenders)
+      if (this.receivedPartialDuringGeneration && !this.audio?.isUserSpeaking()) {
+        console.log('[Speechmatics] ✅ EndOfUtterance received - resetting receivedPartialDuringGeneration flag');
+        this.receivedPartialDuringGeneration = false;
+      }
       return;
     }
 
@@ -616,10 +629,15 @@ export class SpeechmaticsVoiceAgent {
       // USER-SPEAKING CHECK: If user started speaking while LLM was generating,
       // drop the response entirely and wait for user to finish
       // This prevents the AI from talking over the user
-      // Check both: (1) user is currently speaking (VAD) OR (2) we received any partial during generation
-      const userSpokeWhileGenerating = this.receivedPartialDuringGeneration || this.audio?.isUserSpeaking();
+      // Check both: (1) user is currently speaking (VAD) OR (2) we received a RECENT partial during generation
+      // BUG-FIX: Only consider partials received in the last 3 seconds as "fresh"
+      // This prevents dropping responses when the user has already stopped speaking
+      const now = Date.now();
+      const partialFlagIsFresh = this.receivedPartialDuringGeneration &&
+        (now - this.lastPartialDuringGenerationTimestamp < this.PARTIAL_FLAG_STALENESS_MS);
+      const userSpokeWhileGenerating = partialFlagIsFresh || this.audio?.isUserSpeaking();
       if (userSpokeWhileGenerating) {
-        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial received:', this.receivedPartialDuringGeneration, ', currently speaking:', this.audio?.isUserSpeaking(), ')');
+        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial received:', this.receivedPartialDuringGeneration, ', partial age ms:', now - this.lastPartialDuringGenerationTimestamp, ', currently speaking:', this.audio?.isUserSpeaking(), ')');
         // Remove the incomplete user message from conversation history
         // (it will be replaced by the complete one when user finishes)
         if (this.conversationHistory.length > 0 &&
