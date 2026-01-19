@@ -141,6 +141,9 @@ export async function POST(
       }
 
       profileId = profile.id;
+      // BUG FIX: Use admin client for all authenticated users (not just invite token)
+      // This ensures ai_agent_logs INSERT has proper permissions (service_role bypasses RLS)
+      dataClient = admin;
     }
 
     const { row: askRow, error: askError } = await getAskSessionByKey<AskSessionRow & { conversation_mode?: string | null }>(

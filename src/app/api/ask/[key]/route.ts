@@ -3,8 +3,8 @@ import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { ApiResponse, Ask, AskParticipant, Insight, Message } from '@/types';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 import { mapInsightRowToInsight } from '@/lib/insights';
-import { fetchInsightsForSession } from '@/lib/insightQueries';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getInsightsForThread, shouldUseSharedThread, resolveThreadUserId } from '@/lib/asks';
+import { fetchInsightsForSession, fetchInsightsForThread } from '@/lib/insightQueries';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, resolveThreadUserId } from '@/lib/asks';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { executeAgent } from '@/lib/ai/service';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
@@ -659,23 +659,12 @@ export async function GET(
     // Get insights for the session
     // BUG-004 FIX: In individual_parallel mode, filter insights by thread to ensure isolation
     // In shared modes (collaborative, group_reporter, consultant), show all insights
+    // Using centralized functions that properly hydrate type names
     let insightRows;
     try {
       if (!shouldUseSharedThread(askConfig) && conversationThread) {
         // Individual_parallel mode: strict isolation - only insights from this user's thread
-        const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
-          dataClient,
-          conversationThread.id
-        );
-
-        if (threadInsightsError) {
-          if (isPermissionDenied(threadInsightsError)) {
-            return permissionDeniedResponse();
-          }
-          throw threadInsightsError;
-        }
-
-        insightRows = threadInsights;
+        insightRows = await fetchInsightsForThread(dataClient, conversationThread.id);
         console.log(`🔒 GET /api/ask/[key]: Individual thread mode - showing ${insightRows.length} insights from thread ${conversationThread.id}`);
       } else {
         // Shared thread mode: show all insights for the session for visibility

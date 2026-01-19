@@ -232,6 +232,16 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Affichage du panneau de paramètres du microphone
   const [showMicrophoneSettings, setShowMicrophoneSettings] = useState<boolean>(false);
 
+  // ===== SPEAKER FILTERING NOTIFICATION =====
+  // Notification quand une autre voix est détectée et filtrée
+  const [filteredSpeakerNotification, setFilteredSpeakerNotification] = useState<{
+    speaker: string;
+    transcripts: string[]; // Stack of transcripts from this speaker
+  } | null>(null);
+  const filteredSpeakerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Track speakers the user chose to ignore (don't ask again)
+  const ignoredSpeakersRef = useRef<Set<string>>(new Set());
+
   // ===== RÉFÉRENCES POUR LA GESTION DES RESSOURCES =====
   // Référence à l'agent vocal actuel (peut être Deepgram, Hybrid ou Speechmatics)
   const agentRef = useRef<DeepgramVoiceAgent | HybridVoiceAgent | SpeechmaticsVoiceAgent | null>(null);
@@ -1382,8 +1392,43 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           microphoneSensitivity, // Sensibilité du microphone (1.5 par défaut)
           microphoneDeviceId: selectedMicrophoneId || undefined,
           voiceIsolation: voiceIsolationEnabled,
-          // In consultant mode, enable diarization for speaker identification
-          sttDiarization: consultantMode ? "speaker" : undefined,
+          // Always enable diarization for speaker identification
+          sttDiarization: "speaker",
+          // In individual mode, filter out non-primary speakers (TV, background conversations)
+          enableSpeakerFiltering: !consultantMode,
+          onSpeakerEstablished: (speaker: string) => {
+            console.log(`[PremiumVoiceInterface] 🎤 Primary speaker established: ${speaker}`);
+          },
+          onSpeakerFiltered: (speaker: string, transcript: string) => {
+            console.log(`[PremiumVoiceInterface] 🔇 Filtered speaker ${speaker}: "${transcript}"`);
+
+            // Don't show notification for speakers the user chose to ignore
+            if (ignoredSpeakersRef.current.has(speaker)) {
+              console.log(`[PremiumVoiceInterface] Speaker ${speaker} was ignored, skipping notification`);
+              return;
+            }
+
+            // Clear any existing timeout
+            if (filteredSpeakerTimeoutRef.current) {
+              clearTimeout(filteredSpeakerTimeoutRef.current);
+            }
+
+            // Stack transcripts if same speaker, otherwise replace
+            setFilteredSpeakerNotification(prev => {
+              if (prev && prev.speaker === speaker) {
+                // Same speaker - add to stack (max 3 transcripts)
+                const newTranscripts = [...prev.transcripts, transcript].slice(-3);
+                return { speaker, transcripts: newTranscripts };
+              }
+              // New speaker - replace
+              return { speaker, transcripts: [transcript] };
+            });
+
+            // Auto-dismiss after 10 seconds
+            filteredSpeakerTimeoutRef.current = setTimeout(() => {
+              setFilteredSpeakerNotification(null);
+            }, 10000);
+          },
         };
 
         // Log config for debugging consultant mode
@@ -1391,6 +1436,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           disableLLM: config.disableLLM,
           disableElevenLabsTTS: config.disableElevenLabsTTS,
           sttDiarization: config.sttDiarization,
+          enableSpeakerFiltering: config.enableSpeakerFiltering,
           consultantMode,
         });
 
@@ -1929,18 +1975,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       });
     }
 
-    if (interimUser) {
-      const interimUserId = interimUser.messageId || `interim-user-${Date.now()}`;
-      // Only add if not already finalized in base messages
-      if (!seenIds.has(interimUserId)) {
-        base.push({
-          ...interimUser,
-          timestamp: interimUser.timestamp || new Date().toISOString(),
-          messageId: interimUserId,
-          isInterim: true,
-        });
-      }
-    }
+    // Note: interimUser is now displayed in the bottom status area, not in the message list
+    // This prevents the "jump" effect when interim messages become final
 
     if (interimAssistant) {
       const interimAssistantId = interimAssistant.messageId || `interim-assistant-${Date.now()}`;
@@ -1961,7 +1997,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       const timeB = new Date(b.timestamp).getTime();
       return timeA - timeB;
     });
-  }, [messages, interimAssistant, interimUser]);
+  }, [messages, interimAssistant]);
 
   const semanticStatusText = useMemo(() => {
     if (!semanticTelemetry) {
@@ -2545,46 +2581,46 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Voice circle with waveform animation - positioned at bottom */}
-        <div className="flex flex-col items-center justify-center pb-8 px-4">
-          <div className="relative">
-            {/* Outer glow rings */}
-            <motion.div
-              className="absolute inset-0 rounded-full"
-              animate={{
-                scale: [1, 1.2, 1],
-                opacity: [0.3, 0.6, 0.3],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-              style={{
-                background: 'radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%)',
-                filter: 'blur(20px)',
-                width: '120px',
-                height: '120px',
-                margin: '-60px 0 0 -60px',
-              }}
-            />
-            
-            {/* Main voice circle */}
+        {/* Voice control bar - mic button left, status/partials right */}
+        <div className="flex items-center gap-4 pb-6 px-4">
+          {/* Mic button - left, smaller */}
+          <div className="flex-shrink-0 relative">
+            {/* Subtle glow when active */}
+            {!isMuted && isConnected && (
+              <motion.div
+                className="absolute inset-0 rounded-full"
+                animate={{
+                  scale: [1, 1.15, 1],
+                  opacity: [0.2, 0.4, 0.2],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+                style={{
+                  background: 'radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%)',
+                  filter: 'blur(12px)',
+                }}
+              />
+            )}
+
+            {/* Main mic button */}
             <motion.button
               onClick={toggleMute}
               disabled={!isConnected && !isMuted}
               className={cn(
-                "relative w-24 h-24 rounded-full flex items-center justify-center",
+                "relative w-16 h-16 rounded-full flex items-center justify-center",
                 "bg-white/20 backdrop-blur-xl border-2 border-white/30",
-                "shadow-2xl transition-all duration-300",
+                "shadow-xl transition-all duration-300",
                 isMuted && "opacity-50",
                 !isConnected && !isMuted && "opacity-30 cursor-not-allowed"
               )}
               style={{
-                boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 0 20px rgba(255, 255, 255, 0.1)',
+                boxShadow: '0 4px 20px 0 rgba(0, 0, 0, 0.25), inset 0 0 12px rgba(255, 255, 255, 0.1)',
               }}
               animate={{
-                scale: isSpeaking ? [1, 1.1, 1] : 1,
+                scale: isSpeaking ? [1, 1.08, 1] : 1,
               }}
               transition={{
                 duration: 0.5,
@@ -2592,11 +2628,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 ease: "easeInOut",
               }}
             >
-              {/* Waveform visualization - centered */}
+              {/* Waveform visualization - smaller, 8 bars */}
               <svg
-                width="96"
-                height="96"
-                viewBox="0 0 96 96"
+                width="64"
+                height="64"
+                viewBox="0 0 64 64"
                 className="absolute"
                 style={{
                   left: '50%',
@@ -2604,19 +2640,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                   transform: 'translate(-50%, -50%)',
                 }}
               >
-                {Array.from({ length: 12 }).map((_, i) => {
-                  const angle = (i * 360) / 12;
-                  const baseRadius = 28;
-                  const radius = baseRadius + safeAudioLevel * 8;
-                  const barWidth = 3;
-                  const barHeight = 4 + safeAudioLevel * 12;
-                  const centerX = 48;
-                  const centerY = 48;
+                {Array.from({ length: 8 }).map((_, i) => {
+                  const angle = (i * 360) / 8;
+                  const baseRadius = 18;
+                  const radius = baseRadius + safeAudioLevel * 5;
+                  const barWidth = 2.5;
+                  const barHeight = 3 + safeAudioLevel * 8;
+                  const centerX = 32;
+                  const centerY = 32;
                   const x1 = centerX + Math.cos((angle * Math.PI) / 180) * radius;
                   const y1 = centerY + Math.sin((angle * Math.PI) / 180) * radius;
                   const x2 = centerX + Math.cos((angle * Math.PI) / 180) * (radius + barHeight);
                   const y2 = centerY + Math.sin((angle * Math.PI) / 180) * (radius + barHeight);
-                  
+
                   return (
                     <motion.line
                       key={i}
@@ -2629,17 +2665,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                       strokeLinecap="round"
                       opacity={0.9}
                       animate={{
-                        x2: isSpeaking 
-                          ? centerX + Math.cos((angle * Math.PI) / 180) * (radius + barHeight * (1.5 + safeAudioLevel))
+                        x2: isSpeaking
+                          ? centerX + Math.cos((angle * Math.PI) / 180) * (radius + barHeight * (1.4 + safeAudioLevel))
                           : x2,
                         y2: isSpeaking
-                          ? centerY + Math.sin((angle * Math.PI) / 180) * (radius + barHeight * (1.5 + safeAudioLevel))
+                          ? centerY + Math.sin((angle * Math.PI) / 180) * (radius + barHeight * (1.4 + safeAudioLevel))
                           : y2,
                         opacity: isSpeaking ? [0.9, 1, 0.9] : 0.6,
                       }}
                       transition={{
                         duration: 0.3,
-                        delay: i * 0.03,
+                        delay: i * 0.04,
                         repeat: isSpeaking ? Infinity : 0,
                         ease: "easeInOut",
                       }}
@@ -2647,32 +2683,56 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                   );
                 })}
               </svg>
-              
+
               {/* Center icon */}
               {isMuted ? (
-                <MicOff className="h-8 w-8 text-white relative z-10" />
+                <MicOff className="h-6 w-6 text-white relative z-10" />
               ) : (
-                <Volume2 className="h-8 w-8 text-white relative z-10" />
+                <Volume2 className="h-6 w-6 text-white relative z-10" />
               )}
             </motion.button>
           </div>
-          
-          {/* Status text */}
-          <div className="text-center mt-4">
-            <p className="text-white/80 text-sm">
-              {isConnecting && "Connecting..."}
-              {isConnected && !isMuted && !isSpeaking && "Listening... Speak naturally"}
-              {isConnected && !isMuted && isSpeaking && "🎤 You're speaking..."}
-              {isMuted && "Microphone muted"}
-              {error && <span className="text-red-300">{error}</span>}
-            </p>
-            {semanticStatusText && (
-              <p className="text-white/60 text-xs mt-1">
-                {semanticStatusText}
-              </p>
-            )}
-          </div>
 
+          {/* Status area - right, shows mic state + partials */}
+          <div className="flex-1 min-w-0">
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/10">
+              {/* Mic state label */}
+              <p className="text-white/60 text-xs mb-1">
+                {isConnecting && "Connexion..."}
+                {isConnected && !isMuted && "Ecoute en cours..."}
+                {isMuted && "Micro en pause"}
+                {!isConnected && !isConnecting && !isMuted && "Non connecte"}
+              </p>
+
+              {/* Partial transcript or placeholder */}
+              <div className="min-h-[1rem]">
+                {error ? (
+                  <p className="text-red-300 text-xs">{error}</p>
+                ) : interimUser ? (
+                  // RTL direction + LTR content = ellipsis at START, showing the END of text
+                  <p
+                    className="text-white/70 text-xs italic truncate"
+                    style={{ direction: 'rtl', textAlign: 'left' }}
+                  >
+                    <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>
+                      {interimUser.content}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-white/40 text-xs italic">
+                    {isMuted ? "Cliquez sur le micro pour reprendre" : "Parlez naturellement..."}
+                  </p>
+                )}
+              </div>
+
+              {/* Semantic telemetry (debug info) */}
+              {semanticStatusText && (
+                <p className="text-white/40 text-xs mt-1 truncate">
+                  {semanticStatusText}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2722,6 +2782,85 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               >
                 Resume Conversation
               </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Filtered Speaker Notification (Individual Mode) - Same style as "Still there?" overlay */}
+      <AnimatePresence>
+        {filteredSpeakerNotification && !consultantMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="absolute inset-0 z-50 backdrop-blur-md bg-black/40 flex items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ duration: 0.3, delay: 0.1 }}
+              className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 max-w-md mx-4 shadow-2xl"
+            >
+              <h2 className="text-white text-xl font-semibold mb-3 text-center">
+                Autre voix détectée
+              </h2>
+              <div className="text-white/80 text-sm mb-4 space-y-2">
+                {filteredSpeakerNotification.transcripts.map((transcript, index) => (
+                  <p key={index} className="bg-white/5 rounded-lg px-3 py-2 italic">
+                    "{transcript}"
+                  </p>
+                ))}
+              </div>
+              <p className="text-white/60 text-xs mb-4 text-center">
+                Que souhaitez-vous faire ?
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    if (filteredSpeakerTimeoutRef.current) {
+                      clearTimeout(filteredSpeakerTimeoutRef.current);
+                    }
+                    // Add speaker to ignored list so we don't ask again
+                    ignoredSpeakersRef.current.add(filteredSpeakerNotification.speaker);
+                    console.log(`[PremiumVoiceInterface] Speaker ${filteredSpeakerNotification.speaker} added to ignore list`);
+                    setFilteredSpeakerNotification(null);
+                  }}
+                  className="flex-1 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl py-2 text-sm transition-colors"
+                >
+                  Ignorer
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (filteredSpeakerTimeoutRef.current) {
+                      clearTimeout(filteredSpeakerTimeoutRef.current);
+                    }
+                    if (agentRef.current instanceof SpeechmaticsVoiceAgent) {
+                      agentRef.current.addAllowedSpeaker(filteredSpeakerNotification.speaker);
+                    }
+                    setFilteredSpeakerNotification(null);
+                  }}
+                  className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/30 rounded-xl py-2 text-sm transition-colors"
+                >
+                  Ajouter
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (filteredSpeakerTimeoutRef.current) {
+                      clearTimeout(filteredSpeakerTimeoutRef.current);
+                    }
+                    if (agentRef.current instanceof SpeechmaticsVoiceAgent) {
+                      agentRef.current.setPrimarySpeaker(filteredSpeakerNotification.speaker);
+                    }
+                    setFilteredSpeakerNotification(null);
+                  }}
+                  className="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-400/30 rounded-xl py-2 text-sm transition-colors"
+                >
+                  Changer
+                </Button>
+              </div>
             </motion.div>
           </motion.div>
         )}

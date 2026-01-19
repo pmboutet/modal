@@ -316,6 +316,21 @@ export async function fetchInsightsForSession(
   );
 }
 
+/**
+ * Fetch insights for a specific conversation thread with properly resolved types.
+ * This replaces the legacy getInsightsForThread which didn't hydrate type names.
+ */
+export async function fetchInsightsForThread(
+  supabase: SupabaseClient,
+  conversationThreadId: string,
+): Promise<InsightRow[]> {
+  return selectInsightRows(supabase, (query) =>
+    query
+      .eq('conversation_thread_id', conversationThreadId)
+      .order('created_at', { ascending: true }),
+  );
+}
+
 export async function fetchInsightRowById(
   supabase: SupabaseClient,
   insightId: string,

@@ -146,12 +146,24 @@ async function fetchParticipantInsights(
   participantId: string,
   askSessionId: string
 ): Promise<Insight[]> {
-  // Get insights created by this participant (via insight_authors or user_id)
+  // First, get the participant's user_id (if they have one)
+  const { data: participant, error: participantError } = await client
+    .from("ask_participants")
+    .select("user_id")
+    .eq("id", participantId)
+    .single();
+
+  if (participantError) {
+    console.error("[Graph Generation] Error fetching participant:", participantError);
+    return [];
+  }
+
+  // Get insights created by this participant (via insight_authors.user_id)
   const { data: insightRows, error } = await client
     .from("insights")
     .select(`
       *,
-      insight_authors!left(participant_id)
+      insight_authors!left(user_id)
     `)
     .eq("ask_session_id", askSessionId)
     .order("created_at", { ascending: true });
@@ -161,10 +173,19 @@ async function fetchParticipantInsights(
     return [];
   }
 
-  // Filter insights that belong to this participant
+  // Filter insights that belong to this participant (match by user_id)
+  const participantUserId = participant?.user_id;
+
+  // If participant has no user_id, we can't match insights via authors
+  if (!participantUserId) {
+    console.log(`[Graph Generation] Participant ${participantId} has no user_id, returning all session insights`);
+    // For anonymous participants, return all insights from the session
+    return (insightRows || []).map(row => mapInsightRowToInsight(row as InsightRow));
+  }
+
   const participantInsights = (insightRows || []).filter(row => {
     const authors = row.insight_authors || [];
-    return authors.some((a: { participant_id: string }) => a.participant_id === participantId);
+    return authors.some((a: { user_id: string }) => a.user_id === participantUserId);
   });
 
   return participantInsights.map(row => mapInsightRowToInsight(row as InsightRow));
@@ -228,9 +249,14 @@ async function extractClaimsFromAllInsights(
     return { claims: [], entities: [], internalRelations: [] };
   }
 
-  // Parse response
+  // Parse response - strip markdown code blocks if present
   try {
-    const parsed = JSON.parse(result.content);
+    let jsonContent = result.content.trim();
+    // Remove markdown code fences (```json ... ``` or ``` ... ```)
+    if (jsonContent.startsWith("```")) {
+      jsonContent = jsonContent.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "");
+    }
+    const parsed = JSON.parse(jsonContent);
     return {
       claims: (parsed.claims || []).map((c: any) => ({
         statement: c.statement,

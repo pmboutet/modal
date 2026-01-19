@@ -320,6 +320,7 @@ function MobileLayout({
                   <ConversationProgressBar
                     steps={sessionData.conversationPlan.plan_data.steps}
                     currentStepId={sessionData.conversationPlan.current_step_id}
+                    expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                     elapsedMinutes={sessionElapsedMinutes}
                     isTimerPaused={isSessionTimerPaused}
                     onTogglePause={onToggleTimerPause}
@@ -1197,20 +1198,26 @@ export default function HomePage() {
       // If async initialization is needed, trigger it from frontend and poll until complete
       // Note: We trigger from frontend because fire-and-forget doesn't work reliably in serverless
       if (isInitializing && data.data?.conversationThreadId) {
-        console.log('[HomePage] Triggering initialization from frontend...');
+        const initPayload = {
+          askSessionId: data.data.ask?.askSessionId,
+          conversationThreadId: data.data.conversationThreadId,
+          conversationMode: data.data.ask?.conversationMode,
+        };
+        console.log('[HomePage] Triggering initialization from frontend:', JSON.stringify(initPayload, null, 2));
 
         // Trigger /init - fire and forget (the atomic lock prevents duplicates)
         fetch(`/api/ask/token/${encodeURIComponent(token)}/init`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            askSessionId: data.data.ask?.askSessionId,
-            conversationThreadId: data.data.conversationThreadId,
-            conversationMode: data.data.ask?.conversationMode,
-          }),
-        }).catch(err => {
-          console.error('[HomePage] Failed to trigger init:', err);
-        });
+          body: JSON.stringify(initPayload),
+        })
+          .then(res => res.json())
+          .then(result => {
+            console.log('[HomePage] Init response:', JSON.stringify(result, null, 2));
+          })
+          .catch(err => {
+            console.error('[HomePage] Failed to trigger init:', err);
+          });
 
         // Start polling for completion
         const pollForInitialization = async () => {
@@ -2906,6 +2913,7 @@ export default function HomePage() {
                 <ConversationProgressBar
                   steps={sessionData.conversationPlan.plan_data.steps}
                   currentStepId={sessionData.conversationPlan.current_step_id}
+                  expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
                   onTogglePause={handleToggleTimerPause}

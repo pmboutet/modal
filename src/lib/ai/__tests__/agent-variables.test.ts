@@ -392,7 +392,7 @@ describe('Agent Variables', () => {
       expect(variables.participant_description).toBe('');
     });
 
-    test('should return empty string for participant_description when no user messages', () => {
+    test('should use first participant as fallback when no user messages', () => {
       const context = createMinimalContext();
       context.participants = [
         createMockParticipant({ name: 'Alice', description: 'Alice description' }),
@@ -403,7 +403,10 @@ describe('Agent Variables', () => {
 
       const variables = buildConversationAgentVariables(context);
 
-      expect(variables.participant_description).toBe('');
+      // BUG FIX: Now uses first participant as fallback when no user messages
+      // This is important for initial greeting messages
+      expect(variables.participant_description).toBe('Alice description');
+      expect(variables.participant_name).toBe('Alice');
     });
 
     test('should format participants as comma-separated string (legacy format)', () => {
@@ -542,7 +545,7 @@ describe('Agent Variables', () => {
       expect(variables.participant_details).toBe('');
     });
 
-    test('should return empty participant_details when no user messages', () => {
+    test('should use first participant for participant_details when no user messages', () => {
       const context = createMinimalContext();
       context.participants = [
         createMockParticipant({ name: 'Alice', role: 'Manager', description: 'Expert PM' }),
@@ -551,7 +554,47 @@ describe('Agent Variables', () => {
 
       const variables = buildConversationAgentVariables(context);
 
-      expect(variables.participant_details).toBe('');
+      // BUG FIX: Now uses first participant as fallback when no user messages
+      // This is important for initial greeting messages
+      expect(variables.participant_details).toContain('Nom: Alice');
+      expect(variables.participant_details).toContain('Rôle: Manager');
+      expect(variables.participant_details).toContain('Description: Expert PM');
+    });
+
+    test('should use currentParticipantName as fallback when explicitly provided', () => {
+      const context = createMinimalContext();
+      context.participants = [
+        createMockParticipant({ name: 'Alice', role: 'Manager', description: 'Alice expert' }),
+        createMockParticipant({ name: 'Bob', role: 'Developer', description: 'Bob expert' }),
+      ];
+      context.currentParticipantName = 'Bob'; // Explicitly set
+      context.messages = []; // No messages
+
+      const variables = buildConversationAgentVariables(context);
+
+      // BUG FIX: Should use Bob (from currentParticipantName) instead of Alice (first participant)
+      expect(variables.participant_name).toBe('Bob');
+      expect(variables.participant_description).toBe('Bob expert');
+      expect(variables.participant_details).toContain('Nom: Bob');
+      expect(variables.participant_details).toContain('Rôle: Developer');
+    });
+
+    test('should prioritize lastUserMessage over currentParticipantName', () => {
+      const context = createMinimalContext();
+      context.participants = [
+        createMockParticipant({ name: 'Alice', role: 'Manager', description: 'Alice expert' }),
+        createMockParticipant({ name: 'Bob', role: 'Developer', description: 'Bob expert' }),
+      ];
+      context.currentParticipantName = 'Alice'; // Set explicitly
+      context.messages = [
+        createMockMessage({ senderType: 'user', senderName: 'Bob', content: 'Hello' }), // Bob sent the last message
+      ];
+
+      const variables = buildConversationAgentVariables(context);
+
+      // Should use Bob (from lastUserMessage) instead of Alice (from currentParticipantName)
+      expect(variables.participant_name).toBe('Bob');
+      expect(variables.participant_description).toBe('Bob expert');
     });
   });
 

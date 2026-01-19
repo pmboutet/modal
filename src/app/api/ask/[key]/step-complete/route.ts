@@ -147,10 +147,11 @@ export async function POST(
       },
     });
   } catch (error) {
-    console.error('[step-complete] Error:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Failed to complete step';
+    console.error('[step-complete] Error:', errorMsg);
     return NextResponse.json<ApiResponse>({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to complete step',
+      error: errorMsg,
     }, { status: 500 });
   }
 }

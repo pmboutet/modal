@@ -1156,6 +1156,15 @@ export class SpeechmaticsAudio {
   }
 
   /**
+   * Check if user has recent voice activity (VAD detection)
+   * Used to determine if user is currently speaking
+   * Returns true if at least 3 out of the last 5 audio chunks had voice activity
+   */
+  isUserSpeaking(): boolean {
+    return this.hasRecentVoiceActivity;
+  }
+
+  /**
    * Update conversation history for start-of-turn detection
    * Called by parent agent when messages are added to conversation
    */

@@ -139,9 +139,16 @@ describe('Conversation Plan', () => {
     // so the regex cannot cleanly separate step_id from trailing underscores.
     // Use **..** or *..*  instead for markdown formatting.
     test('should handle _STEP_COMPLETE:step_id_ markdown underscore format', () => {
-      const content = 'Complete _STEP_COMPLETE:intro_';
+      const content = 'Complete _STEP_COMPLETE:step_1_intro_';
       // Single underscore works because the regex matches the full pattern
-      expect(detectStepCompletion(content)).toBe('intro');
+      // Note: step IDs must follow the step_N pattern (e.g., step_1, step_1_intro)
+      expect(detectStepCompletion(content)).toBe('step_1_intro');
+    });
+
+    test('should return CURRENT for invalid step ID format (no step_ prefix)', () => {
+      // "intro" is not a valid step ID format, should fall back to CURRENT
+      const content = 'Complete _STEP_COMPLETE:intro_';
+      expect(detectStepCompletion(content)).toBe('CURRENT');
     });
 
     test('should return CURRENT when no step_id provided', () => {

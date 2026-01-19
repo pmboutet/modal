@@ -5,9 +5,9 @@ import { executeAgent } from '@/lib/ai/service';
 import { renderTemplate } from '@/lib/ai/templates';
 import { parseErrorMessage } from '@/lib/utils';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getInsightsForThread } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread } from '@/lib/asks';
 import { getConversationPlanWithSteps } from '@/lib/ai/conversation-plan';
-import { fetchInsightTypesForPrompt, fetchInsightsForSession } from '@/lib/insightQueries';
+import { fetchInsightTypesForPrompt, fetchInsightsForSession, fetchInsightsForThread } from '@/lib/insightQueries';
 import { mapInsightRowToInsight } from '@/lib/insights';
 import { buildClaimExtractionVariables } from '@/lib/graphRAG/extractClaims';
 import { fetchProjectJourneyContext, flattenChallengeTree, buildInsightSummaries, buildExistingAskSummaries, buildAskGeneratorVariables } from '@/lib/projectJourneyLoader';
@@ -164,14 +164,11 @@ export async function POST(
       const insightTypes = await fetchInsightTypesForPrompt(supabase);
 
       // Fetch existing insights for the session (for insight detection agent)
-      let existingInsights: any[] = [];
-      if (conversationThread) {
-        const { insights: threadInsights } = await getInsightsForThread(supabase, conversationThread.id);
-        existingInsights = (threadInsights ?? []).map(mapInsightRowToInsight);
-      } else {
-        const insightRows = await fetchInsightsForSession(supabase, askRow.id);
-        existingInsights = insightRows.map(mapInsightRowToInsight);
-      }
+      // Using centralized functions that properly hydrate type names
+      const insightRows = conversationThread
+        ? await fetchInsightsForThread(supabase, conversationThread.id)
+        : await fetchInsightsForSession(supabase, askRow.id);
+      const existingInsights = insightRows.map(mapInsightRowToInsight);
 
       // Find the last AI response for latestAiResponse variable
       const lastAiMessage = [...messages].reverse().find(m => m.senderType === 'ai');

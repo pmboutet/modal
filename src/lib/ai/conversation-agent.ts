@@ -263,6 +263,13 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
   // Find the last user message
   const lastUserMessage = [...context.messages].reverse().find(message => message.senderType === 'user');
 
+  // BUG FIX: Derive participant info from lastUserMessage OR currentParticipantName
+  // When messages are empty (e.g., initial greeting), use currentParticipantName to find the participant
+  // This fixes the issue where participant_name and participant_details were empty on /init
+  const derivedParticipantName = lastUserMessage?.senderName
+    ?? context.currentParticipantName
+    ?? (activeParticipants.length > 0 ? activeParticipants[0].name : null);
+
   // Add conversation plan variables if plan is available
   // Default values when no plan exists - these should never show as empty in the prompt
   let conversationPlanFormatted = '';
@@ -407,14 +414,15 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
   );
   const timeTrackingVariables = formatTimeTrackingVariables(timeTrackingStats);
 
-  // Find the participant who sent the last message to get their description
-  const lastUserParticipant = lastUserMessage?.senderName
-    ? context.participants.find(p => p.name === lastUserMessage.senderName)
+  // Find the participant who sent the last message (or derived from currentParticipantName/first participant)
+  // BUG FIX: Use derivedParticipantName instead of lastUserMessage?.senderName
+  const targetParticipant = derivedParticipantName
+    ? context.participants.find(p => p.name === derivedParticipantName)
     : null;
 
   // Build participant_details with full info (name, role, description)
-  const participantDetails = lastUserParticipant
-    ? buildParticipantDetails(lastUserParticipant)
+  const participantDetails = targetParticipant
+    ? buildParticipantDetails(targetParticipant)
     : '';
 
   // Build base variables
@@ -426,9 +434,11 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     // Uses activeParticipants (filtered by conversation_mode)
     participants: participantsSummary,
     participants_list: activeParticipants,
-    participant_name: lastUserMessage?.senderName ?? '',
-    participant_description: lastUserParticipant?.description ?? '',
-    participant_job_title: lastUserParticipant?.jobTitle ?? '',
+    // BUG FIX: Use derivedParticipantName and targetParticipant instead of lastUserMessage
+    // This ensures participant info is available even when messages array is empty (e.g., initial greeting)
+    participant_name: derivedParticipantName ?? '',
+    participant_description: targetParticipant?.description ?? '',
+    participant_job_title: targetParticipant?.jobTitle ?? '',
     participant_details: participantDetails,
     // Messages (modern JSON format)
     messages_json: JSON.stringify(conversationMessagesPayload),

@@ -27,8 +27,27 @@ export function cleanStepCompleteMarker(content: string): string {
 }
 
 /**
+ * Valid step ID pattern: step_N with optional suffix (e.g., step_1, step_2, step_10, step_10_final)
+ * This prevents capturing arbitrary words like "Compr" from AI text as step IDs
+ *
+ * Valid formats:
+ * - step_1, step_2, step_10 (basic format)
+ * - step_10_final, step_1_intro (with additional suffix)
+ * - STEP_1 (case insensitive)
+ *
+ * Invalid:
+ * - Compr, Hello, myStepId (no step_ prefix)
+ * - intro, final (no step_ prefix)
+ */
+const VALID_STEP_ID_PATTERN = /^step_\d+(_[a-z0-9]+)*$/i;
+
+/**
  * Detects and extracts step completion information from message content.
- * Returns the step ID if present, or null if no marker found.
+ * Returns the step ID if present and valid, or null if no marker found or invalid ID.
+ *
+ * IMPORTANT: Only step IDs matching the pattern "step_N" (e.g., step_1, step_2) are considered valid.
+ * If the AI outputs something like "STEP_COMPLETE: Compréhension terminée", the captured word
+ * "Compr" is not a valid step ID and will be returned as null (to use current step instead).
  */
 export function detectStepComplete(content: string): { hasMarker: boolean; stepId: string | null } {
   // Clean markdown formatting around STEP_COMPLETE for detection
@@ -38,13 +57,17 @@ export function detectStepComplete(content: string): { hasMarker: boolean; stepI
   );
 
   const stepCompleteMatch = cleanedForDetection.match(/STEP_COMPLETE:\s*(\w+)/i);
-  const hasStepCompleteWithId = stepCompleteMatch !== null;
+  const capturedStepId = stepCompleteMatch?.[1] ?? null;
 
-  // Also detect STEP_COMPLETE without ID (e.g., "STEP_COMPLETE:" or "**STEP_COMPLETE:**")
-  const hasStepCompleteWithoutId = !hasStepCompleteWithId && /STEP_COMPLETE:?\s*(?!\w)/i.test(cleanedForDetection);
+  // Validate that the captured step ID matches expected pattern (step_N)
+  // If not valid, treat it as if no step ID was provided
+  const validStepId = capturedStepId && VALID_STEP_ID_PATTERN.test(capturedStepId) ? capturedStepId : null;
+
+  // Detect STEP_COMPLETE marker presence (regardless of whether step ID is valid)
+  const hasStepCompleteMarker = /STEP_COMPLETE:/i.test(cleanedForDetection);
 
   return {
-    hasMarker: hasStepCompleteWithId || hasStepCompleteWithoutId,
-    stepId: stepCompleteMatch?.[1] ?? null
+    hasMarker: hasStepCompleteMarker,
+    stepId: validStepId
   };
 }

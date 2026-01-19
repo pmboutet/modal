@@ -275,18 +275,17 @@ describe('cleanStepCompleteMarker', () => {
 // ============================================================================
 
 describe('detectStepComplete', () => {
-  describe('detection of marker with step ID', () => {
-    test('should detect STEP_COMPLETE: with step ID', () => {
+  describe('detection of marker with valid step ID', () => {
+    test('should detect STEP_COMPLETE: with valid step ID (step_1)', () => {
       const result = detectStepComplete('STEP_COMPLETE: step_1 Hello world');
       expect(result.hasMarker).toBe(true);
       expect(result.stepId).toBe('step_1');
     });
 
-    test('should capture first word as step ID', () => {
-      // First word after STEP_COMPLETE: is captured as step ID
-      const result = detectStepComplete('STEP_COMPLETE: myStepId message');
+    test('should detect STEP_COMPLETE: with multi-digit step ID (step_10)', () => {
+      const result = detectStepComplete('STEP_COMPLETE: step_10 Moving on');
       expect(result.hasMarker).toBe(true);
-      expect(result.stepId).toBe('myStepId');
+      expect(result.stepId).toBe('step_10');
     });
 
     test('should not detect when no marker present', () => {
@@ -296,34 +295,88 @@ describe('detectStepComplete', () => {
     });
   });
 
-  describe('detection with newlines', () => {
-    test('should detect STEP_COMPLETE: and capture first word even with newline', () => {
-      // \s* in regex also matches newlines, so first word is still captured as step ID
-      const result = detectStepComplete('STEP_COMPLETE:\nHello world');
+  describe('invalid step IDs should return null', () => {
+    test('should detect marker but return null for invalid step ID (myStepId)', () => {
+      // myStepId doesn't match step_N pattern
+      const result = detectStepComplete('STEP_COMPLETE: myStepId message');
       expect(result.hasMarker).toBe(true);
-      expect(result.stepId).toBe('Hello');
+      expect(result.stepId).toBeNull();
     });
 
-    test('should detect **STEP_COMPLETE:** and capture first word even with newline', () => {
+    test('should detect marker but return null for arbitrary word (Compr)', () => {
+      // BUG-040 FIX: "Compr" from "Compréhension" should not be captured as step ID
+      const result = detectStepComplete('STEP_COMPLETE: Compréhension terminée');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
+    });
+
+    test('should detect marker but return null for step without underscore (step1)', () => {
+      const result = detectStepComplete('STEP_COMPLETE: step1');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
+    });
+  });
+
+  describe('detection with newlines', () => {
+    test('should detect STEP_COMPLETE: but return null for invalid word after newline', () => {
+      // Hello doesn't match step_N pattern
+      const result = detectStepComplete('STEP_COMPLETE:\nHello world');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
+    });
+
+    test('should detect **STEP_COMPLETE:** but return null for invalid word after newline', () => {
       const result = detectStepComplete('**STEP_COMPLETE:**\nHello world');
       expect(result.hasMarker).toBe(true);
-      expect(result.stepId).toBe('Hello');
+      expect(result.stepId).toBeNull();
+    });
+
+    test('should detect and capture valid step ID after newline', () => {
+      const result = detectStepComplete('STEP_COMPLETE:\nstep_2 content');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBe('step_2');
     });
   });
 
   describe('markdown formatting', () => {
-    test('should detect **STEP_COMPLETE: step_id**', () => {
-      const result = detectStepComplete('**STEP_COMPLETE: step_id** Hello');
+    test('should detect **STEP_COMPLETE: step_1**', () => {
+      const result = detectStepComplete('**STEP_COMPLETE: step_1** Hello');
       expect(result.hasMarker).toBe(true);
-      expect(result.stepId).toBe('step_id');
+      expect(result.stepId).toBe('step_1');
+    });
+
+    test('should detect **STEP_COMPLETE:** without step ID', () => {
+      const result = detectStepComplete('**STEP_COMPLETE:** Moving to next topic');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
     });
   });
 
   describe('case insensitivity', () => {
-    test('should detect lowercase step_complete', () => {
+    test('should detect lowercase step_complete with valid step ID', () => {
       const result = detectStepComplete('step_complete: step_1 Hello');
       expect(result.hasMarker).toBe(true);
       expect(result.stepId).toBe('step_1');
+    });
+
+    test('should accept uppercase STEP_1', () => {
+      const result = detectStepComplete('STEP_COMPLETE: STEP_1');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBe('STEP_1');
+    });
+  });
+
+  describe('marker without step ID (use current step)', () => {
+    test('should detect marker with just colon', () => {
+      const result = detectStepComplete('STEP_COMPLETE:');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
+    });
+
+    test('should detect marker with colon and space only', () => {
+      const result = detectStepComplete('STEP_COMPLETE: ');
+      expect(result.hasMarker).toBe(true);
+      expect(result.stepId).toBeNull();
     });
   });
 });

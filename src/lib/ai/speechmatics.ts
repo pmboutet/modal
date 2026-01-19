@@ -108,6 +108,9 @@ export class SpeechmaticsVoiceAgent {
   private userMessageQueue: Array<{ content: string; timestamp: string }> = [];
   // Track if user continues speaking during response generation (abort-on-continue)
   private responseAbortedDueToUserContinuation: boolean = false;
+  // Track if ANY partial transcript was received during LLM generation
+  // This flag is only reset when generation completes, not when processing starts
+  private receivedPartialDuringGeneration: boolean = false;
   // Last processed user message (to detect new content during response)
   private lastSentUserMessage: string = '';
   // Deduplication: Track last successfully processed message to avoid duplicate processing
@@ -247,6 +250,14 @@ export class SpeechmaticsVoiceAgent {
             maxContextMessages: this.semanticTurnConfig.contextMessages,
             telemetry: (event) => this.onSemanticTurnCallback?.(event),
           }
+        : undefined,
+      // Speaker filtering config (individual mode)
+      config.enableSpeakerFiltering
+        ? {
+            enabled: true,
+            onSpeakerEstablished: config.onSpeakerEstablished,
+            onSpeakerFiltered: config.onSpeakerFiltered,
+          }
         : undefined
     );
 
@@ -280,7 +291,7 @@ export class SpeechmaticsVoiceAgent {
       () => {}, // onAudioChunk not needed, handled internally
       this.websocket.getWebSocket(),
       () => this.abortResponse(), // Barge-in callback
-      () => this.onAudioPlaybackEndCallback?.(), // Audio playback end callback (for inactivity timer)
+      () => this.handleAudioPlaybackEnd(), // Audio playback end callback - clears lastSentUserMessage and notifies inactivity timer
       // BUG-008 FIX: Pass echo details to handler for UI feedback
       (details) => this.handleEchoDetected(details)
     );
@@ -347,9 +358,17 @@ export class SpeechmaticsVoiceAgent {
       if (this.audio && transcript && transcript.trim()) {
         const trimmedTranscript = transcript.trim();
 
-        // ABORT-ON-CONTINUE: If response is being generated and user continues speaking,
+        // Track ANY partial received during LLM generation
+        // This flag is used to drop the LLM response if user was speaking
+        if (this.isGeneratingResponse) {
+          this.receivedPartialDuringGeneration = true;
+        }
+
+        // ABORT-ON-CONTINUE: If response is being generated OR audio is playing and user continues speaking,
         // abort the current response and let them finish
-        if (this.isGeneratingResponse && this.lastSentUserMessage) {
+        // BUG FIX: Also check isPlayingAudio - user should be able to abort during TTS, not just LLM generation
+        const isAgentResponding = this.isGeneratingResponse || this.audio?.isPlaying();
+        if (isAgentResponding && this.lastSentUserMessage) {
           const hasSignificantNewContent = this.hasSignificantNewContent(trimmedTranscript, this.lastSentUserMessage);
           if (hasSignificantNewContent) {
             this.responseAbortedDueToUserContinuation = true;
@@ -506,6 +525,7 @@ export class SpeechmaticsVoiceAgent {
 
     this.isGeneratingResponse = true;
     this.generationStartedAt = processStartedAt;
+    this.receivedPartialDuringGeneration = false; // Reset flag at start of generation
 
     // Track the message we're about to process (for abort-on-continue detection)
     this.lastSentUserMessage = transcript;
@@ -593,6 +613,28 @@ export class SpeechmaticsVoiceAgent {
         }
       );
 
+      // USER-SPEAKING CHECK: If user started speaking while LLM was generating,
+      // drop the response entirely and wait for user to finish
+      // This prevents the AI from talking over the user
+      // Check both: (1) user is currently speaking (VAD) OR (2) we received any partial during generation
+      const userSpokeWhileGenerating = this.receivedPartialDuringGeneration || this.audio?.isUserSpeaking();
+      if (userSpokeWhileGenerating) {
+        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial received:', this.receivedPartialDuringGeneration, ', currently speaking:', this.audio?.isUserSpeaking(), ')');
+        // Remove the incomplete user message from conversation history
+        // (it will be replaced by the complete one when user finishes)
+        if (this.conversationHistory.length > 0 &&
+            this.conversationHistory[this.conversationHistory.length - 1]?.role === 'user') {
+          this.conversationHistory.pop();
+        }
+        // Reset generation state
+        this.isGeneratingResponse = false;
+        this.generationStartedAt = 0;
+        this.receivedPartialDuringGeneration = false; // Reset flag
+        // Clear queue - stale fragments will be replaced by new user message
+        this.userMessageQueue = [];
+        return;
+      }
+
       // Add to conversation history
       this.conversationHistory.push({ role: 'agent', content: llmResponse });
 
@@ -644,8 +686,12 @@ export class SpeechmaticsVoiceAgent {
         timestamp: Date.now(),
       };
 
-      // Clear the sent message tracker as response completed successfully
-      this.lastSentUserMessage = '';
+      // BUG FIX: Don't clear lastSentUserMessage here if audio is still playing
+      // The abort-on-continue logic needs it to detect if user adds new content during TTS
+      // It will be cleared by handleAudioPlaybackEnd() when TTS finishes
+      if (!this.audio?.isPlaying()) {
+        this.lastSentUserMessage = '';
+      }
 
       // Process queued messages
       if (this.userMessageQueue.length > 0) {
@@ -848,6 +894,38 @@ export class SpeechmaticsVoiceAgent {
     return this.config?.disableElevenLabsTTS ?? false;
   }
 
+  // ===== SPEAKER FILTERING METHODS =====
+
+  /**
+   * Add a speaker to the whitelist (allows multiple speakers)
+   * @param speaker Speaker ID to allow (e.g., "S2")
+   */
+  addAllowedSpeaker(speaker: string): void {
+    this.transcriptionManager?.addAllowedSpeaker(speaker);
+  }
+
+  /**
+   * Set a new primary speaker (resets filtering and establishes new speaker)
+   * @param speaker New primary speaker ID (e.g., "S2")
+   */
+  setPrimarySpeaker(speaker: string): void {
+    this.transcriptionManager?.setPrimarySpeaker(speaker);
+  }
+
+  /**
+   * Reset speaker filtering state (clears primary and whitelist)
+   */
+  resetSpeakerFiltering(): void {
+    this.transcriptionManager?.resetSpeakerFiltering();
+  }
+
+  /**
+   * Get the current primary speaker
+   */
+  getPrimarySpeaker(): string | undefined {
+    return this.transcriptionManager?.getPrimarySpeaker();
+  }
+
   /**
    * Extract the dominant speaker from Speechmatics results array
    * According to Speechmatics API docs, speaker is in alternatives[0].speaker (S1, S2, S3, UU for unknown)
@@ -965,6 +1043,18 @@ export class SpeechmaticsVoiceAgent {
   }
 
   /**
+   * Handle audio playback end - called when TTS finishes playing
+   * Clears lastSentUserMessage since agent is no longer responding
+   */
+  private handleAudioPlaybackEnd(): void {
+    // Clear lastSentUserMessage since agent is done responding
+    // This allows abort-on-continue to work only while agent is actively responding
+    this.lastSentUserMessage = '';
+    // Notify external callback (for inactivity timer)
+    this.onAudioPlaybackEndCallback?.();
+  }
+
+  /**
    * Abort current assistant response (called when user interrupts)
    * Stops ElevenLabs playback, clears assistant interim message, and cancels in-flight LLM request
    */
@@ -992,6 +1082,7 @@ export class SpeechmaticsVoiceAgent {
 
     // Reset generation state
     this.isGeneratingResponse = false;
+    this.receivedPartialDuringGeneration = false;
   }
 
   /**

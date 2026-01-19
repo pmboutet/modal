@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { createAgentLog, completeAgentLog } from '@/lib/ai/logs';
-import { getAgentConfigForAsk, type PromptVariables } from '@/lib/ai/agent-config';
-import { getAskSessionByKey, getOrCreateConversationThread, getLastUserMessageThread } from '@/lib/asks';
-import { getConversationPlanWithSteps } from '@/lib/ai/conversation-plan';
+import { getAgentConfigForAsk } from '@/lib/ai/agent-config';
+import { getAskSessionByKey } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { parseErrorMessage } from '@/lib/utils';
 import type { ApiResponse } from '@/types';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
-  buildParticipantDisplayName,
-  buildDetailedMessage,
-  fetchUsersByIds,
-  fetchElapsedTime,
+  fetchConversationContext,
   type AskSessionRow,
-  type UserRow,
-  type ParticipantRow,
-  type ProjectRow,
-  type ChallengeRow,
-  type MessageRow,
 } from '@/lib/conversation-context';
 
 export async function POST(
@@ -45,9 +36,10 @@ export async function POST(
     }
 
     const supabase = await createServerSupabaseClient();
+    const adminClient = getAdminSupabaseClient();
 
-    // Get ASK session with all needed fields (including conversation_mode for thread resolution)
-    const { row: askRow, error: askError } = await getAskSessionByKey<AskSessionRow & { conversation_mode?: string | null }>(
+    // Get ASK session with all needed fields
+    const { row: askRow, error: askError } = await getAskSessionByKey<AskSessionRow>(
       supabase,
       key,
       'id, ask_key, question, description, project_id, challenge_id, system_prompt, conversation_mode, expected_duration_minutes'
@@ -60,208 +52,35 @@ export async function POST(
       }, { status: 404 });
     }
 
-    // Fetch participants
-    const { data: participantRows, error: participantError } = await supabase
-      .from('ask_participants')
-      .select('*')
-      .eq('ask_session_id', askRow.id)
-      .order('joined_at', { ascending: true });
-
-    if (participantError) {
-      console.error('Error fetching participants:', participantError);
-    }
-
-    const participantUserIds = (participantRows ?? [])
-      .map(row => row.user_id)
-      .filter((value): value is string => Boolean(value));
-
-    let usersById: Record<string, UserRow> = {};
-
-    if (participantUserIds.length > 0) {
-      const { data: userRows, error: userError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, first_name, last_name, description')
-        .in('id', participantUserIds);
-
-      if (userError) {
-        console.error('Error fetching users:', userError);
-      } else {
-        usersById = (userRows ?? []).reduce<Record<string, UserRow>>((acc, user) => {
-          acc[user.id] = user;
-          return acc;
-        }, {});
-      }
-    }
-
-    const participants = (participantRows ?? []).map((row, index) => {
-      const user = row.user_id ? usersById[row.user_id] ?? null : null;
-      return {
-        id: row.id,
-        name: buildParticipantDisplayName(row, user, index),
-        email: row.participant_email ?? user?.email ?? null,
-        role: row.role ?? null,
-        description: user?.description ?? null, // FIX: description comes from profile, not participant row
-        isSpokesperson: Boolean(row.is_spokesperson),
-        isActive: true,
-      };
-    });
-
-    // Fetch messages (include plan_step_id for step variable support)
-    const { data: messageRows, error: messageError } = await supabase
-      .from('messages')
-      .select('id, ask_session_id, user_id, sender_type, content, message_type, metadata, created_at, plan_step_id')
-      .eq('ask_session_id', askRow.id)
-      .order('created_at', { ascending: true });
-
-    if (messageError) {
-      console.error('Error fetching messages:', messageError);
-    }
-
-    const messageUserIds = (messageRows ?? [])
-      .map(row => row.user_id)
-      .filter((value): value is string => Boolean(value));
-
-    const additionalUserIds = messageUserIds.filter(id => !usersById[id]);
-
-    if (additionalUserIds.length > 0) {
-      const { data: extraUsers, error: extraUsersError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, first_name, last_name')
-        .in('id', additionalUserIds);
-
-      if (extraUsersError) {
-        console.error('Error fetching additional users:', extraUsersError);
-      } else {
-        (extraUsers ?? []).forEach(user => {
-          usersById[user.id] = user;
-        });
-      }
-    }
-
-    // Format messages using unified buildDetailedMessage for consistent mapping
-    const messages = (messageRows ?? []).map((row, index) => {
-      const user = row.user_id ? usersById[row.user_id] ?? null : null;
-      return buildDetailedMessage(row as MessageRow, user, index, askRow.ask_key);
-    });
-
-    // Fetch project and challenge data
-    let projectData: ProjectRow | null = null;
-    if (askRow.project_id) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('id, name, system_prompt')
-        .eq('id', askRow.project_id)
-        .maybeSingle<ProjectRow>();
-
-      if (error) {
-        console.error('Error fetching project:', error);
-      } else {
-        projectData = data ?? null;
-      }
-    }
-
-    let challengeData: ChallengeRow | null = null;
-    if (askRow.challenge_id) {
-      const { data, error } = await supabase
-        .from('challenges')
-        .select('id, name, system_prompt')
-        .eq('id', askRow.challenge_id)
-        .maybeSingle<ChallengeRow>();
-
-      if (error) {
-        console.error('Error fetching challenge:', error);
-      } else {
-        challengeData = data ?? null;
-      }
-    }
-
-    const participantSummaries = participants.map(p => ({ name: p.name, role: p.role ?? null, description: p.description ?? null }));
-
-    // Format messages as JSON (same as agent-config/route.ts)
-    const conversationMessagesPayload = messages.map(message => ({
-      id: message.id,
-      senderType: message.senderType,
-      senderName: message.senderName,
-      content: message.content,
-      timestamp: message.timestamp,
-    }));
-
-    // Get conversation thread - use the same logic as stream route
-    // Find the thread from the last user message to ensure we use the correct thread
-    // (important for individual_parallel mode where each participant has their own thread)
-    const adminClient = getAdminSupabaseClient();
-    const askConfig = {
-      conversation_mode: askRow.conversation_mode ?? null,
-    };
-
-    let conversationThread: { id: string; is_shared: boolean } | null = null;
-
-    // First, try to find the thread from the last user message
-    const { threadId: lastUserThreadId } = await getLastUserMessageThread(
+    // Fetch complete conversation context using centralized function (DRY!)
+    // Uses admin client to bypass RLS for voice agent access
+    // useLastUserMessageThread: true to find the correct thread in individual_parallel mode
+    const context = await fetchConversationContext(adminClient, askRow, {
       adminClient,
-      askRow.id
-    );
-
-    if (lastUserThreadId) {
-      // Use the same thread as the last user message
-      const { data: existingThread, error: fetchError } = await adminClient
-        .from('conversation_threads')
-        .select('id, is_shared')
-        .eq('id', lastUserThreadId)
-        .single();
-
-      if (!fetchError && existingThread) {
-        conversationThread = existingThread;
-      }
-    }
-
-    // Fallback: create/get thread based on conversation mode
-    if (!conversationThread) {
-      const { thread, error: threadError } = await getOrCreateConversationThread(
-        adminClient,
-        askRow.id,
-        null,
-        askConfig
-      );
-
-      if (!threadError) {
-        conversationThread = thread;
-      }
-    }
-
-    let conversationPlan = null;
-    if (conversationThread) {
-      conversationPlan = await getConversationPlanWithSteps(adminClient, conversationThread.id);
-      if (conversationPlan && conversationPlan.plan_data) {
-        console.log('📋 Voice agent log: Loaded conversation plan with', conversationPlan.plan_data.steps.length, 'steps');
-      }
-    }
-
-    // Fetch elapsed times using centralized helper (DRY - same as stream route)
-    // IMPORTANT: Pass participantRows to use fallback (first participant) when profileId is null
-    const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
-      supabase,
-      askSessionId: askRow.id,
       profileId: null, // voice-agent log doesn't have a specific user context
-      conversationPlan,
-      participantRows: participantRows ?? [],
-      adminClient,
+      useLastUserMessageThread: true, // Important: find thread from last user message
     });
+
+    if (context.conversationPlan?.plan_data) {
+      console.log('📋 Voice agent log: Loaded conversation plan with', context.conversationPlan.plan_data.steps.length, 'steps');
+    }
 
     // Use centralized function for ALL prompt variables - no manual overrides
     const promptVariables = buildConversationAgentVariables({
       ask: askRow,
-      project: projectData,
-      challenge: challengeData,
-      messages: conversationMessagesPayload,
-      participants: participantSummaries,
-      conversationPlan,
-      elapsedActiveSeconds,
-      stepElapsedActiveSeconds,
+      project: context.project,
+      challenge: context.challenge,
+      messages: context.messages, // Already in ConversationMessageSummary format with planStepId
+      participants: context.participants,
+      conversationPlan: context.conversationPlan,
+      elapsedActiveSeconds: context.elapsedActiveSeconds,
+      stepElapsedActiveSeconds: context.stepElapsedActiveSeconds,
     });
 
     // Pass the complete promptVariables directly - no manual subset
-    const agentConfig = await getAgentConfigForAsk(supabase, askRow.id, promptVariables);
+    // Use admin client because session client may not have RLS access (guest/anonymous users)
+    // Access is already validated via getAskSessionByKey RPC
+    const agentConfig = await getAgentConfigForAsk(adminClient, askRow.id, promptVariables);
 
     if (!agentConfig.modelConfig) {
       return NextResponse.json<ApiResponse>({
@@ -272,7 +91,8 @@ export async function POST(
 
     if (role === 'user') {
       // Create a new log for user message with resolved system prompt
-      const log = await createAgentLog(supabase, {
+      // Use admin client because ai_agent_logs only allows INSERT via service_role
+      const log = await createAgentLog(adminClient, {
         agentId: agentConfig.agent?.id || null,
         askSessionId: askRow.id,
         messageId: messageId || null,
@@ -303,7 +123,8 @@ export async function POST(
         }, { status: 400 });
       }
 
-      await completeAgentLog(supabase, logId, {
+      // Use admin client because ai_agent_logs only allows UPDATE via service_role
+      await completeAgentLog(adminClient, logId, {
         responsePayload: {
           agentMessage: content,
           role: 'agent',
@@ -317,10 +138,11 @@ export async function POST(
     }
 
   } catch (error) {
-    console.error('Error handling voice agent log:', error);
+    const errorMsg = parseErrorMessage(error);
+    console.error('Error handling voice agent log:', errorMsg);
     return NextResponse.json<ApiResponse>({
       success: false,
-      error: parseErrorMessage(error)
+      error: errorMsg
     }, { status: 500 });
   }
 }

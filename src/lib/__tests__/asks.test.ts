@@ -2,7 +2,6 @@ import {
   shouldUseSharedThread,
   getOrCreateConversationThread,
   getMessagesForThread,
-  getInsightsForThread,
   getAskSessionByKey,
   getAskSessionByToken,
   resolveThreadUserId,
@@ -608,56 +607,8 @@ describe('getMessagesForThread', () => {
   });
 });
 
-describe('getInsightsForThread', () => {
-  it('should fetch insights ordered by created_at', async () => {
-    const mockInsights = [
-      { id: 'insight-1', content: 'Insight 1', created_at: '2024-01-01T00:00:00Z' },
-      { id: 'insight-2', content: 'Insight 2', created_at: '2024-01-01T00:01:00Z' },
-    ];
-
-    const mockFrom = jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      order: jest.fn().mockResolvedValue({
-        data: mockInsights,
-        error: null,
-      }),
-    });
-
-    const supabase = { from: mockFrom } as unknown as SupabaseClient;
-
-    const result = await getInsightsForThread(supabase, 'thread-123');
-
-    expect(result.insights).toEqual(mockInsights);
-    expect(result.error).toBeNull();
-    expect(mockFrom).toHaveBeenCalledWith('insights');
-  });
-
-  it('should return empty array on error', async () => {
-    const mockError: PostgrestError = {
-      code: 'PGRST001',
-      message: 'Error fetching insights',
-      details: null,
-      hint: null,
-    };
-
-    const mockFrom = jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      order: jest.fn().mockResolvedValue({
-        data: null,
-        error: mockError,
-      }),
-    });
-
-    const supabase = { from: mockFrom } as unknown as SupabaseClient;
-
-    const result = await getInsightsForThread(supabase, 'thread-123');
-
-    expect(result.insights).toEqual([]);
-    expect(result.error).toEqual(mockError);
-  });
-});
+// Note: getInsightsForThread was removed and replaced by fetchInsightsForThread in insightQueries.ts
+// Tests for fetchInsightsForThread are in insightQueries.test.ts
 
 describe('getAskSessionByKey', () => {
   const mockRpcResult = {
@@ -1244,8 +1195,8 @@ describe('Thread Isolation (BUG-004, BUG-005, BUG-013, BUG-031)', () => {
       // Check for BUG-004 fix comment
       expect(content).toMatch(/BUG-004 FIX/);
 
-      // Check that getInsightsForThread is imported and used
-      expect(content).toMatch(/getInsightsForThread/);
+      // Check that fetchInsightsForThread is imported and used (replaces legacy getInsightsForThread)
+      expect(content).toMatch(/fetchInsightsForThread/);
     });
 
     it('stream route should use shouldUseSharedThread for message filtering', () => {

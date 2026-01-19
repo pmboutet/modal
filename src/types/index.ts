@@ -35,6 +35,7 @@ export interface Ask {
   updatedAt: string;
   deliveryMode: AskDeliveryMode;
   conversationMode: AskConversationMode;
+  expectedDurationMinutes?: number | null; // Expected conversation duration (1-30 minutes)
   participants: AskParticipant[];
   askSessionId?: string;
 }

@@ -51,6 +51,14 @@ export class TranscriptionManager {
   private lastPartialUpdateTimestamp: number = 0;
   private currentSpeaker: string | undefined = undefined;
 
+  // ===== SPEAKER FILTERING (individual mode) =====
+  private speakerFilteringEnabled: boolean = false;
+  private candidateSpeaker: string | undefined = undefined; // Speaker awaiting confirmation
+  private primarySpeaker: string | undefined = undefined; // Confirmed primary speaker (2 consecutive)
+  private allowedSpeakers: Set<string> = new Set(); // Whitelist of allowed speakers
+  private onSpeakerEstablished?: (speaker: string) => void;
+  private onSpeakerFiltered?: (speaker: string, transcript: string) => void;
+
   // Gestion de la détection sémantique des fins de tour
   private semanticHoldTimeout: NodeJS.Timeout | null = null;
   private semanticHoldStartedAt: number | null = null;
@@ -78,8 +86,19 @@ export class TranscriptionManager {
     private processUserMessage: (transcript: string) => Promise<void>,
     private conversationHistory: Array<{ role: 'user' | 'agent'; content: string }>,
     private enablePartials: boolean = true,
-    private semanticOptions?: SemanticSupportOptions
-  ) {}
+    private semanticOptions?: SemanticSupportOptions,
+    filteringConfig?: {
+      enabled: boolean;
+      onSpeakerEstablished?: (speaker: string) => void;
+      onSpeakerFiltered?: (speaker: string, transcript: string) => void;
+    }
+  ) {
+    if (filteringConfig) {
+      this.speakerFilteringEnabled = filteringConfig.enabled;
+      this.onSpeakerEstablished = filteringConfig.onSpeakerEstablished;
+      this.onSpeakerFiltered = filteringConfig.onSpeakerFiltered;
+    }
+  }
 
   // ===== PUBLIC METHODS =====
 
@@ -112,6 +131,33 @@ export class TranscriptionManager {
     // Update current speaker
     if (speaker) {
       this.currentSpeaker = speaker;
+    }
+
+    // Speaker filtering for individual mode (2 consecutive transcripts from same speaker)
+    if (this.speakerFilteringEnabled && speaker) {
+      // Skip unknown speakers entirely
+      if (speaker === 'UU') {
+        return;
+      }
+
+      // Establishment phase: need 2 consecutive transcripts from same speaker
+      if (!this.primarySpeaker) {
+        if (speaker === this.candidateSpeaker) {
+          // Same speaker twice in a row → confirmed!
+          this.primarySpeaker = speaker;
+          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+          this.onSpeakerEstablished?.(this.primarySpeaker);
+        } else {
+          // Different speaker → reset candidate
+          this.candidateSpeaker = speaker;
+        }
+        // Don't filter during establishment - process normally
+      } else if (speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
+        // Filter non-primary speakers (unless in whitelist) after establishment
+        console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
+        this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+        return;
+      }
     }
 
     // Store segment in the segment store (handles deduplication by timestamp)
@@ -172,6 +218,33 @@ export class TranscriptionManager {
     // Update current speaker
     if (speaker) {
       this.currentSpeaker = speaker;
+    }
+
+    // Speaker filtering for individual mode (2 consecutive transcripts from same speaker)
+    if (this.speakerFilteringEnabled && speaker) {
+      // Skip unknown speakers entirely
+      if (speaker === 'UU') {
+        return;
+      }
+
+      // Establishment phase: need 2 consecutive transcripts from same speaker
+      if (!this.primarySpeaker) {
+        if (speaker === this.candidateSpeaker) {
+          // Same speaker twice in a row → confirmed!
+          this.primarySpeaker = speaker;
+          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+          this.onSpeakerEstablished?.(this.primarySpeaker);
+        } else {
+          // Different speaker → reset candidate
+          this.candidateSpeaker = speaker;
+        }
+        // Don't filter during establishment - process normally
+      } else if (speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
+        // Filter non-primary speakers (unless in whitelist) after establishment
+        console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
+        this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+        return;
+      }
     }
 
     // Store as final (automatically removes overlapping partials)
@@ -340,6 +413,14 @@ export class TranscriptionManager {
   }
 
   /**
+   * Check if there's pending transcript (user started speaking again)
+   * Used to discard LLM response if user started a new turn
+   */
+  hasPendingTranscript(): boolean {
+    return !!(this.pendingFinalTranscript && this.pendingFinalTranscript.trim());
+  }
+
+  /**
    * Cleanup on disconnect
    */
   cleanup(): void {
@@ -356,6 +437,44 @@ export class TranscriptionManager {
     this.lastProcessedContent = null;
     this.lastPartialUpdateTimestamp = 0;
     this.currentSpeaker = undefined;
+    this.resetSpeakerFiltering();
+  }
+
+  /**
+   * Reset speaker filtering state (for new session)
+   */
+  resetSpeakerFiltering(): void {
+    this.candidateSpeaker = undefined;
+    this.primarySpeaker = undefined;
+    this.allowedSpeakers.clear();
+  }
+
+  /**
+   * Get the current primary speaker (for debugging/UI)
+   */
+  getPrimarySpeaker(): string | undefined {
+    return this.primarySpeaker;
+  }
+
+  /**
+   * Add a speaker to the whitelist (allows multiple speakers)
+   * @param speaker Speaker ID to allow (e.g., "S2")
+   */
+  addAllowedSpeaker(speaker: string): void {
+    this.allowedSpeakers.add(speaker);
+    console.log(`[Transcription] Added speaker ${speaker} to whitelist. Allowed: ${Array.from(this.allowedSpeakers).join(', ')}`);
+  }
+
+  /**
+   * Set a new primary speaker (resets filtering and establishes new speaker)
+   * @param speaker New primary speaker ID (e.g., "S2")
+   */
+  setPrimarySpeaker(speaker: string): void {
+    this.candidateSpeaker = undefined;
+    this.primarySpeaker = speaker;
+    this.allowedSpeakers.clear();
+    console.log(`[Transcription] Changed primary speaker to: ${speaker}`);
+    this.onSpeakerEstablished?.(speaker);
   }
 
   // ===== PRIVATE METHODS =====

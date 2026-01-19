@@ -14,7 +14,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as Sentry from '@sentry/nextjs';
 import { normaliseMessageMetadata } from './messages';
-import { getOrCreateConversationThread, getMessagesForThread, type AskSessionConfig } from './asks';
+import { getOrCreateConversationThread, getMessagesForThread, getLastUserMessageThread, type AskSessionConfig } from './asks';
 import { getConversationPlanWithSteps, type ConversationPlan, type ConversationPlanWithSteps } from './ai/conversation-plan';
 import type { ConversationMessageSummary, ConversationParticipantSummary } from './ai/conversation-agent';
 
@@ -221,6 +221,10 @@ export interface ConversationContextResult {
 export interface FetchConversationContextOptions {
   profileId?: string | null;
   adminClient?: SupabaseClient; // For bypassing RLS when needed
+  /** Invite token for voice mode (uses token-based RPCs to bypass RLS) */
+  token?: string;
+  /** If true, find the thread from the last user message (important for individual_parallel mode) */
+  useLastUserMessageThread?: boolean;
 }
 
 // ============================================================================
@@ -673,6 +677,173 @@ export async function fetchChallenge(
 }
 
 // ============================================================================
+// Token-Based Fetch Functions (Voice Mode)
+// ============================================================================
+
+/**
+ * RPC participant row type from get_ask_participants_by_token.
+ * Includes both participant data and profile data (from LEFT JOIN).
+ */
+interface RpcParticipantByToken {
+  participant_id: string;
+  user_id: string | null;
+  participant_name: string | null;
+  participant_email: string | null;
+  role: string | null;
+  is_spokesperson: boolean | null;
+  joined_at: string | null;
+  elapsed_active_seconds: number | null;
+  timer_reset_at: string | null;
+  profile_full_name: string | null;
+  profile_first_name: string | null;
+  profile_last_name: string | null;
+  profile_email: string | null;
+  profile_description: string | null;
+}
+
+/**
+ * RPC message row type from get_ask_messages_by_token.
+ */
+interface RpcMessageByToken {
+  message_id: string;
+  content: string;
+  type: string | null;
+  sender_type: string | null;
+  sender_id: string | null;
+  sender_name: string | null;
+  created_at: string | null;
+  metadata: Record<string, unknown> | null;
+  plan_step_id: string | null;
+}
+
+/**
+ * Fetch participants and their profile data via token RPC.
+ * This bypasses RLS and returns all participants for the session associated with the token.
+ *
+ * @param supabase - Supabase client (admin client recommended for RPC)
+ * @param token - Invite token
+ * @param projectId - Optional project ID for fetching project-specific descriptions
+ * @returns Participants, users lookup, and raw participant rows
+ */
+export async function fetchParticipantsByToken(
+  supabase: SupabaseClient,
+  token: string,
+  projectId?: string | null
+): Promise<FetchParticipantsResult> {
+  const params = { p_token: token };
+  const { data: rpcRows, error } = await supabase.rpc('get_ask_participants_by_token', params);
+
+  if (error) {
+    return handleRpcError('get_ask_participants_by_token', { p_token: token.substring(0, 8) + '...' }, error, {
+      participants: [],
+      usersById: {},
+      participantRows: [],
+      projectMembersById: {},
+    });
+  }
+
+  const rpcParticipants = (rpcRows ?? []) as RpcParticipantByToken[];
+
+  // Build participantRows from RPC data
+  const participantRows: ParticipantRow[] = rpcParticipants.map(row => ({
+    id: row.participant_id,
+    participant_name: row.participant_name,
+    participant_email: row.participant_email,
+    role: row.role,
+    is_spokesperson: row.is_spokesperson,
+    user_id: row.user_id,
+    elapsed_active_seconds: row.elapsed_active_seconds,
+  }));
+
+  // Build usersById from RPC profile data (no separate profile fetch needed!)
+  const usersById: Record<string, UserRow> = rpcParticipants.reduce((acc, row) => {
+    if (row.user_id) {
+      acc[row.user_id] = {
+        id: row.user_id,
+        email: row.profile_email,
+        full_name: row.profile_full_name,
+        first_name: row.profile_first_name,
+        last_name: row.profile_last_name,
+        description: row.profile_description,
+      };
+    }
+    return acc;
+  }, {} as Record<string, UserRow>);
+
+  // Fetch project members if project ID provided (for project-specific descriptions)
+  const projectMembersById = projectId
+    ? await fetchProjectMembersByProject(supabase, projectId)
+    : {};
+
+  // Build participant summaries with project-specific data priority
+  const participants = participantRows.map((row, index) => {
+    const user = row.user_id ? usersById[row.user_id] ?? null : null;
+    const projectMember = row.user_id ? projectMembersById[row.user_id] ?? null : null;
+    return buildParticipantSummary(row, user, projectMember, index);
+  });
+
+  return { participants, usersById, participantRows, projectMembersById };
+}
+
+/**
+ * Fetch messages via token RPC.
+ * This bypasses RLS and returns all messages for the session associated with the token.
+ *
+ * @param supabase - Supabase client (admin client recommended for RPC)
+ * @param token - Invite token
+ * @param existingUsersById - Existing users lookup (to avoid re-fetching)
+ * @returns Messages and updated users lookup
+ */
+export async function fetchMessagesByToken(
+  supabase: SupabaseClient,
+  token: string,
+  existingUsersById: Record<string, UserRow> = {}
+): Promise<{ messages: ConversationMessageSummary[]; usersById: Record<string, UserRow> }> {
+  const params = { p_token: token };
+  const { data: rpcRows, error } = await supabase.rpc('get_ask_messages_by_token', params);
+
+  if (error) {
+    return handleRpcError('get_ask_messages_by_token', { p_token: token.substring(0, 8) + '...' }, error, {
+      messages: [],
+      usersById: existingUsersById,
+    });
+  }
+
+  const rpcMessages = (rpcRows ?? []) as RpcMessageByToken[];
+
+  // RPC already returns sender_name, so we can build messages directly
+  // No need to fetch additional users - the RPC does the JOIN
+  const messages: ConversationMessageSummary[] = rpcMessages.map((row, index) => ({
+    id: row.message_id,
+    senderType: row.sender_type ?? 'user',
+    // Use RPC-provided sender_name, fallback to "Participant N" if empty
+    senderName: row.sender_name && row.sender_name.trim().length > 0
+      ? row.sender_name
+      : row.sender_type === 'ai'
+        ? 'Agent'
+        : `Participant ${index + 1}`,
+    content: row.content,
+    timestamp: row.created_at ?? new Date().toISOString(),
+    // CRITICAL: Include planStepId for step_messages_json filtering
+    planStepId: row.plan_step_id ?? null,
+  }));
+
+  // Build usersById from message sender info (for consistency with non-token path)
+  // Note: This is less detailed than profile data, but sufficient for message display
+  const usersById = { ...existingUsersById };
+  rpcMessages.forEach(row => {
+    if (row.sender_id && !usersById[row.sender_id]) {
+      usersById[row.sender_id] = {
+        id: row.sender_id,
+        full_name: row.sender_name,
+      };
+    }
+  });
+
+  return { messages, usersById };
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -695,43 +866,95 @@ export async function fetchConversationContext(
   askSession: AskSessionRow,
   options: FetchConversationContextOptions = {}
 ): Promise<ConversationContextResult> {
-  const { profileId, adminClient } = options;
+  const { profileId, adminClient, token, useLastUserMessageThread } = options;
 
-  // Use admin client for plan fetching if provided (to bypass RLS)
+  // Use admin client for plan fetching and token-based RPCs (to bypass RLS)
   const planClient = adminClient ?? supabase;
+  const dataClient = token ? (adminClient ?? supabase) : supabase;
 
   // 1. Fetch participants with user data (includes participantRows for elapsed time)
-  // Pass project_id to fetch project-specific descriptions (priority over profile descriptions)
-  const { participants, usersById: participantUsersById, participantRows } = await fetchParticipantsWithUsers(
-    supabase,
-    askSession.id,
-    askSession.project_id
-  );
+  // Use token-based RPC when token is provided (voice mode)
+  let participantsResult: FetchParticipantsResult;
+  if (token) {
+    participantsResult = await fetchParticipantsByToken(
+      dataClient,
+      token,
+      askSession.project_id
+    );
+  } else {
+    // Pass project_id to fetch project-specific descriptions (priority over profile descriptions)
+    participantsResult = await fetchParticipantsWithUsers(
+      supabase,
+      askSession.id,
+      askSession.project_id
+    );
+  }
+  const { participants, usersById: participantUsersById, participantRows } = participantsResult;
 
   // 2. Get or create conversation thread
+  // Use last user message thread resolution when specified (important for individual_parallel mode)
   const askConfig: AskSessionConfig = {
     conversation_mode: askSession.conversation_mode ?? null,
   };
 
-  const { thread: conversationThread } = await getOrCreateConversationThread(
-    supabase,
-    askSession.id,
-    profileId ?? null,
-    askConfig
-  );
+  let conversationThread: { id: string; is_shared: boolean } | null = null;
+
+  if (useLastUserMessageThread) {
+    // First, try to find the thread from the last user message (for voice mode / individual_parallel)
+    const { threadId: lastUserThreadId } = await getLastUserMessageThread(
+      dataClient,
+      askSession.id
+    );
+
+    if (lastUserThreadId) {
+      // Fetch the thread details
+      const { data: existingThread } = await dataClient
+        .from('conversation_threads')
+        .select('id, is_shared')
+        .eq('id', lastUserThreadId)
+        .single();
+
+      if (existingThread) {
+        conversationThread = existingThread;
+      }
+    }
+  }
+
+  // Fallback: create/get thread based on conversation mode
+  if (!conversationThread) {
+    const { thread } = await getOrCreateConversationThread(
+      dataClient,
+      askSession.id,
+      profileId ?? null,
+      askConfig
+    );
+    conversationThread = thread;
+  }
 
   // 3. Fetch messages with user data
-  const { messages, usersById } = await fetchMessagesWithUsers(
-    supabase,
-    askSession.id,
-    conversationThread?.id ?? null,
-    participantUsersById
-  );
+  // Use token-based RPC when token is provided (voice mode)
+  let messagesResult: { messages: ConversationMessageSummary[]; usersById: Record<string, UserRow> };
+  if (token) {
+    messagesResult = await fetchMessagesByToken(
+      dataClient,
+      token,
+      participantUsersById
+    );
+  } else {
+    messagesResult = await fetchMessagesWithUsers(
+      supabase,
+      askSession.id,
+      conversationThread?.id ?? null,
+      participantUsersById
+    );
+  }
+  const { messages, usersById } = messagesResult;
 
   // 4. Fetch project and challenge data in parallel
+  // Use dataClient to bypass RLS when token is provided
   const [project, challenge] = await Promise.all([
-    fetchProject(supabase, askSession.project_id ?? null),
-    fetchChallenge(supabase, askSession.challenge_id ?? null),
+    fetchProject(dataClient, askSession.project_id ?? null),
+    fetchChallenge(dataClient, askSession.challenge_id ?? null),
   ]);
 
   // 5. Fetch conversation plan (using admin client if available for RLS bypass)
@@ -743,12 +966,12 @@ export async function fetchConversationContext(
   // 6. Fetch elapsed times using centralized helper
   // IMPORTANT: Pass participantRows to use fallback when profileId doesn't match
   const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
-    supabase,
+    supabase: dataClient,
     askSessionId: askSession.id,
     profileId,
     conversationPlan,
     participantRows,
-    adminClient,
+    adminClient: adminClient ?? (token ? dataClient : undefined),
   });
 
   return {

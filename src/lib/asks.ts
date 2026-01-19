@@ -386,27 +386,6 @@ export async function getMessagesForThread(
   return { messages: data ?? [], error: null };
 }
 
-/**
- * Get insights for a specific conversation thread
- * Used for isolation in individual_parallel mode
- */
-export async function getInsightsForThread(
-  supabase: SupabaseClient,
-  threadId: string
-): Promise<{ insights: any[]; error: PostgrestError | null }> {
-  const { data, error } = await supabase
-    .from('insights')
-    .select('*')
-    .eq('conversation_thread_id', threadId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    return { insights: [], error };
-  }
-
-  return { insights: data ?? [], error: null };
-}
-
 export async function getAskSessionByKey<Row>(
   supabase: SupabaseClient,
   rawKey: string,

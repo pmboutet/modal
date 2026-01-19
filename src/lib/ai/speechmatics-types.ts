@@ -42,6 +42,10 @@ export interface SpeechmaticsConfig {
   disableElevenLabsTTS?: boolean; // If true, disable ElevenLabs TTS (only STT will work)
   // Consultant mode (passive listening)
   disableLLM?: boolean; // If true, disable LLM responses (transcription only, for consultant mode)
+  // Speaker filtering (individual mode)
+  enableSpeakerFiltering?: boolean; // If true, filter out non-primary speakers (for individual mode)
+  onSpeakerEstablished?: (speaker: string) => void; // Callback when primary speaker is established
+  onSpeakerFiltered?: (speaker: string, transcript: string) => void; // Callback when a non-primary speaker is filtered
 }
 
 export interface SpeechmaticsMessageEvent {

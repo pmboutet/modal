@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
-import { type ApiResponse, type Message, type AskConversationMode } from "@/types";
-import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread, getInsightsForThread } from "@/lib/asks";
+import { type ApiResponse, type Message, type AskConversationMode, type Insight } from "@/types";
+import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread } from "@/lib/asks";
+import { fetchInsightsForThread, fetchInsightsForSession } from "@/lib/insightQueries";
+import { mapInsightRowToInsight } from "@/lib/insights";
 import {
   getConversationPlanWithSteps,
   generateConversationPlan,
@@ -30,6 +32,7 @@ type AskSessionRow = {
   max_participants: number | null;
   delivery_mode: string;
   conversation_mode: string;
+  expected_duration_minutes: number | null;
   project_id: string;
   challenge_id: string | null;
   created_by: string | null;
@@ -104,7 +107,7 @@ async function loadTokenDataWithAdmin(token: string): Promise<TokenDataBundle | 
     const { data: askRow, error: askError } = await admin
       .from("ask_sessions")
       .select(
-        "ask_session_id:id, ask_key, name, question, description, status, start_date, end_date, allow_auto_registration, max_participants, delivery_mode, conversation_mode, project_id, challenge_id, created_by, created_at, updated_at",
+        "ask_session_id:id, ask_key, name, question, description, status, start_date, end_date, allow_auto_registration, max_participants, delivery_mode, conversation_mode, expected_duration_minutes, project_id, challenge_id, created_by, created_at, updated_at",
       )
       .eq("id", askSessionId)
       .maybeSingle<AskSessionRow>();
@@ -463,7 +466,9 @@ export async function GET(
       }
     }
 
-    let insights = (insightRows ?? []).map((row: any) => ({
+    // Map insights from RPC data (insight_type_name is already hydrated by the RPC)
+    // Default to 'idea' to match central resolveInsightType logic
+    let insights: Insight[] = (insightRows ?? []).map((row: any) => ({
       id: row.insight_id,
       askId: askRow.ask_key,
       askSessionId: askRow.ask_session_id,
@@ -477,7 +482,7 @@ export async function GET(
       })),
       content: row.content,
       summary: row.summary,
-      type: (row.insight_type_name || 'pain') as any,
+      type: (row.insight_type_name || 'idea') as any,
       category: row.category ?? null,
       status: row.status || 'new',
       priority: null,
@@ -611,62 +616,16 @@ export async function GET(
           console.log(`[token route] Individual thread mode: filtered ${messages.length} messages for thread ${conversationThread.id}`);
         }
 
-        // BUG FIX: Also filter insights by thread in individual_parallel mode
+        // Filter insights by thread in individual_parallel mode
         // This ensures participants only see insights from their own conversation
-        const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
-          adminClient,
-          conversationThread.id
-        );
-
-        if (!threadInsightsError && threadInsights) {
-          // Get insight authors for filtered insights
-          const filteredInsightIds = threadInsights.map(row => row.id);
-          let filteredInsightAuthorsById: Record<string, any[]> = {};
-
-          if (filteredInsightIds.length > 0) {
-            const { data: filteredAuthors } = await adminClient
-              .from('insight_authors')
-              .select('insight_id, user_id, display_name')
-              .in('insight_id', filteredInsightIds);
-
-            if (filteredAuthors) {
-              filteredAuthors.forEach(author => {
-                if (!filteredInsightAuthorsById[author.insight_id]) {
-                  filteredInsightAuthorsById[author.insight_id] = [];
-                }
-                filteredInsightAuthorsById[author.insight_id].push(author);
-              });
-            }
-          }
-
-          // Rebuild insights array with filtered thread insights
-          insights = threadInsights.map((row: any) => ({
-            id: row.id,
-            askId: askRow.ask_key,
-            askSessionId: askRow.ask_session_id,
-            challengeId: row.challenge_id,
-            authorId: null,
-            authorName: null,
-            authors: (filteredInsightAuthorsById[row.id] ?? []).map((author: any) => ({
-              id: author.user_id || '',
-              userId: author.user_id,
-              name: author.display_name,
-            })),
-            content: row.content,
-            summary: row.summary,
-            type: (row.insight_type_name || row.type || 'pain') as any,
-            category: row.category ?? null,
-            status: row.status || 'new',
-            priority: null,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-            relatedChallengeIds: row.challenge_id ? [row.challenge_id] : [],
-            kpis: [],
-            sourceMessageId: null,
-            conversationThreadId: row.conversation_thread_id ?? conversationThread.id,
-          }));
-
+        // Using centralized fetchInsightsForThread which properly hydrates type names
+        try {
+          const threadInsightRows = await fetchInsightsForThread(adminClient, conversationThread.id);
+          insights = threadInsightRows.map(mapInsightRowToInsight);
           console.log(`[token route] Individual thread mode: filtered ${insights.length} insights for thread ${conversationThread.id}`);
+        } catch (threadInsightsError) {
+          console.error('[token route] Error fetching thread insights:', threadInsightsError);
+          // Keep the original insights if thread fetch fails
         }
       }
 
@@ -735,6 +694,7 @@ export async function GET(
           updatedAt: askRow.updated_at,
           deliveryMode: askRow.delivery_mode as "physical" | "digital",
           conversationMode: askRow.conversation_mode as AskConversationMode,
+          expectedDurationMinutes: askRow.expected_duration_minutes,
           participants,
           askSessionId: askRow.ask_session_id,
         },

@@ -4,11 +4,11 @@ import { ApiResponse, Insight, Message } from '@/types';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { createServerSupabaseClient, getCurrentUser } from '@/lib/supabaseServer';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getInsightsForThread, shouldUseSharedThread, getLastUserMessageThread } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, getLastUserMessageThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { executeAgent, fetchAgentBySlug, type AgentExecutionResult } from '@/lib/ai';
 import { INSIGHT_TYPES, mapInsightRowToInsight, type InsightRow } from '@/lib/insights';
-import { fetchInsightRowById, fetchInsightsForSession, fetchInsightTypeMap, fetchInsightTypesForPrompt } from '@/lib/insightQueries';
+import { fetchInsightRowById, fetchInsightsForSession, fetchInsightsForThread, fetchInsightTypeMap, fetchInsightTypesForPrompt } from '@/lib/insightQueries';
 import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep, ensureConversationPlanExists } from '@/lib/ai/conversation-plan';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
@@ -1336,22 +1336,11 @@ async function triggerInsightDetection(
     }
 
     // Get refreshed insights filtered by thread if thread is provided
-    let refreshedInsights: InsightRow[];
-    if (options.conversationThreadId) {
-      const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
-        supabase,
-        options.conversationThreadId
-      );
-      
-      if (threadInsightsError) {
-        throw threadInsightsError;
-      }
-      
-      refreshedInsights = threadInsights as InsightRow[];
-    } else {
-      refreshedInsights = await fetchInsightsForSession(supabase, options.askSessionId);
-    }
-    
+    // Using centralized functions that properly hydrate type names
+    const refreshedInsights = options.conversationThreadId
+      ? await fetchInsightsForThread(supabase, options.conversationThreadId)
+      : await fetchInsightsForSession(supabase, options.askSessionId);
+
     const mappedInsights = refreshedInsights.map(mapInsightRowToInsight);
 
     return mappedInsights;
@@ -1616,19 +1605,10 @@ export async function POST(
     // Get insights for the thread (or all insights if no thread for backward compatibility)
     // BUG-012 FIX: In individual_parallel mode without a thread, return empty insights
     // to prevent cross-thread data exposure
+    // Using centralized functions that properly hydrate type names
     let insightRows: InsightRow[];
     if (conversationThread) {
-      const { insights: threadInsights, error: threadInsightsError } = await getInsightsForThread(
-        supabase,
-        conversationThread.id
-      );
-
-      if (threadInsightsError) {
-        throw threadInsightsError;
-      }
-
-      // Convert to InsightRow format (simplified - we'll need to hydrate properly)
-      insightRows = threadInsights as InsightRow[];
+      insightRows = await fetchInsightsForThread(supabase, conversationThread.id);
     } else if (!shouldUseSharedThread(askConfig)) {
       // BUG-012 FIX: Individual mode requires a thread - don't fall back to session-wide insights
       console.warn('[respond] Individual parallel mode without thread - returning empty insights for isolation');
@@ -1830,7 +1810,7 @@ export async function POST(
           data: { insights: refreshedInsights },
         });
       } catch (error) {
-        console.error('Insight detection failed', error);
+        console.error('Insight detection failed:', parseErrorMessage(error));
         return NextResponse.json<ApiResponse>({
           success: false,
           error: 'Failed to detect insights'
@@ -2154,7 +2134,7 @@ export async function POST(
       } catch (error) {
         // For voice messages, don't fail the entire request if insight detection fails
         // Just log the error and continue with existing insights
-        console.error('Insight detection failed (non-blocking for voice messages):', error);
+        console.error('Insight detection failed (non-blocking for voice messages):', parseErrorMessage(error));
         if (!isVoiceMessage) {
           // Only throw for non-voice messages to maintain existing behavior
           throw error;

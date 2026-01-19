@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Paperclip, Mic, Image, FileText, X, Radio, Pencil, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Tooltip,
@@ -320,8 +320,10 @@ export function ChatComponent({
     setInputValue("");
     setSelectedFiles([]);
 
-    // Close keyboard on mobile after sending message
-    textareaRef.current?.blur();
+    // Close keyboard on mobile after sending message (only on small screens)
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      textareaRef.current?.blur();
+    }
   };
 
   const handleInputChange = (value: string) => {
@@ -813,12 +815,14 @@ export function ChatComponent({
               {/* Responsive layout based on container width */}
               <div className="flex flex-col @[320px]:flex-row items-stretch @[320px]:items-end gap-2 min-w-0 max-w-full">
                 <div className="flex-1 min-w-0">
-                  <Textarea
+                  <AutoResizeTextarea
                     ref={textareaRef}
                     value={inputValue}
                     onChange={(e) => handleInputChange(e.target.value)}
                     placeholder="Type your response..."
-                    className="border-0 shadow-none resize-none min-h-[60px] focus-visible:ring-0 focus-visible:ring-offset-0 w-full max-w-full min-w-0 box-border text-sm"
+                    className="border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 w-full max-w-full min-w-0 box-border text-sm"
+                    minHeight="60px"
+                    maxHeight="30vh"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

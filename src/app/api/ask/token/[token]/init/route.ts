@@ -40,7 +40,12 @@ export async function POST(
       }, { status: 400 });
     }
 
-    console.log(`🚀 [init route] Starting async initialization for thread ${conversationThreadId}`);
+    console.log(`🚀 [init route] Starting async initialization`, {
+      token,
+      askSessionId,
+      conversationThreadId,
+      conversationMode,
+    });
 
     const adminClient = getAdminSupabaseClient();
 
@@ -112,6 +117,9 @@ export async function POST(
     if (!conversationPlan) {
       console.log(`📋 [init route] Generating conversation plan...`);
       try {
+        // BUG FIX: Pass currentParticipantName to ensure participant_name/participant_details are populated
+        // even when messages array is empty (initial greeting)
+        const firstParticipantName = participants.length > 0 ? participants[0].name : null;
         const planGenerationVariables = buildConversationAgentVariables({
           ask: {
             ask_key: askRow.ask_key,
@@ -123,6 +131,7 @@ export async function POST(
           challenge: null,
           messages: [],
           participants,
+          currentParticipantName: firstParticipantName,
           conversationPlan: null,
         });
 
@@ -131,6 +140,10 @@ export async function POST(
           askSessionId,
           planGenerationVariables
         );
+        console.log(`📋 [init route] Plan data generated`, {
+          stepsCount: planData.steps?.length,
+          firstStepId: planData.steps?.[0]?.id,
+        });
 
         // Double-check for plan before creating to prevent race condition
         const existingPlan = await getConversationPlanWithSteps(adminClient, conversationThreadId);
@@ -138,17 +151,26 @@ export async function POST(
           console.log(`⚠️ [init route] Plan already exists (race condition prevented), skipping creation`);
           conversationPlan = existingPlan;
         } else {
+          console.log(`📋 [init route] Creating plan in database...`);
           conversationPlan = await createConversationPlan(
             adminClient,
             conversationThreadId,
             planData
           );
-          console.log(`✅ [init route] Plan created with ${planData.steps.length} steps`);
+          console.log(`✅ [init route] Plan created`, {
+            planId: conversationPlan.id,
+            stepsCount: conversationPlan.steps?.length,
+          });
         }
       } catch (planError) {
         const errorMsg = planError instanceof Error ? planError.message : String(planError);
-        console.error('❌ [init route] Plan generation failed:', errorMsg);
-        // Continue to try initial message anyway
+        const stack = planError instanceof Error ? planError.stack : undefined;
+        console.error('❌ [init route] Plan generation failed:', { errorMsg, stack });
+        // IMPORTANT: Plan is REQUIRED - fail if generation fails
+        return NextResponse.json<ApiResponse>({
+          success: false,
+          error: 'Failed to generate conversation plan. Please try again.'
+        }, { status: 500 });
       }
     } else {
       console.log(`📋 [init route] Plan already exists`);
@@ -176,6 +198,9 @@ export async function POST(
           participantRows: participantRows ?? [],
         });
 
+        // BUG FIX: Pass currentParticipantName to ensure participant_name/participant_details are populated
+        // even when messages array is empty (initial greeting)
+        const firstParticipant = participants.length > 0 ? participants[0].name : null;
         const agentVariables = buildConversationAgentVariables({
           ask: {
             ask_key: askRow.ask_key,
@@ -187,6 +212,7 @@ export async function POST(
           challenge: null,
           messages: [],
           participants,
+          currentParticipantName: firstParticipant,
           conversationPlan,
           elapsedActiveSeconds,
           stepElapsedActiveSeconds,
@@ -207,6 +233,12 @@ export async function POST(
         if (typeof agentResult.content === 'string' && agentResult.content.trim().length > 0) {
           const aiResponse = agentResult.content.trim();
           const activeStepId = conversationPlan?.steps?.find(s => s.status === 'active')?.id ?? null;
+          console.log(`💬 [init route] AI response generated`, {
+            responseLength: aiResponse.length,
+            activeStepId,
+            hasConversationPlan: !!conversationPlan,
+            stepsCount: conversationPlan?.steps?.length,
+          });
 
           // Double-check for messages before insert to prevent race condition
           // Another init request might have already created the message while we were generating
@@ -219,7 +251,8 @@ export async function POST(
           if (messagesBeforeInsert && messagesBeforeInsert.length > 0) {
             console.log(`⚠️ [init route] Message already exists (race condition prevented), skipping insert`);
           } else {
-            const { error: insertError } = await adminClient.rpc('insert_ai_message', {
+            console.log(`💬 [init route] Inserting AI message via RPC...`);
+            const { data: insertedMessage, error: insertError } = await adminClient.rpc('insert_ai_message', {
               p_ask_session_id: askSessionId,
               p_conversation_thread_id: conversationThreadId,
               p_content: aiResponse,
@@ -228,11 +261,23 @@ export async function POST(
             });
 
             if (insertError) {
-              console.error('❌ [init route] Failed to insert initial message:', insertError.message);
+              console.error('❌ [init route] Failed to insert initial message:', {
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint,
+                code: insertError.code,
+              });
             } else {
-              console.log(`✅ [init route] Initial message created`);
+              console.log(`✅ [init route] Initial message created`, {
+                messageId: insertedMessage?.id,
+              });
             }
           }
+        } else {
+          console.warn(`⚠️ [init route] Agent returned empty content`, {
+            contentType: typeof agentResult.content,
+            contentLength: typeof agentResult.content === 'string' ? agentResult.content.length : 'N/A',
+          });
         }
       } catch (msgError) {
         const errorMsg = msgError instanceof Error ? msgError.message : String(msgError);
