@@ -7,6 +7,9 @@ import { getAskSessionByKey } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import {
   fetchConversationContext,
+  fetchParticipantByToken,
+  fetchUsersByIds,
+  buildParticipantDisplayName,
   type AskSessionRow,
 } from '@/lib/conversation-context';
 
@@ -99,6 +102,22 @@ export async function GET(
       useLastUserMessageThread: true, // Important: find thread from last user message
     });
 
+    // BUG FIX: Determine current participant name from token (critical for individual_parallel mode)
+    // Without this, all participants are shown to the AI instead of just the current one
+    let currentParticipantName: string | null = null;
+    if (token) {
+      const participantRow = await fetchParticipantByToken(adminClient, token);
+      if (participantRow) {
+        // Get user data for the participant to build display name
+        const usersById = participantRow.user_id
+          ? await fetchUsersByIds(adminClient, [participantRow.user_id])
+          : {};
+        const user = participantRow.user_id ? usersById[participantRow.user_id] ?? null : null;
+        currentParticipantName = buildParticipantDisplayName(participantRow, user, 0);
+        console.log(`[agent-config] Current participant from token: ${currentParticipantName}`);
+      }
+    }
+
     // Debug logging for STEP_COMPLETE troubleshooting
     console.log('[agent-config] 📋 Conversation context loaded:', {
       hasConversationPlan: !!context.conversationPlan,
@@ -108,15 +127,18 @@ export async function GET(
       participantCount: context.participants.length,
       messageCount: context.messages.length,
       usingToken: !!token,
+      currentParticipantName,
     });
 
     // Use centralized function for ALL prompt variables - no manual overrides
+    // BUG FIX: Pass currentParticipantName for proper filtering in individual_parallel mode
     const promptVariables = buildConversationAgentVariables({
       ask: askSession,
       project: context.project,
       challenge: context.challenge,
       messages: context.messages, // Already in ConversationMessageSummary format with planStepId
       participants: context.participants,
+      currentParticipantName, // Critical for individual_parallel mode
       conversationPlan: context.conversationPlan,
       elapsedActiveSeconds: context.elapsedActiveSeconds,
       stepElapsedActiveSeconds: context.stepElapsedActiveSeconds,

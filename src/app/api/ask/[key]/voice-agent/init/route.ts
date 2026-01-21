@@ -17,6 +17,8 @@ import {
   fetchChallengeById,
   fetchMessagesWithoutThread,
   fetchUsersByIds,
+  fetchParticipantByToken,
+  buildParticipantDisplayName,
   insertAiMessage,
   type AskSessionRow,
   type UserRow,
@@ -33,6 +35,9 @@ export async function POST(
   try {
     const { key } = await params;
     const supabase = await createServerSupabaseClient();
+
+    // Check for invite token (from URL or header)
+    const token = request.nextUrl.searchParams.get('token') || request.headers.get('x-invite-token');
 
     // Get ASK session
     const { row: askRow, error: askError } = await getAskSessionByKey<AskSessionRow>(
@@ -178,13 +183,28 @@ export async function POST(
       adminClient: getAdminSupabaseClient(),
     });
 
-    // Find the current participant name from profileId
-    const currentParticipant = profileId
-      ? participantSummaries.find((p, index) => {
-          const participantRow = (participantRows ?? [])[index];
-          return participantRow?.user_id === profileId;
-        })
-      : null;
+    // BUG FIX: Find current participant from token OR profileId
+    // In voice mode, authentication often fails so we need to use the token
+    let currentParticipantName: string | null = null;
+
+    // First try: use token to find participant (most reliable in voice mode)
+    if (token) {
+      const participantFromToken = await fetchParticipantByToken(adminClient, token);
+      if (participantFromToken) {
+        const user = participantFromToken.user_id ? usersById[participantFromToken.user_id] ?? null : null;
+        currentParticipantName = buildParticipantDisplayName(participantFromToken, user, 0);
+        console.log(`[voice-agent/init] Current participant from token: ${currentParticipantName}`);
+      }
+    }
+
+    // Fallback: use profileId if token didn't work
+    if (!currentParticipantName && profileId) {
+      const currentParticipant = participantSummaries.find((p, index) => {
+        const participantRow = (participantRows ?? [])[index];
+        return participantRow?.user_id === profileId;
+      });
+      currentParticipantName = currentParticipant?.name ?? null;
+    }
 
     // Build agent variables using THE SAME function as text/stream mode
     // This ensures 100% consistency between voice and text modes
@@ -197,7 +217,7 @@ export async function POST(
       challenge: challengeData,
       messages,
       participants: participantSummaries,
-      currentParticipantName: currentParticipant?.name ?? null,
+      currentParticipantName, // BUG FIX: Now determined from token or profileId
       conversationPlan,
       elapsedActiveSeconds,
       stepElapsedActiveSeconds,

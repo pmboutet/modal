@@ -260,7 +260,14 @@ export class SpeechmaticsVoiceAgent {
         ? {
             enabled: true,
             onSpeakerEstablished: config.onSpeakerEstablished,
-            onSpeakerFiltered: config.onSpeakerFiltered,
+            onSpeakerFiltered: (speaker: string, transcript: string) => {
+              // BUG FIX: Reset VAD state when a speaker is filtered
+              // This prevents filtered speakers (e.g., S2) from causing "isUserSpeaking" = true
+              // which would incorrectly drop LLM responses
+              this.audio?.resetVADStateForFilteredSpeaker();
+              // Call the original callback
+              config.onSpeakerFiltered?.(speaker, transcript);
+            },
           }
         : undefined
     );

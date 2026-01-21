@@ -1,6 +1,11 @@
 import type { PromptVariables } from './agent-config';
-import type { ConversationPlan } from './conversation-plan';
+import type { ConversationPlan, ConversationPlanStep } from './conversation-plan';
 import type { Insight } from '@/types';
+import {
+  formatSubtopicsForPrompt,
+  countPendingSubtopics,
+  getStepSubtopics,
+} from './conversation-signals';
 import {
   calculatePacingConfig,
   formatPacingVariables,
@@ -403,6 +408,13 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     planStepId: m.planStepId ?? null,
   }));
 
+  // Get completed steps count from conversation plan
+  const completedSteps = context.conversationPlan
+    ? ('completed_steps' in context.conversationPlan
+        ? context.conversationPlan.completed_steps
+        : 0)
+    : 0;
+
   // Use real elapsed seconds from context (from DB), default to 0 if not provided
   const timeTrackingStats = calculateTimeTrackingStats(
     messagesForTimeTracking,
@@ -411,8 +423,34 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     context.elapsedActiveSeconds ?? 0,
     context.stepElapsedActiveSeconds ?? 0,
     currentStepRecordId,
+    completedSteps,
+    totalSteps,
   );
   const timeTrackingVariables = formatTimeTrackingVariables(timeTrackingStats);
+
+  // Calculate subtopics variables for dynamic topic tracking
+  // These are subtopics discovered during the conversation (e.g., when user mentions multiple channels)
+  let discoveredSubtopicsFormatted = 'Aucun sous-sujet découvert dans cette étape.';
+  let pendingSubtopicsCount = 0;
+
+  if (context.conversationPlan && 'steps' in context.conversationPlan && Array.isArray(context.conversationPlan.steps)) {
+    // Cast to the expected type (we've verified steps is an array)
+    const planWithSteps = context.conversationPlan as ConversationPlan & { steps: ConversationPlanStep[] };
+
+    // Get current step from normalized steps
+    const currentStepRecord = planWithSteps.steps.find(
+      (s: ConversationPlanStep) => s.step_identifier === currentStepId
+    );
+
+    if (currentStepRecord) {
+      // Get and format subtopics for current step
+      const stepSubtopics = getStepSubtopics(currentStepRecord);
+      discoveredSubtopicsFormatted = formatSubtopicsForPrompt(stepSubtopics);
+    }
+
+    // Count pending subtopics across all steps
+    pendingSubtopicsCount = countPendingSubtopics(planWithSteps);
+  }
 
   // Find the participant who sent the last message (or derived from currentParticipantName/first participant)
   // BUG FIX: Use derivedParticipantName instead of lastUserMessage?.senderName
@@ -470,6 +508,9 @@ export function buildConversationAgentVariables(context: ConversationAgentContex
     ...pacingVariables,
     // Time tracking variables (dynamic, real-time)
     ...timeTrackingVariables,
+    // Subtopics tracking variables (dynamic, discovered during conversation)
+    discovered_subtopics: discoveredSubtopicsFormatted,
+    pending_subtopics_count: String(pendingSubtopicsCount),
   };
 
   // Add legacy message_history for backward compatibility

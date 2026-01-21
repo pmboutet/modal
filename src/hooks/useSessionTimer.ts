@@ -102,6 +102,11 @@ export interface SessionTimerState {
   isPaused: boolean;
 
   /**
+   * Whether the timer is loading initial value from server
+   */
+  isLoading: boolean;
+
+  /**
    * Whether the timer is syncing to server
    */
   isSyncing: boolean;
@@ -312,6 +317,27 @@ function clearTimerFromLocalStorage(askKey: string): void {
 }
 
 /**
+ * Clear ALL session timer data from localStorage.
+ * Use this after a project purge to ensure no stale timer values remain.
+ */
+export function clearAllTimersFromLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    console.log(`[useSessionTimer] Cleared ${keysToRemove.length} timer entries from localStorage`);
+  } catch (error) {
+    // Silent fail
+  }
+}
+
+/**
  * Fetch elapsed seconds from server
  */
 interface ServerTimerData {
@@ -350,15 +376,46 @@ async function fetchFromServer(askKey: string, inviteToken?: string | null): Pro
 }
 
 /**
- * Save elapsed seconds to server (includes step time if provided)
+ * Response from server when syncing timer
  */
-async function saveToServer(
-  askKey: string,
-  elapsedSeconds: number,
-  inviteToken?: string | null,
-  currentStepId?: string | null,
-  stepElapsedSeconds?: number
-): Promise<boolean> {
+interface SyncResponse {
+  success: boolean;
+  staleReset?: boolean;
+  serverResetAt?: string;
+  serverElapsedSeconds?: number;
+  /** New timer reset timestamp when user-initiated reset is performed */
+  newTimerResetAt?: string;
+}
+
+/**
+ * Options for saving to server
+ */
+interface SaveToServerOptions {
+  askKey: string;
+  elapsedSeconds: number;
+  inviteToken?: string | null;
+  currentStepId?: string | null;
+  stepElapsedSeconds?: number;
+  timerResetAt?: string | null;
+  /** Set to true for user-initiated reset - server will set new timer_reset_at */
+  reset?: boolean;
+}
+
+/**
+ * Save elapsed seconds to server (includes step time if provided)
+ * Returns info about whether sync was rejected due to stale reset
+ */
+async function saveToServer(options: SaveToServerOptions): Promise<SyncResponse> {
+  const {
+    askKey,
+    elapsedSeconds,
+    inviteToken,
+    currentStepId,
+    stepElapsedSeconds,
+    timerResetAt,
+    reset,
+  } = options;
+
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -377,16 +434,45 @@ async function saveToServer(
       body.stepElapsedSeconds = stepElapsedSeconds;
     }
 
+    // Include timer reset timestamp to detect stale syncs after purge
+    if (timerResetAt) {
+      body.timerResetAt = timerResetAt;
+    }
+
+    // User-initiated reset flag
+    if (reset) {
+      body.reset = true;
+    }
+
     const response = await fetch(`/api/ask/${askKey}/timer`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify(body),
     });
 
-    return response.ok;
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        success: true,
+        newTimerResetAt: data.data?.timerResetAt ?? undefined,
+      };
+    }
+
+    // Check if sync was rejected due to stale reset (409 Conflict)
+    if (response.status === 409) {
+      const data = await response.json();
+      return {
+        success: false,
+        staleReset: true,
+        serverResetAt: data.data?.serverResetAt,
+        serverElapsedSeconds: data.data?.serverElapsedSeconds,
+      };
+    }
+
+    return { success: false };
   } catch (error) {
     console.warn('Failed to save timer to server:', error);
-    return false;
+    return { success: false };
   }
 }
 
@@ -400,12 +486,11 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     onServerSync,
   } = config;
 
-  // Determine initial value from localStorage if askKey is provided
+  // Don't load from localStorage initially - wait for server to avoid showing stale data
+  // after a purge. The server response is the source of truth.
   const getInitialElapsedSeconds = () => {
-    if (askKey) {
-      const localValue = loadFromLocalStorage(askKey);
-      return Math.max(localValue, initialElapsedSeconds);
-    }
+    // If we have an askKey, start with 0 and wait for server
+    // This prevents showing stale localStorage values after a purge
     return initialElapsedSeconds;
   };
 
@@ -432,6 +517,8 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
   const [stepElapsedSeconds, setStepElapsedSeconds] = useState(getInitialStepElapsedSeconds);
   const [timerState, setTimerState] = useState<TimerState>(() => shouldStartPaused() ? 'paused' : 'running');
   const [isSyncing, setIsSyncing] = useState(false);
+  // Loading state - true while waiting for initial server fetch (only when askKey is provided)
+  const [isLoading, setIsLoading] = useState(!!askKey);
 
   // Track current step ID to detect changes
   const previousStepIdRef = useRef<string | null | undefined>(currentStepId);
@@ -470,24 +557,56 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     }
   }, [currentStepId]);
 
+  // Track local timer reset timestamp for detecting stale syncs
+  const timerResetAtRef = useRef<string | null>(null);
+
   /**
    * Sync to server (includes step time if available)
+   * If server rejects due to stale reset, updates local state with server values
+   * @param resetFlag - If true, this is a user-initiated reset
    */
-  const syncToServer = useCallback(async (): Promise<boolean> => {
+  const syncToServer = useCallback(async (resetFlag?: boolean): Promise<boolean> => {
     if (!askKey) return false;
 
     setIsSyncing(true);
     try {
-      const success = await saveToServer(
+      const response = await saveToServer({
         askKey,
-        elapsedSecondsRef.current,
+        elapsedSeconds: elapsedSecondsRef.current,
         inviteToken,
-        currentStepIdRef.current,
-        stepElapsedSecondsRef.current
-      );
+        currentStepId: currentStepIdRef.current,
+        stepElapsedSeconds: stepElapsedSecondsRef.current,
+        timerResetAt: timerResetAtRef.current,
+        reset: resetFlag,
+      });
       lastServerSyncRef.current = Date.now();
-      onServerSync?.(elapsedSecondsRef.current, success);
-      return success;
+
+      // Handle stale reset - server has a newer timer_reset_at
+      if (response.staleReset) {
+        console.log('[useSessionTimer] Stale sync detected, resetting to server values');
+        // Clear localStorage and update local state with server values
+        clearTimerFromLocalStorage(askKey);
+        if (response.serverResetAt) {
+          saveTimerResetToLocalStorage(askKey, response.serverResetAt);
+          timerResetAtRef.current = response.serverResetAt;
+        }
+        const serverValue = response.serverElapsedSeconds ?? 0;
+        setElapsedSeconds(serverValue);
+        setStepElapsedSeconds(0);
+        saveToLocalStorage(askKey, serverValue);
+        onServerSync?.(serverValue, false);
+        return false;
+      }
+
+      // Handle user-initiated reset - update local reset timestamp from server response
+      if (resetFlag && response.newTimerResetAt) {
+        saveTimerResetToLocalStorage(askKey, response.newTimerResetAt);
+        timerResetAtRef.current = response.newTimerResetAt;
+        console.log('[useSessionTimer] Timer reset synced to server:', response.newTimerResetAt);
+      }
+
+      onServerSync?.(elapsedSecondsRef.current, response.success);
+      return response.success;
     } finally {
       setIsSyncing(false);
     }
@@ -617,75 +736,99 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
   }, [clearInactivityTimeout, askKey, syncToServer]);
 
   /**
-   * Reset the timer
+   * Reset the timer (clears local state and syncs reset to server)
+   * This propagates the reset to all other browser sessions via timer_reset_at
    */
   const reset = useCallback(() => {
     setElapsedSeconds(0);
+    setStepElapsedSeconds(0);
     setTimerState('running');
     lastActivityTimestampRef.current = Date.now();
     clearInactivityTimeout();
     startInactivityCountdown();
-    // Clear localStorage and sync reset to server
+    // Clear localStorage and sync reset to server with reset flag
     if (askKey) {
+      clearTimerFromLocalStorage(askKey);
       saveToLocalStorage(askKey, 0);
-      syncToServer();
+      // Pass reset=true to tell server to update timer_reset_at
+      syncToServer(true);
     }
   }, [clearInactivityTimeout, startInactivityCountdown, askKey, syncToServer]);
 
-  // Load from server on mount (async, detects resets)
+  // Load from server on mount (async, source of truth)
+  // Server data takes priority to ensure purge resets are honored
   useEffect(() => {
     if (!askKey) return;
 
     let mounted = true;
 
     const loadServerValue = async () => {
-      const serverData = await fetchFromServer(askKey, inviteToken);
-      if (mounted && serverData !== null) {
-        // Check if a timer reset occurred (e.g., after purge)
-        const localResetAt = loadTimerResetFromLocalStorage(askKey);
-        const serverResetAt = serverData.timerResetAt;
+      try {
+        const serverData = await fetchFromServer(askKey, inviteToken);
 
-        // Detect if server has a newer reset timestamp
-        const resetDetected = serverResetAt && (
-          !localResetAt ||
-          new Date(serverResetAt).getTime() > new Date(localResetAt).getTime()
-        );
+        if (!mounted) return;
 
-        if (resetDetected) {
-          // A reset was triggered on the server - clear local cache and use server value
-          console.log('[useSessionTimer] Timer reset detected, clearing localStorage');
-          clearTimerFromLocalStorage(askKey);
-          saveTimerResetToLocalStorage(askKey, serverResetAt);
-          setElapsedSeconds(serverData.elapsedActiveSeconds);
-          setStepElapsedSeconds(0);
-          return;
+        if (serverData !== null) {
+          // Check if a timer reset occurred (e.g., after purge)
+          const localResetAt = loadTimerResetFromLocalStorage(askKey);
+          const serverResetAt = serverData.timerResetAt;
+
+          // Detect if server has a newer reset timestamp
+          const resetDetected = serverResetAt && (
+            !localResetAt ||
+            new Date(serverResetAt).getTime() > new Date(localResetAt).getTime()
+          );
+
+          if (resetDetected) {
+            // A reset was triggered on the server - clear local cache and use server value
+            console.log('[useSessionTimer] Timer reset detected, clearing localStorage');
+            clearTimerFromLocalStorage(askKey);
+            saveTimerResetToLocalStorage(askKey, serverResetAt);
+            timerResetAtRef.current = serverResetAt;
+            setElapsedSeconds(serverData.elapsedActiveSeconds);
+            setStepElapsedSeconds(0);
+          } else {
+            // No reset - use max of localStorage and server (localStorage may have more recent ticks)
+            const localValue = loadFromLocalStorage(askKey);
+            const maxValue = Math.max(localValue, serverData.elapsedActiveSeconds);
+            setElapsedSeconds(maxValue);
+            saveToLocalStorage(askKey, maxValue);
+
+            // Save the server's reset timestamp if we don't have one locally
+            if (serverResetAt && !localResetAt) {
+              saveTimerResetToLocalStorage(askKey, serverResetAt);
+            }
+            // Always update the ref with server's reset timestamp
+            if (serverResetAt) {
+              timerResetAtRef.current = serverResetAt;
+            }
+
+            // Update step elapsed time if server returned it and matches current step
+            if (
+              typeof serverData.stepElapsedSeconds === 'number' &&
+              serverData.currentStepId &&
+              serverData.currentStepId === currentStepIdRef.current
+            ) {
+              const localStepValue = currentStepIdRef.current
+                ? loadStepFromLocalStorage(askKey, currentStepIdRef.current)
+                : 0;
+              const maxStepValue = Math.max(localStepValue, serverData.stepElapsedSeconds);
+              setStepElapsedSeconds(maxStepValue);
+              if (currentStepIdRef.current) {
+                saveStepToLocalStorage(askKey, currentStepIdRef.current, maxStepValue);
+              }
+            }
+          }
+        } else {
+          // Server fetch failed - fall back to localStorage
+          const localValue = loadFromLocalStorage(askKey);
+          if (localValue > 0) {
+            setElapsedSeconds(localValue);
+          }
         }
-
-        // No reset - use the higher value between local and server
-        setElapsedSeconds(prev => {
-          const maxValue = Math.max(prev, serverData.elapsedActiveSeconds);
-          // Update localStorage with the max value
-          saveToLocalStorage(askKey, maxValue);
-          return maxValue;
-        });
-
-        // Save the server's reset timestamp if we don't have one locally
-        if (serverResetAt && !localResetAt) {
-          saveTimerResetToLocalStorage(askKey, serverResetAt);
-        }
-
-        // Update step elapsed time if server returned it and matches current step
-        if (
-          typeof serverData.stepElapsedSeconds === 'number' &&
-          serverData.currentStepId &&
-          serverData.currentStepId === currentStepIdRef.current
-        ) {
-          setStepElapsedSeconds(prev => {
-            const maxValue = Math.max(prev, serverData.stepElapsedSeconds!);
-            // Update localStorage with the max value
-            saveStepToLocalStorage(askKey, serverData.currentStepId!, maxValue);
-            return maxValue;
-          });
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
         }
       }
     };
@@ -697,12 +840,14 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     };
   }, [askKey, inviteToken]);
 
-  // Save to localStorage on every change
+  // Save to localStorage on every change (but not while loading initial value)
   useEffect(() => {
-    if (askKey) {
+    // Don't save while loading - we might overwrite a valid localStorage value
+    // before the server fetch has a chance to read it
+    if (askKey && !isLoading) {
       saveToLocalStorage(askKey, elapsedSeconds);
     }
-  }, [askKey, elapsedSeconds]);
+  }, [askKey, elapsedSeconds, isLoading]);
 
   // Periodic server sync
   useEffect(() => {
@@ -860,6 +1005,7 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     stepElapsedMinutes,
     timerState,
     isPaused: timerState === 'paused',
+    isLoading,
     isSyncing,
     notifyAiStreaming,
     notifyUserTyping,

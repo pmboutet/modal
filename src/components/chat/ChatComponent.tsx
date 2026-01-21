@@ -62,7 +62,9 @@ export function ChatComponent({
   // Timer props for voice mode
   elapsedMinutes,
   isTimerPaused,
+  isTimerLoading,
   onTogglePause,
+  onResetTimer,
   expectedDurationMinutes,
   onChatScroll,
 }: ChatComponentProps) {
@@ -556,7 +558,9 @@ export function ChatComponent({
         conversationPlan={conversationPlan}
         elapsedMinutes={elapsedMinutes}
         isTimerPaused={isTimerPaused}
+        isTimerLoading={isTimerLoading}
         onTogglePause={onTogglePause}
+        onResetTimer={onResetTimer}
         expectedDurationMinutes={expectedDurationMinutes}
         consultantMode={consultantMode}
         participants={consultantMode ? participantOptions : undefined}

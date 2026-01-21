@@ -374,7 +374,9 @@ export interface ChatComponentProps {
   // Timer props for voice mode progress bar
   elapsedMinutes?: number;
   isTimerPaused?: boolean;
+  isTimerLoading?: boolean;
   onTogglePause?: () => void;
+  onResetTimer?: () => void;
   expectedDurationMinutes?: number | null;
   // Scroll callback for mobile header hide/show
   onChatScroll?: (scrollTop: number, scrollDelta: number) => void;
@@ -906,6 +908,8 @@ export interface TimeTrackingStats {
   overtimeMinutes: number;
   stepIsOvertime: boolean;
   stepOvertimeMinutes: number;
+  /** Dynamic time budget per remaining step (redistributed based on actual progress) */
+  durationPerRemainingStep: number;
 }
 
 // ============================================================================

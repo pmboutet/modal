@@ -11,6 +11,7 @@ import type { AiAgentLog, Insight } from '@/types';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep } from '@/lib/ai/conversation-plan';
+import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
 import {
   buildParticipantDisplayName,
   buildDetailedMessage,
@@ -683,6 +684,22 @@ export async function POST(
                         console.error('Failed to update conversation plan in stream:', planError);
                         // Don't fail the stream if plan update fails
                       }
+                    }
+
+                    // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+                    try {
+                      const adminForSubtopics = await getAdminClient();
+                      const subtopicResult = await handleSubtopicSignals(
+                        adminForSubtopics,
+                        conversationThread.id,
+                        fullContent.trim()
+                      );
+                      if (subtopicResult) {
+                        console.log('[stream] 🔄 Subtopic signals handled:', subtopicResult);
+                      }
+                    } catch (subtopicError) {
+                      console.error('[stream] ⚠️ Failed to handle subtopic signals:', subtopicError);
+                      // Don't fail the stream if subtopic handling fails
                     }
                   }
                 }

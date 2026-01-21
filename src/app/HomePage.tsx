@@ -96,8 +96,12 @@ interface MobileLayoutProps {
   sessionElapsedMinutes: number;
   /** Whether the session timer is paused */
   isSessionTimerPaused: boolean;
+  /** Whether the session timer is loading initial value */
+  isSessionTimerLoading: boolean;
   /** Toggle the session timer pause state */
   onToggleTimerPause: () => void;
+  /** Reset the session timer to zero */
+  onResetTimer: () => void;
   /** Notify session timer of user typing */
   onUserTyping: (isTyping: boolean) => void;
   /** Consultant mode - AI-assisted question suggestions */
@@ -147,7 +151,9 @@ function MobileLayout({
   onInsightUpdate,
   sessionElapsedMinutes,
   isSessionTimerPaused,
+  isSessionTimerLoading,
   onToggleTimerPause,
+  onResetTimer,
   onUserTyping,
   isConsultantMode,
   isSpokesperson,
@@ -323,7 +329,9 @@ function MobileLayout({
                     expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                     elapsedMinutes={sessionElapsedMinutes}
                     isTimerPaused={isSessionTimerPaused}
+                    isTimerLoading={isSessionTimerLoading}
                     onTogglePause={onToggleTimerPause}
+                    onResetTimer={onResetTimer}
                   />
                 </motion.div>
               )}
@@ -356,7 +364,9 @@ function MobileLayout({
                   onSpeakerChange={onSpeakerChange}
                   elapsedMinutes={sessionElapsedMinutes}
                   isTimerPaused={isSessionTimerPaused}
+                  isTimerLoading={isSessionTimerLoading}
                   onTogglePause={onToggleTimerPause}
+                  onResetTimer={onResetTimer}
                   expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   onChatScroll={onChatScroll}
                 />
@@ -2889,7 +2899,9 @@ export default function HomePage() {
           onInsightUpdate={handleInsightUpdate}
           sessionElapsedMinutes={sessionTimer.elapsedMinutes}
           isSessionTimerPaused={sessionTimer.isPaused}
+          isSessionTimerLoading={sessionTimer.isLoading}
           onToggleTimerPause={handleToggleTimerPause}
+          onResetTimer={sessionTimer.reset}
           onUserTyping={sessionTimer.notifyUserTyping}
           isConsultantMode={isConsultantMode}
           isSpokesperson={isSpokesperson}
@@ -2917,7 +2929,9 @@ export default function HomePage() {
                   expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
+                  isTimerLoading={sessionTimer.isLoading}
                   onTogglePause={handleToggleTimerPause}
+                  onResetTimer={sessionTimer.reset}
                 />
               )}
               <div className="flex-1 overflow-hidden">
@@ -2949,7 +2963,9 @@ export default function HomePage() {
                   onSpeakerChange={consultantAnalysis.notifySpeakerChange}
                   elapsedMinutes={sessionTimer.elapsedMinutes}
                   isTimerPaused={sessionTimer.isPaused}
+                  isTimerLoading={sessionTimer.isLoading}
                   onTogglePause={handleToggleTimerPause}
+                  onResetTimer={sessionTimer.reset}
                   expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
                   onChatScroll={handleMobileChatScroll}
                 />

@@ -18,6 +18,11 @@ export interface ConversationPlanStep {
   created_at: string;
   activated_at: string | null; // When status changed to 'active'
   completed_at: string | null; // When status changed to 'completed'
+  /**
+   * Dynamic subtopics discovered during conversation
+   * Structure: Array of { id, label, status, priority, discovered_at, explored_at, relevant_for_steps? }
+   */
+  discovered_subtopics?: unknown[] | null;
 }
 
 /**

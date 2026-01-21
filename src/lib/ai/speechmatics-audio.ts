@@ -249,17 +249,22 @@ export class SpeechmaticsAudio {
         if (!this.isMuted && this.isPlayingAudio && hasVoiceActivity) {
           this.handleBargeIn();
         }
-        
-        // Update VAD sliding window
-        this.recentVoiceActivity.push(hasVoiceActivity);
-        if (this.recentVoiceActivity.length > this.VAD_WINDOW_SIZE) {
-          this.recentVoiceActivity.shift();
-        }
 
-        // Calculate if we have recent voice activity
-        // Increased from 2 to 3 out of 5 chunks to reduce false positives from brief noise/echo
-        const activeChunks = this.recentVoiceActivity.filter(v => v).length;
-        this.hasRecentVoiceActivity = activeChunks >= 3;
+        // BUG FIX: Only update VAD sliding window when AI is NOT playing audio
+        // When AI is playing, the microphone picks up the echo which causes false "user speaking" detection
+        // This was causing LLM responses to be dropped because isUserSpeaking() returned true due to echo
+        if (!this.isPlayingAudio) {
+          // Update VAD sliding window
+          this.recentVoiceActivity.push(hasVoiceActivity);
+          if (this.recentVoiceActivity.length > this.VAD_WINDOW_SIZE) {
+            this.recentVoiceActivity.shift();
+          }
+
+          // Calculate if we have recent voice activity
+          // Increased from 2 to 3 out of 5 chunks to reduce false positives from brief noise/echo
+          const activeChunks = this.recentVoiceActivity.filter(v => v).length;
+          this.hasRecentVoiceActivity = activeChunks >= 3;
+        }
         
         // Adaptive noise gate: Only send audio chunks if we have recent voice activity
         // This filters out background noise and distant conversations while allowing
@@ -545,6 +550,10 @@ export class SpeechmaticsAudio {
         this.nextStartTime = this.audioContext ? this.audioContext.currentTime : 0;
         // Record when audio playback ended for grace period tracking
         this.lastAudioPlaybackEndTime = Date.now();
+        // BUG FIX: Clear VAD sliding window when audio playback ends
+        // This ensures we start fresh without echo contamination
+        this.recentVoiceActivity = [];
+        this.hasRecentVoiceActivity = false;
         // Notify parent that audio playback has ended (for inactivity timer)
         this.onAudioPlaybackEnd?.();
       }
@@ -1162,6 +1171,19 @@ export class SpeechmaticsAudio {
    */
   isUserSpeaking(): boolean {
     return this.hasRecentVoiceActivity;
+  }
+
+  /**
+   * Reset VAD state when a non-primary speaker is filtered
+   * This prevents filtered speakers (e.g., S2) from affecting "isUserSpeaking" detection
+   * which would cause LLM responses to be incorrectly dropped
+   */
+  resetVADStateForFilteredSpeaker(): void {
+    this.recentVoiceActivity = [];
+    this.hasRecentVoiceActivity = false;
+    // Also cancel any pending barge-in validation since it was from a filtered speaker
+    this.cancelBargeInValidation();
+    console.log('[Speechmatics Audio] ✅ VAD state reset due to filtered speaker');
   }
 
   /**

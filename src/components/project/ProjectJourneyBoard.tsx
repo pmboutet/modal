@@ -40,6 +40,7 @@ import { DurationSlider } from "@/components/ui/duration-slider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { getMockProjectJourneyData } from "@/lib/mockProjectJourney";
+import { clearAllTimersFromLocalStorage } from "@/hooks/useSessionTimer";
 import {
   type AiAskGeneratorResponse,
   type AiAskSuggestion,
@@ -3151,6 +3152,9 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
       setAiBuilderErrors(null);
       setAiBuilderLastRunAt(null);
       setHasAiBuilderResults(false);
+
+      // Clear all timer data from localStorage to prevent stale values
+      clearAllTimersFromLocalStorage();
 
     } catch (err) {
       console.error("Failed to purge project data", err);

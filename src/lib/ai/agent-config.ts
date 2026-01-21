@@ -184,6 +184,13 @@ export interface PromptVariables {
   overtime_minutes?: string;
   step_is_overtime?: string;
   step_overtime_minutes?: string;
+  /** Dynamic time budget per remaining step (redistributed based on actual progress) */
+  duration_per_remaining_step?: string;
+  // Subtopics tracking variables (dynamic, discovered during conversation)
+  /** Formatted string of discovered subtopics for current step */
+  discovered_subtopics?: string;
+  /** Count of pending (unexplored) subtopics across all steps */
+  pending_subtopics_count?: string;
   [key: string]: any; // Allow any type for Handlebars flexibility (arrays, objects, etc.)
 }
 

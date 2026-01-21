@@ -6,6 +6,7 @@ import { getAskSessionByKey, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { executeAgent, fetchAgentBySlug } from '@/lib/ai';
 import { getConversationPlanWithSteps, completeStep, getCurrentStep, detectStepCompletion } from '@/lib/ai/conversation-plan';
+import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   buildParticipantDisplayName,
@@ -629,6 +630,23 @@ export async function POST(
       } catch (planError) {
         console.error('❌ [CONSULTANT-ANALYZE] Failed to complete step:', planError);
         // Don't fail the request if step completion fails
+      }
+    }
+
+    // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+    if (conversationThread && helperResult.content) {
+      try {
+        const subtopicResult = await handleSubtopicSignals(
+          supabase,
+          conversationThread.id,
+          helperResult.content
+        );
+        if (subtopicResult) {
+          console.log('🔍 [CONSULTANT-ANALYZE] Subtopic signals handled:', subtopicResult);
+        }
+      } catch (subtopicError) {
+        console.error('⚠️ [CONSULTANT-ANALYZE] Failed to handle subtopic signals:', subtopicError);
+        // Don't fail the request if subtopic handling fails
       }
     }
 

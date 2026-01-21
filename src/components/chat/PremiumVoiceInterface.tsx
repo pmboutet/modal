@@ -102,7 +102,9 @@ interface PremiumVoiceInterfaceProps {
   // Timer props for progress bar
   elapsedMinutes?: number;
   isTimerPaused?: boolean;
+  isTimerLoading?: boolean;
   onTogglePause?: () => void;
+  onResetTimer?: () => void;
   expectedDurationMinutes?: number | null;
   consultantMode?: boolean; // If true, AI listens but doesn't respond (no TTS, diarization enabled)
   // Consultant mode: participants for speaker assignment
@@ -158,7 +160,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   conversationPlan,
   elapsedMinutes = 0,
   isTimerPaused = false,
+  isTimerLoading = false,
   onTogglePause,
+  onResetTimer,
   expectedDurationMinutes,
   consultantMode = false,
   participants = [],
@@ -217,6 +221,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const conversationSteps = conversationPlan?.plan_data.steps ?? [];
   const currentConversationStepId = conversationPlan?.current_step_id;
   const hasConversationSteps = conversationSteps.length > 0;
+
+  // Check if all steps are completed (for showing completion celebration)
+  const allStepsCompleted = conversationPlan && conversationPlan.plan_data.steps.length > 0
+    ? conversationPlan.plan_data.steps.every(step => step.status === 'completed')
+    : false;
 
   // ===== ÉTATS DES CONTRÔLES MICROPHONE =====
   // ID du microphone sélectionné (null = microphone par défaut)
@@ -2034,8 +2043,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     previousLengthRef.current = displayMessages.length;
 
     if (hasNewMessages) {
+      // Use instant scroll to avoid visual artifacts during message transitions
+      // The smooth scroll was causing a "lift" effect when combined with layout animations
       requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
       });
     }
   }, [displayMessages]);
@@ -2286,7 +2297,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               currentStepId={currentConversationStepId ?? ''}
               elapsedMinutes={elapsedMinutes}
               isTimerPaused={isTimerPaused}
+              isTimerLoading={isTimerLoading}
               onTogglePause={onTogglePause}
+              onResetTimer={onResetTimer}
               expectedDurationMinutes={expectedDurationMinutes}
               variant="dark"
             />
@@ -2328,7 +2341,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               </motion.div>
             </div>
           )}
-          <AnimatePresence mode="popLayout" initial={false}>
+          <AnimatePresence mode="sync" initial={false}>
             {displayMessages.map((message, idx) => {
               const messageKey = message.messageId || `${message.role}-${idx}-${message.timestamp}`;
               const isStreamingAssistant = message.isInterim && message.role === "assistant";
@@ -2381,14 +2394,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               return (
                 <motion.div
                   key={messageKey}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
+                  initial={false}
+                  animate={{ opacity: 1 }}
                   transition={{
-                    duration: 0.2,
+                    duration: 0.1,
                     ease: "easeOut",
-                    layout: { duration: 0.3 }
                   }}
                   className={cn(
                     "flex flex-col",
@@ -2814,10 +2824,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                   </p>
                 ))}
               </div>
-              <p className="text-white/60 text-xs mb-4 text-center">
-                Que souhaitez-vous faire ?
-              </p>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 w-full">
                 <Button
                   onClick={() => {
                     if (filteredSpeakerTimeoutRef.current) {
@@ -2828,9 +2835,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     console.log(`[PremiumVoiceInterface] Speaker ${filteredSpeakerNotification.speaker} added to ignore list`);
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="flex-1 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl py-2 text-sm transition-colors"
+                  className="w-full bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
                 >
-                  Ignorer
+                  <span className="font-medium">Ignorer</span>
+                  <span className="text-white/60 text-xs">Ne pas transcrire cette voix</span>
                 </Button>
                 <Button
                   onClick={() => {
@@ -2842,9 +2850,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     }
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/30 rounded-xl py-2 text-sm transition-colors"
+                  className="w-full bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/30 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
                 >
-                  Ajouter
+                  <span className="font-medium">Ajouter</span>
+                  <span className="text-blue-300/60 text-xs">Cette personne participe avec moi</span>
                 </Button>
                 <Button
                   onClick={() => {
@@ -2856,9 +2865,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     }
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-400/30 rounded-xl py-2 text-sm transition-colors"
+                  className="w-full bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-400/30 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
                 >
-                  Changer
+                  <span className="font-medium">Remplacer</span>
+                  <span className="text-green-300/60 text-xs">Utiliser uniquement cette voix</span>
                 </Button>
               </div>
             </motion.div>
@@ -2895,6 +2905,109 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           })}
         </div>
       )}
+
+      {/* Interview Completion Celebration Overlay */}
+      <AnimatePresence>
+        {allStepsCompleted && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="absolute inset-0 z-50 backdrop-blur-md bg-black/40 flex items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
+              className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 max-w-md mx-4 shadow-2xl overflow-hidden relative"
+            >
+              {/* Confetti animation background */}
+              <div className="absolute inset-0 opacity-30">
+                {[...Array(15)].map((_, i) => (
+                  <motion.div
+                    key={i}
+                    className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500"
+                    initial={{
+                      x: Math.random() * 100 + '%',
+                      y: -20,
+                      rotate: 0,
+                      scale: 0
+                    }}
+                    animate={{
+                      y: '120%',
+                      rotate: Math.random() * 360,
+                      scale: [0, 1, 1, 0.8]
+                    }}
+                    transition={{
+                      duration: 2 + Math.random() * 2,
+                      delay: i * 0.1,
+                      repeat: Infinity,
+                      repeatDelay: 3
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div className="relative z-10 text-center">
+                <motion.div
+                  animate={{
+                    rotate: [0, 10, -10, 10, 0],
+                    scale: [1, 1.1, 1]
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                    repeatDelay: 2
+                  }}
+                  className="mb-4 text-6xl"
+                >
+                  🎉
+                </motion.div>
+
+                <h3 className="mb-2 text-2xl font-bold text-white">
+                  Entretien terminé !
+                </h3>
+
+                <p className="mb-6 text-sm text-white/80">
+                  Merci pour votre participation et vos réponses détaillées.
+                  Toutes les étapes ont été complétées avec succès !
+                </p>
+
+                <motion.div
+                  animate={{
+                    boxShadow: [
+                      '0 0 0 0 rgba(6, 182, 212, 0.4)',
+                      '0 0 0 10px rgba(6, 182, 212, 0)',
+                    ]
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>Toutes les étapes complétées</span>
+                </motion.div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }, (prevProps, nextProps) => {

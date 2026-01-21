@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { Pause, Play, CheckCircle2, Loader2 } from "lucide-react";
+import { Pause, Play, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -26,8 +26,12 @@ export interface ConversationProgressBarProps {
   elapsedMinutes?: number;
   /** Whether the timer is currently paused */
   isTimerPaused?: boolean;
+  /** Whether the timer is loading initial value from server */
+  isTimerLoading?: boolean;
   /** Callback to toggle pause/resume the timer */
   onTogglePause?: () => void;
+  /** Callback to reset the timer to zero */
+  onResetTimer?: () => void;
   /** Consultant mode - shows manual step validation button */
   consultantMode?: boolean;
   /** Callback when consultant manually validates a step */
@@ -44,7 +48,9 @@ export function ConversationProgressBar({
   expectedDurationMinutes,
   elapsedMinutes = 0,
   isTimerPaused = false,
+  isTimerLoading = false,
   onTogglePause,
+  onResetTimer,
   consultantMode = false,
   onValidateStep,
   isValidatingStep = false,
@@ -52,6 +58,14 @@ export function ConversationProgressBar({
 }: ConversationProgressBarProps) {
   const isDark = variant === "dark";
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
+
+  // Handle timer reset with confirmation
+  const handleResetTimer = () => {
+    if (!onResetTimer) return;
+    if (window.confirm('Êtes-vous sûr de vouloir remettre le compteur à zéro ?')) {
+      onResetTimer();
+    }
+  };
 
   if (!steps || steps.length === 0) {
     return null;
@@ -136,38 +150,53 @@ export function ConversationProgressBar({
               ~{duration} min total ({durationPerStep} min/étape)
             </span>
           </div>
-          <button
-            onClick={onTogglePause}
-            disabled={!onTogglePause}
-            className={`text-[10px] flex items-center gap-1.5 transition-colors ${
-              onTogglePause ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
-            } ${isTimerPaused
-              ? (isDark ? 'text-amber-400' : 'text-amber-600')
-              : (isDark ? 'text-white/50' : 'text-gray-500')
-            }`}
-            title={isTimerPaused ? 'Reprendre le timer' : 'Mettre en pause le timer'}
-          >
-            {elapsedMinutes} min écoulées
-            {onTogglePause && (
-              <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${
-                isTimerPaused
-                  ? (isDark ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-amber-100 text-amber-700 hover:bg-amber-200')
-                  : (isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')
-              }`}>
-                {isTimerPaused ? (
-                  <>
-                    <Play className="h-2.5 w-2.5" />
-                    <span className="text-[9px] font-medium">reprendre</span>
-                  </>
-                ) : (
-                  <>
-                    <Pause className="h-2.5 w-2.5" />
-                    <span className="text-[9px] font-medium">pause</span>
-                  </>
-                )}
-              </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onTogglePause}
+              disabled={!onTogglePause}
+              className={`text-[10px] flex items-center gap-1.5 transition-colors ${
+                onTogglePause ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
+              } ${isTimerPaused
+                ? (isDark ? 'text-amber-400' : 'text-amber-600')
+                : (isDark ? 'text-white/50' : 'text-gray-500')
+              }`}
+              title={isTimerPaused ? 'Reprendre le timer' : 'Mettre en pause le timer'}
+            >
+              {isTimerLoading ? '--' : elapsedMinutes} min écoulées
+              {onTogglePause && (
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded transition-colors ${
+                  isTimerPaused
+                    ? (isDark ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-amber-100 text-amber-700 hover:bg-amber-200')
+                    : (isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')
+                }`}>
+                  {isTimerPaused ? (
+                    <>
+                      <Play className="h-2.5 w-2.5" />
+                      <span className="text-[9px] font-medium">reprendre</span>
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="h-2.5 w-2.5" />
+                      <span className="text-[9px] font-medium">pause</span>
+                    </>
+                  )}
+                </span>
+              )}
+            </button>
+            {onResetTimer && (
+              <button
+                onClick={handleResetTimer}
+                className={`p-1 rounded transition-colors ${
+                  isDark
+                    ? 'text-white/30 hover:text-red-400 hover:bg-red-500/20'
+                    : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                }`}
+                title="Remettre le compteur à zéro"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
             )}
-          </button>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {steps.map((step, index) => {

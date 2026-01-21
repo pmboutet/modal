@@ -405,11 +405,27 @@ describe('useSessionTimer', () => {
   });
 
   describe('localStorage persistence', () => {
-    it('should save to localStorage when askKey is provided', () => {
+    it('should save to localStorage when askKey is provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 0, participantId: 'p1' },
+        }),
+      });
+
       const { result } = renderHook(() =>
         useSessionTimer({ askKey: 'test-ask-123' })
       );
 
+      // Wait for server fetch to complete (isLoading becomes false)
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(result.current.isLoading).toBe(false);
+
+      // Now advance time - this should save to localStorage
       act(() => {
         jest.advanceTimersByTime(5000);
       });
@@ -418,13 +434,33 @@ describe('useSessionTimer', () => {
       expect(stored).toBe('5');
     });
 
-    it('should load from localStorage on mount when askKey is provided', () => {
+    it('should load from localStorage after server fetch when askKey is provided', async () => {
       localStorage.setItem('session_timer_test-ask-456', '120');
+
+      // Server returns lower value than localStorage
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 100, participantId: 'p1' },
+        }),
+      });
 
       const { result } = renderHook(() =>
         useSessionTimer({ askKey: 'test-ask-456' })
       );
 
+      // Initially isLoading and elapsedSeconds is 0
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.elapsedSeconds).toBe(0);
+
+      // Wait for server fetch
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // After server fetch, uses max of localStorage (120) and server (100)
+      expect(result.current.isLoading).toBe(false);
       expect(result.current.elapsedSeconds).toBe(120);
     });
 
@@ -450,12 +486,25 @@ describe('useSessionTimer', () => {
       expect(result.current.elapsedSeconds).toBe(0);
     });
 
-    it('should update localStorage on reset', () => {
+    it('should update localStorage on reset', async () => {
       localStorage.setItem('session_timer_test-reset', '100');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 100, participantId: 'p1' },
+        }),
+      });
 
       const { result } = renderHook(() =>
         useSessionTimer({ askKey: 'test-reset' })
       );
+
+      // Wait for server fetch
+      await act(async () => {
+        await Promise.resolve();
+      });
 
       expect(result.current.elapsedSeconds).toBe(100);
 
@@ -467,11 +516,19 @@ describe('useSessionTimer', () => {
       expect(localStorage.getItem('session_timer_test-reset')).toBe('0');
     });
 
-    it('should start paused if user was away for longer than inactivity timeout', () => {
+    it('should start paused if user was away for longer than inactivity timeout', async () => {
       // Set last activity to 2 minutes ago (longer than 30s inactivity timeout)
       const twoMinutesAgo = Date.now() - 120000;
       localStorage.setItem('session_timer_test-long-absence_last_activity', String(twoMinutesAgo));
       localStorage.setItem('session_timer_test-long-absence', '300'); // 5 minutes elapsed
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 300, participantId: 'p1' },
+        }),
+      });
 
       const { result } = renderHook(() =>
         useSessionTimer({
@@ -483,7 +540,18 @@ describe('useSessionTimer', () => {
       // Should start in paused state because user was away for > 30s
       expect(result.current.isPaused).toBe(true);
       expect(result.current.timerState).toBe('paused');
-      expect(result.current.elapsedSeconds).toBe(300); // Preserved elapsed time
+      // Initially isLoading is true and elapsedSeconds is 0
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.elapsedSeconds).toBe(0);
+
+      // Wait for server fetch to complete
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // After server fetch, elapsed time is loaded
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.elapsedSeconds).toBe(300);
     });
 
     it('should start running if user was away for less than inactivity timeout', () => {
@@ -593,15 +661,17 @@ describe('useSessionTimer', () => {
         useSessionTimer({ askKey: 'test-max' })
       );
 
-      // Initially loads from localStorage
-      expect(result.current.elapsedSeconds).toBe(50);
+      // Initially isLoading is true and elapsedSeconds is 0 (doesn't load from localStorage)
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.elapsedSeconds).toBe(0);
 
       // Flush promises to let server fetch complete
       await act(async () => {
         await Promise.resolve();
       });
 
-      // After server fetch, should use server value (100 > 50)
+      // After server fetch, should use max of localStorage (50) and server (100) = 100
+      expect(result.current.isLoading).toBe(false);
       expect(result.current.elapsedSeconds).toBe(100);
     });
 

@@ -13,6 +13,8 @@ interface TimerUpdateRequest {
   elapsedActiveSeconds: number;
   currentStepId?: string;
   stepElapsedSeconds?: number;
+  timerResetAt?: string; // Client's local timer_reset_at to detect stale syncs
+  reset?: boolean; // User-initiated reset - sets timer_reset_at on server
 }
 
 interface TimerResponse {
@@ -416,10 +418,62 @@ export async function PATCH(
       }, { status: 404 });
     }
 
+    // Check for stale reset: if server has a newer timer_reset_at than client, reject the sync
+    // This prevents open sessions from overwriting a timer that was reset by a purge
+    if (body.timerResetAt) {
+      const admin = await getAdminClient();
+      const { data: currentParticipant } = await admin
+        .from('ask_participants')
+        .select('timer_reset_at, elapsed_active_seconds')
+        .eq('id', participantId)
+        .single();
+
+      if (currentParticipant?.timer_reset_at) {
+        const clientResetAt = new Date(body.timerResetAt).getTime();
+        const serverResetAt = new Date(currentParticipant.timer_reset_at).getTime();
+
+        if (serverResetAt > clientResetAt) {
+          // Server has a newer reset - reject the sync and tell client to refresh
+          console.log('[timer] Rejecting stale sync:', {
+            participantId,
+            clientResetAt: body.timerResetAt,
+            serverResetAt: currentParticipant.timer_reset_at,
+            clientElapsed: body.elapsedActiveSeconds,
+            serverElapsed: currentParticipant.elapsed_active_seconds,
+          });
+
+          return NextResponse.json<ApiResponse<{
+            serverResetAt: string;
+            serverElapsedSeconds: number;
+          }>>({
+            success: false,
+            error: 'Timer was reset on server. Please refresh.',
+            data: {
+              serverResetAt: currentParticipant.timer_reset_at,
+              serverElapsedSeconds: currentParticipant.elapsed_active_seconds ?? 0,
+            }
+          }, { status: 409 });
+        }
+      }
+    }
+
+    // Build update payload
+    const updatePayload: { elapsed_active_seconds: number; timer_reset_at?: string } = {
+      elapsed_active_seconds: Math.floor(body.elapsedActiveSeconds),
+    };
+
+    // If user-initiated reset, also set timer_reset_at to propagate reset to other sessions
+    let newTimerResetAt: string | undefined;
+    if (body.reset) {
+      newTimerResetAt = new Date().toISOString();
+      updatePayload.timer_reset_at = newTimerResetAt;
+      console.log('[timer] User-initiated reset:', { participantId, newTimerResetAt });
+    }
+
     // Update the participant elapsed time
     const { error: updateError } = await dataClient
       .from('ask_participants')
-      .update({ elapsed_active_seconds: Math.floor(body.elapsedActiveSeconds) })
+      .update(updatePayload)
       .eq('id', participantId);
 
     if (updateError) {
@@ -490,6 +544,7 @@ export async function PATCH(
         participantId,
         stepElapsedSeconds,
         currentStepId: body.currentStepId,
+        timerResetAt: newTimerResetAt ?? null,
       }
     });
   } catch (error) {

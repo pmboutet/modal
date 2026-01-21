@@ -258,6 +258,8 @@ export interface TimeTrackingStats {
   stepIsOvertime: boolean;
   /** Minutes over step time budget */
   stepOvertimeMinutes: number;
+  /** Dynamic time budget per remaining step (redistributed based on actual progress) */
+  durationPerRemainingStep: number;
 }
 
 /**
@@ -277,10 +279,12 @@ interface MessageForTimeTracking {
  *
  * @param messages - Array of messages for counting questions
  * @param expectedDurationMinutes - Target session duration
- * @param durationPerStep - Time budget per step
+ * @param durationPerStep - Static time budget per step (initial calculation)
  * @param elapsedActiveSeconds - Real elapsed time from participant timer (DB)
  * @param stepElapsedActiveSeconds - Real elapsed time for current step (DB)
  * @param currentStepId - ID of the current active step (for question counting)
+ * @param completedSteps - Number of steps already completed
+ * @param totalSteps - Total number of steps in the plan
  */
 export function calculateTimeTrackingStats(
   messages: MessageForTimeTracking[],
@@ -289,6 +293,8 @@ export function calculateTimeTrackingStats(
   elapsedActiveSeconds: number,
   stepElapsedActiveSeconds: number,
   currentStepId?: string | null,
+  completedSteps?: number,
+  totalSteps?: number,
 ): TimeTrackingStats {
   // Convert real elapsed seconds to minutes with 1 decimal precision
   const conversationElapsedMinutes = Math.round((elapsedActiveSeconds / 60) * 10) / 10;
@@ -317,6 +323,15 @@ export function calculateTimeTrackingStats(
     ? Math.round((stepElapsedMinutes - durationPerStep) * 10) / 10
     : 0;
 
+  // Calculate dynamic time per remaining step (redistributed based on actual progress)
+  // This divides remaining time equally among remaining steps
+  const safeCompletedSteps = completedSteps ?? 0;
+  const safeTotalSteps = totalSteps ?? 5;
+  const remainingSteps = Math.max(0, safeTotalSteps - safeCompletedSteps);
+  const durationPerRemainingStep = remainingSteps > 0
+    ? Math.round((timeRemainingMinutes / remainingSteps) * 10) / 10
+    : 0;
+
   return {
     conversationElapsedMinutes,
     stepElapsedMinutes,
@@ -327,6 +342,7 @@ export function calculateTimeTrackingStats(
     overtimeMinutes,
     stepIsOvertime,
     stepOvertimeMinutes,
+    durationPerRemainingStep,
   };
 }
 
@@ -344,5 +360,6 @@ export function formatTimeTrackingVariables(stats: TimeTrackingStats): Record<st
     overtime_minutes: String(stats.overtimeMinutes),
     step_is_overtime: String(stats.stepIsOvertime),
     step_overtime_minutes: String(stats.stepOvertimeMinutes),
+    duration_per_remaining_step: String(stats.durationPerRemainingStep),
   };
 }

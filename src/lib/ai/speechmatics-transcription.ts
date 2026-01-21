@@ -44,6 +44,7 @@ export class TranscriptionManager {
   private pendingFinalTranscript: string | null = null;
   private currentStreamingMessageId: string | null = null;
   private lastProcessedContent: string | null = null;
+  private contentBeingProcessed: string | null = null; // BUG FIX: Track content currently being processed to prevent duplicates
   private silenceTimeout: NodeJS.Timeout | null = null;
   private receivedEndOfUtterance: boolean = false;
   private utteranceDebounceTimeout: NodeJS.Timeout | null = null;
@@ -340,6 +341,14 @@ export class TranscriptionManager {
         return;
       }
 
+      // BUG FIX: Skip if this content is currently being processed (race condition prevention)
+      // This prevents duplicate messages when processPendingTranscript is called multiple times
+      // in quick succession (e.g., speaker change + EndOfUtterance arriving close together)
+      if (finalMessage === this.contentBeingProcessed) {
+        this.clearState();
+        return;
+      }
+
       // Skip if too short
       if (finalMessage.length < 2) {
         this.clearState();
@@ -351,8 +360,8 @@ export class TranscriptionManager {
       const fullContent = finalMessage;
       const speakerSnapshot = this.currentSpeaker;
 
-      // BUG-007 FIX: Don't clear state until processing completes successfully
-      // This allows retry if processUserMessage fails
+      // BUG FIX: Mark content as being processed to prevent duplicate processing
+      this.contentBeingProcessed = fullContent;
 
       // Add to conversation history
       this.conversationHistory.push({ role: 'user', content: fullContent });
@@ -374,6 +383,7 @@ export class TranscriptionManager {
         // BUG-007 FIX: Only clear state AFTER successful processing
         this.clearState();
         this.lastProcessedContent = fullContent;
+        this.contentBeingProcessed = null;
       } catch (error) {
         // BUG-007 FIX: On error, remove from conversation history and keep state for retry
         // Simplified: directly check and remove the last element if it matches
@@ -381,6 +391,8 @@ export class TranscriptionManager {
         if (lastMsg && lastMsg.role === 'user' && lastMsg.content === fullContent) {
           this.conversationHistory.pop();
         }
+        // Clear the "being processed" flag so it can be retried
+        this.contentBeingProcessed = null;
 
         console.error('[Transcription] Error processing user message, transcript preserved for retry:', error);
         // Re-throw so the caller knows it failed
@@ -435,6 +447,7 @@ export class TranscriptionManager {
     this.clearSemanticHold();
     this.clearState();
     this.lastProcessedContent = null;
+    this.contentBeingProcessed = null;
     this.lastPartialUpdateTimestamp = 0;
     this.currentSpeaker = undefined;
     this.resetSpeakerFiltering();

@@ -76,43 +76,56 @@ describe('TranscriptionManager speaker filtering', () => {
     const processUserMessage = jest.fn().mockResolvedValue(undefined);
     const onSpeakerEstablished = jest.fn();
 
-    const manager = new TranscriptionManager(
-      onMessage,
-      processUserMessage,
-      [],
-      true,
-      undefined,
-      {
-        enabled: true,
-        onSpeakerEstablished,
-      }
-    );
+    // Mock Date.now to avoid rate limiting (100ms between calls)
+    let mockTime = 1000;
+    const originalDateNow = Date.now;
+    Date.now = jest.fn(() => {
+      mockTime += 150; // Advance by 150ms each call to bypass rate limiting
+      return mockTime;
+    });
 
-    // Establish S1 as primary (2 consecutive)
-    manager.handlePartialTranscript('Bonjour', 0, 0.5, 'S1');
-    manager.handlePartialTranscript('je suis le speaker principal', 0.5, 1.5, 'S1');
-    expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
+    try {
+      const manager = new TranscriptionManager(
+        onMessage,
+        processUserMessage,
+        [],
+        true,
+        undefined,
+        {
+          enabled: true,
+          onSpeakerEstablished,
+        }
+      );
 
-    // Count calls after establishment
-    const callsAfterEstablishment = onMessage.mock.calls.length;
+      // Establish S1 as primary (2 consecutive)
+      manager.handlePartialTranscript('Bonjour', 0, 0.5, 'S1');
+      manager.handlePartialTranscript('je suis le speaker principal', 0.5, 1.5, 'S1');
+      expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
 
-    // S2 transcript should be filtered
-    // Note: speaker change triggers finalization of S1's pending message first,
-    // but S2's content itself should NOT appear in any message
-    manager.handlePartialTranscript('Je suis la TV en fond', 2, 3, 'S2');
+      // Count calls after establishment
+      const callsAfterEstablishment = onMessage.mock.calls.length;
 
-    // Verify S2's content was NOT included in any message
-    const allContents = onMessage.mock.calls.map(call => call[0]?.content || '');
-    expect(allContents.some(c => c.includes('TV'))).toBe(false);
+      // S2 transcript should be filtered
+      // Note: speaker change triggers finalization of S1's pending message first,
+      // but S2's content itself should NOT appear in any message
+      manager.handlePartialTranscript('Je suis la TV en fond', 2, 3, 'S2');
 
-    // S1 transcript should pass through and trigger a new message
-    const callsBeforeS1Continue = onMessage.mock.calls.length;
-    manager.handlePartialTranscript('je continue', 4, 5, 'S1');
+      // Verify S2's content was NOT included in any message
+      const allContents = onMessage.mock.calls.map(call => call[0]?.content || '');
+      expect(allContents.some(c => c.includes('TV'))).toBe(false);
 
-    // Check that a new message was emitted for S1
-    expect(onMessage.mock.calls.length).toBeGreaterThan(callsBeforeS1Continue);
+      // S1 transcript should pass through and trigger a new message
+      const callsBeforeS1Continue = onMessage.mock.calls.length;
+      manager.handlePartialTranscript('je continue', 4, 5, 'S1');
 
-    manager.cleanup();
+      // The interim message for "je continue" should be emitted synchronously
+      // Check that a new message was emitted for S1
+      expect(onMessage.mock.calls.length).toBeGreaterThan(callsBeforeS1Continue);
+
+      manager.cleanup();
+    } finally {
+      Date.now = originalDateNow;
+    }
   });
 
   test('ignores UU (unknown) speakers entirely', async () => {

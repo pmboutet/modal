@@ -10,6 +10,7 @@ import { executeAgent, fetchAgentBySlug, type AgentExecutionResult } from '@/lib
 import { INSIGHT_TYPES, mapInsightRowToInsight, type InsightRow } from '@/lib/insights';
 import { fetchInsightRowById, fetchInsightsForSession, fetchInsightsForThread, fetchInsightTypeMap, fetchInsightTypesForPrompt } from '@/lib/insightQueries';
 import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep, ensureConversationPlanExists } from '@/lib/ai/conversation-plan';
+import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   buildParticipantDisplayName,
@@ -1935,6 +1936,22 @@ export async function POST(
                 // Don't fail the request if plan update fails
               }
             }
+
+            // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+            try {
+              const adminSupabase = getAdminSupabaseClient();
+              const subtopicResult = await handleSubtopicSignals(
+                adminSupabase,
+                conversationThread.id,
+                latestAiResponse
+              );
+              if (subtopicResult) {
+                console.log('[respond] 🎤 Voice subtopic signals handled:', subtopicResult);
+              }
+            } catch (subtopicError) {
+              console.error('[respond] ⚠️ Failed to handle subtopic signals for voice message:', subtopicError);
+              // Don't fail the request if subtopic handling fails
+            }
           }
         }
       } else if (!isConsultantMode) {
@@ -2075,6 +2092,22 @@ export async function POST(
               console.error('Failed to update conversation plan:', planError);
               // Don't fail the request if plan update fails
             }
+          }
+
+          // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+          try {
+            const adminSupabase = getAdminSupabaseClient();
+            const subtopicResult = await handleSubtopicSignals(
+              adminSupabase,
+              conversationThread.id,
+              latestAiResponse
+            );
+            if (subtopicResult) {
+              console.log('[respond] 📝 Text subtopic signals handled:', subtopicResult);
+            }
+          } catch (subtopicError) {
+            console.error('[respond] ⚠️ Failed to handle subtopic signals:', subtopicError);
+            // Don't fail the request if subtopic handling fails
           }
         }
         }

@@ -393,6 +393,56 @@ describe('calculateTimeTrackingStats', () => {
 
     expect(stats.questionsAskedInStep).toBe(0);
   });
+
+  test('should calculate durationPerRemainingStep with default values', () => {
+    // 10 min total, 5 min elapsed = 5 min remaining
+    // Default: 0 completed, 5 total = 5 remaining steps
+    // 5 min / 5 steps = 1 min per step
+    const stats = calculateTimeTrackingStats([], 10, 2, 300, 0);
+
+    expect(stats.durationPerRemainingStep).toBe(1);
+  });
+
+  test('should calculate durationPerRemainingStep with explicit step counts', () => {
+    // 10 min total, 4 min elapsed = 6 min remaining
+    // 2 completed, 5 total = 3 remaining steps
+    // 6 min / 3 steps = 2 min per step
+    const stats = calculateTimeTrackingStats([], 10, 2, 240, 0, null, 2, 5);
+
+    expect(stats.durationPerRemainingStep).toBe(2);
+  });
+
+  test('should redistribute time when step finishes early', () => {
+    // 10 min total, 1 min elapsed (step finished early) = 9 min remaining
+    // 1 completed, 5 total = 4 remaining steps
+    // 9 min / 4 steps = 2.3 min per step (rounded)
+    const stats = calculateTimeTrackingStats([], 10, 2, 60, 0, null, 1, 5);
+
+    expect(stats.durationPerRemainingStep).toBe(2.3); // 9/4 = 2.25 rounded to 2.3
+  });
+
+  test('should redistribute time when step runs late', () => {
+    // 10 min total, 6 min elapsed (step ran late) = 4 min remaining
+    // 1 completed, 5 total = 4 remaining steps
+    // 4 min / 4 steps = 1 min per step
+    const stats = calculateTimeTrackingStats([], 10, 2, 360, 0, null, 1, 5);
+
+    expect(stats.durationPerRemainingStep).toBe(1);
+  });
+
+  test('should return 0 for durationPerRemainingStep when all steps completed', () => {
+    const stats = calculateTimeTrackingStats([], 10, 2, 600, 0, null, 5, 5);
+
+    expect(stats.durationPerRemainingStep).toBe(0);
+  });
+
+  test('should return 0 for durationPerRemainingStep when overtime', () => {
+    // 10 min total, 12 min elapsed = 0 min remaining
+    // Remaining time is 0, so duration per step should be 0
+    const stats = calculateTimeTrackingStats([], 10, 2, 720, 0, null, 2, 5);
+
+    expect(stats.durationPerRemainingStep).toBe(0);
+  });
 });
 
 // ============================================================================
@@ -411,6 +461,7 @@ describe('formatTimeTrackingVariables', () => {
     expect(variables.overtime_minutes).toBe('0');
     expect(variables.step_is_overtime).toBe('false');
     expect(variables.step_overtime_minutes).toBe('0');
+    expect(variables.duration_per_remaining_step).toBe('1'); // 5 min remaining / 5 default steps
   });
 
   test('should format overtime variables correctly', () => {
@@ -421,5 +472,16 @@ describe('formatTimeTrackingVariables', () => {
     expect(variables.overtime_minutes).toBe('2');
     expect(variables.step_is_overtime).toBe('true');
     expect(variables.step_overtime_minutes).toBe('0.5');
+    expect(variables.duration_per_remaining_step).toBe('0'); // 0 remaining time
+  });
+
+  test('should format duration_per_remaining_step with step progress', () => {
+    // 10 min total, 4 min elapsed = 6 min remaining
+    // 2 completed, 5 total = 3 remaining steps
+    // 6 min / 3 steps = 2 min per step
+    const stats = calculateTimeTrackingStats([], 10, 2, 240, 0, null, 2, 5);
+    const variables = formatTimeTrackingVariables(stats);
+
+    expect(variables.duration_per_remaining_step).toBe('2');
   });
 });
