@@ -3022,14 +3022,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     'userPrompt',
     'modelConfig',
     'conversationPlan',
+    // Timer props - must trigger re-render when changed
+    'elapsedMinutes',
+    'isTimerPaused',
+    'isTimerLoading',
   ];
 
   for (const key of propsToCompare) {
     if (prevProps[key] !== nextProps[key]) {
-      console.log(`[PremiumVoiceInterface] 🔄 Prop changed: ${key}`, {
-        prev: typeof prevProps[key] === 'object' ? JSON.stringify(prevProps[key]).slice(0, 100) : prevProps[key],
-        next: typeof nextProps[key] === 'object' ? JSON.stringify(nextProps[key]).slice(0, 100) : nextProps[key]
-      });
       return false; // Props changed, re-render
     }
   }

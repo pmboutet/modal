@@ -20,9 +20,17 @@ export interface ConversationPlanStep {
   completed_at: string | null; // When status changed to 'completed'
   /**
    * Dynamic subtopics discovered during conversation
-   * Structure: Array of { id, label, status, priority, discovered_at, explored_at, relevant_for_steps? }
+   * @see DiscoveredSubtopic in conversation-signals.ts for the structure
    */
-  discovered_subtopics?: unknown[] | null;
+  discovered_subtopics?: Array<{
+    id: string;
+    label: string;
+    status: 'pending' | 'explored' | 'skipped';
+    priority: 'high' | 'medium' | 'low';
+    discovered_at: string;
+    explored_at: string | null;
+    relevant_for_steps?: string[];
+  }> | null;
 }
 
 /**

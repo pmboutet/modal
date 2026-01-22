@@ -516,6 +516,63 @@ describe('useSessionTimer', () => {
       expect(localStorage.getItem('session_timer_test-reset')).toBe('0');
     });
 
+    it('should send 0 to server on reset (not stale ref value)', async () => {
+      localStorage.setItem('session_timer_test-reset-server', '200');
+
+      // Initial fetch returns 200 seconds
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 200, participantId: 'p1' },
+        }),
+      });
+
+      const { result } = renderHook(() =>
+        useSessionTimer({ askKey: 'test-reset-server' })
+      );
+
+      // Wait for server fetch
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(result.current.elapsedSeconds).toBe(200);
+
+      // Clear mock to track reset call
+      mockFetch.mockClear();
+
+      // Mock the PATCH response for reset
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          data: { elapsedActiveSeconds: 0, participantId: 'p1', timerResetAt: new Date().toISOString() },
+        }),
+      });
+
+      // Reset the timer
+      await act(async () => {
+        result.current.reset();
+        await Promise.resolve();
+      });
+
+      expect(result.current.elapsedSeconds).toBe(0);
+
+      // Verify the PATCH request sent 0, not 200
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/ask/test-reset-server/timer',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: expect.stringContaining('"elapsedActiveSeconds":0'),
+        })
+      );
+
+      // Also verify reset flag was sent
+      const callBody = mockFetch.mock.calls[0][1].body;
+      expect(callBody).toContain('"reset":true');
+    });
+
     it('should start paused if user was away for longer than inactivity timeout', async () => {
       // Set last activity to 2 minutes ago (longer than 30s inactivity timeout)
       const twoMinutesAgo = Date.now() - 120000;

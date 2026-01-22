@@ -746,6 +746,10 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
     lastActivityTimestampRef.current = Date.now();
     clearInactivityTimeout();
     startInactivityCountdown();
+    // IMPORTANT: Update refs synchronously BEFORE calling syncToServer
+    // Otherwise syncToServer will use stale values from elapsedSecondsRef.current
+    elapsedSecondsRef.current = 0;
+    stepElapsedSecondsRef.current = 0;
     // Clear localStorage and sync reset to server with reset flag
     if (askKey) {
       clearTimerFromLocalStorage(askKey);

@@ -636,15 +636,16 @@ export class SpeechmaticsVoiceAgent {
       // USER-SPEAKING CHECK: If user started speaking while LLM was generating,
       // drop the response entirely and wait for user to finish
       // This prevents the AI from talking over the user
-      // Check both: (1) user is currently speaking (VAD) OR (2) we received a RECENT partial during generation
-      // BUG-FIX: Only consider partials received in the last 3 seconds as "fresh"
-      // This prevents dropping responses when the user has already stopped speaking
+      // BUG-FIX: Only use receivedPartialDuringGeneration flag, NOT isUserSpeaking() VAD check
+      // The VAD sliding window can have stale state from BEFORE generation started, causing
+      // responses to be incorrectly dropped even when the user has stopped speaking
+      // The partial flag is the accurate signal - it's only set when we receive actual
+      // transcription partials during generation
       const now = Date.now();
       const partialFlagIsFresh = this.receivedPartialDuringGeneration &&
         (now - this.lastPartialDuringGenerationTimestamp < this.PARTIAL_FLAG_STALENESS_MS);
-      const userSpokeWhileGenerating = partialFlagIsFresh || this.audio?.isUserSpeaking();
-      if (userSpokeWhileGenerating) {
-        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial received:', this.receivedPartialDuringGeneration, ', partial age ms:', now - this.lastPartialDuringGenerationTimestamp, ', currently speaking:', this.audio?.isUserSpeaking(), ')');
+      if (partialFlagIsFresh) {
+        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial age ms:', now - this.lastPartialDuringGenerationTimestamp, ')');
         // Remove the incomplete user message from conversation history
         // (it will be replaced by the complete one when user finishes)
         if (this.conversationHistory.length > 0 &&
@@ -658,6 +659,11 @@ export class SpeechmaticsVoiceAgent {
         // Clear queue - stale fragments will be replaced by new user message
         this.userMessageQueue = [];
         return;
+      }
+
+      // Log that response was NOT dropped (helps debugging)
+      if (this.receivedPartialDuringGeneration) {
+        console.log('[Speechmatics] ✅ LLM response NOT dropped - partial was stale (age ms:', now - this.lastPartialDuringGenerationTimestamp, ', threshold:', this.PARTIAL_FLAG_STALENESS_MS, ')');
       }
 
       // Add to conversation history

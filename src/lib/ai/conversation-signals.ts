@@ -367,6 +367,8 @@ export async function updateSubtopicStatus(
  * This function does NOT handle STEP_COMPLETE - use this for incremental adoption
  * while keeping existing STEP_COMPLETE handling in place.
  *
+ * DRY: Delegates to processSubtopicSignals() which is also used by handleConversationSignals()
+ *
  * @param supabase - Supabase client (should be admin for RLS bypass)
  * @param conversationThreadId - The conversation thread ID
  * @param aiResponse - The AI response content to check for signals
@@ -384,16 +386,21 @@ export async function handleSubtopicSignals(
     return null;
   }
 
+  // Delegate to shared processing function
+  return processSubtopicSignals(supabase, conversationThreadId, signals);
+}
+
+/**
+ * Internal helper: Process subtopic signals with provided plan context
+ * DRY: Single implementation for subtopic handling, used by both handleSubtopicSignals and handleConversationSignals
+ */
+async function processSubtopicSignalsWithPlan(
+  supabase: SupabaseClient,
+  conversationThreadId: string,
+  signals: ConversationSignals,
+  currentStep: ConversationPlanStep | LegacyConversationPlanStep | null
+): Promise<{ subtopicsAdded: number; subtopicsUpdated: number }> {
   const result = { subtopicsAdded: 0, subtopicsUpdated: 0 };
-
-  // Get current plan and step for context
-  const plan = await getConversationPlanWithSteps(supabase, conversationThreadId);
-  if (!plan) {
-    console.warn('[handleSubtopicSignals] No conversation plan found');
-    return null;
-  }
-
-  const currentStep = getCurrentStep(plan);
 
   // Handle TOPICS_DISCOVERED
   if (signals.topicsDiscovered?.topics.length && currentStep) {
@@ -403,7 +410,6 @@ export async function handleSubtopicSignals(
       signals.topicsDiscovered.topics
     );
     result.subtopicsAdded = added;
-    console.log('[handleSubtopicSignals] Added subtopics:', added);
   }
 
   // Handle TOPIC_EXPLORED
@@ -429,6 +435,26 @@ export async function handleSubtopicSignals(
   }
 
   return result;
+}
+
+/**
+ * Internal helper: Process subtopic signals (fetches plan internally)
+ * Used by handleSubtopicSignals for standalone subtopic handling
+ */
+async function processSubtopicSignals(
+  supabase: SupabaseClient,
+  conversationThreadId: string,
+  signals: ConversationSignals
+): Promise<{ subtopicsAdded: number; subtopicsUpdated: number } | null> {
+  // Get current plan and step for context
+  const plan = await getConversationPlanWithSteps(supabase, conversationThreadId);
+  if (!plan) {
+    console.warn('[processSubtopicSignals] No conversation plan found');
+    return null;
+  }
+
+  const currentStep = getCurrentStep(plan);
+  return processSubtopicSignalsWithPlan(supabase, conversationThreadId, signals, currentStep);
 }
 
 // ============================================================================
@@ -478,48 +504,21 @@ export async function handleConversationSignals(
 
   const currentStep = getCurrentStep(plan);
 
-  // 1. Handle TOPICS_DISCOVERED (before step completion, in case step completes)
-  if (signals.topicsDiscovered?.topics.length && currentStep) {
-    const added = await addSubtopicsToStep(
-      supabase,
-      currentStep.id,
-      signals.topicsDiscovered.topics
-    );
-    result.subtopicsAdded = added;
-    if (added > 0) {
-      result.planUpdated = true;
-    }
+  // 1. Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+  // DRY: Use shared helper function
+  const subtopicResult = await processSubtopicSignalsWithPlan(
+    supabase,
+    conversationThreadId,
+    signals,
+    currentStep
+  );
+  result.subtopicsAdded = subtopicResult.subtopicsAdded;
+  result.subtopicsUpdated = subtopicResult.subtopicsUpdated;
+  if (subtopicResult.subtopicsAdded > 0 || subtopicResult.subtopicsUpdated > 0) {
+    result.planUpdated = true;
   }
 
-  // 2. Handle TOPIC_EXPLORED
-  if (signals.topicExplored) {
-    const updated = await updateSubtopicStatus(
-      supabase,
-      conversationThreadId,
-      signals.topicExplored.topicId,
-      'explored'
-    );
-    if (updated) {
-      result.subtopicsUpdated++;
-      result.planUpdated = true;
-    }
-  }
-
-  // 3. Handle TOPIC_SKIPPED
-  if (signals.topicSkipped) {
-    const updated = await updateSubtopicStatus(
-      supabase,
-      conversationThreadId,
-      signals.topicSkipped.topicId,
-      'skipped'
-    );
-    if (updated) {
-      result.subtopicsUpdated++;
-      result.planUpdated = true;
-    }
-  }
-
-  // 4. Handle STEP_COMPLETE (last, as it changes current step)
+  // 2. Handle STEP_COMPLETE (last, as it changes current step)
   if (signals.stepComplete && currentStep) {
     const currentStepId = getStepIdentifier(currentStep);
     const stepIdToComplete = signals.stepComplete.stepId === 'CURRENT'
@@ -599,8 +598,8 @@ export function countPendingSubtopics(plan: ConversationPlan & { steps?: Convers
   if (!plan.steps) return 0;
 
   return plan.steps.reduce((count, step) => {
-    const subtopics = (step as any).discovered_subtopics as DiscoveredSubtopic[] | undefined;
-    if (!subtopics) return count;
+    const subtopics = step.discovered_subtopics;
+    if (!subtopics || !Array.isArray(subtopics)) return count;
     return count + subtopics.filter(st => st.status === 'pending').length;
   }, 0);
 }
@@ -609,6 +608,8 @@ export function countPendingSubtopics(plan: ConversationPlan & { steps?: Convers
  * Get all subtopics for a specific step
  */
 export function getStepSubtopics(step: ConversationPlanStep): DiscoveredSubtopic[] {
-  const subtopics = (step as any).discovered_subtopics;
-  return Array.isArray(subtopics) ? subtopics : [];
+  const subtopics = step.discovered_subtopics;
+  if (!subtopics || !Array.isArray(subtopics)) return [];
+  // Type assertion is safe here because ConversationPlanStep.discovered_subtopics matches DiscoveredSubtopic
+  return subtopics as DiscoveredSubtopic[];
 }
