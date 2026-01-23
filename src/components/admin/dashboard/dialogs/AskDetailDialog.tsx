@@ -28,12 +28,9 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
     return `${baseUrl}/?ask=${askKey}`;
   };
 
-  // Generate participant link URL - token is required
-  const generateMagicLinkUrl = (email: string, askKey: string, participantToken?: string | null): string | null => {
-    if (!participantToken) {
-      // Token is required - return null if not available
-      return null;
-    }
+  // Generate participant link URL with token (direct access)
+  const generateMagicLinkUrl = (participantToken?: string | null): string | null => {
+    if (!participantToken) return null;
 
     const baseUrl = typeof window !== "undefined"
       ? (process.env.NEXT_PUBLIC_APP_URL || window.location.origin)
@@ -277,10 +274,8 @@ export function AskDetailDialog({ ask, projectName, challengeName, onClose }: As
                   <div className="mt-2 space-y-3">
                     {ask.participants.map(participant => {
                       const participantEmail = participant.email;
-                      // Token is required for participant links
-                      const magicLink = participant.inviteToken
-                        ? generateMagicLinkUrl(participantEmail || "", ask.askKey, participant.inviteToken)
-                        : null;
+                      // Generate link using participant token (direct access)
+                      const magicLink = generateMagicLinkUrl(participant.inviteToken);
                       const isCopied = copiedLinks.has(participant.id);
 
                       return (

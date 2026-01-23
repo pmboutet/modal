@@ -71,3 +71,78 @@ export function detectStepComplete(content: string): { hasMarker: boolean; stepI
     stepId: validStepId
   };
 }
+
+/**
+ * Remove TOPICS_DISCOVERED signal and its JSON array from content
+ * Uses bracket counting to correctly handle nested JSON structures
+ */
+function cleanTopicsDiscovered(content: string): string {
+  const marker = content.match(/TOPICS_DISCOVERED:\s*/i);
+  if (!marker || marker.index === undefined) return content;
+
+  const startIndex = marker.index;
+  const afterMarker = startIndex + marker[0].length;
+
+  // Find the JSON array if it exists
+  if (content[afterMarker] !== '[') {
+    // No JSON array, just remove the marker
+    return content.slice(0, startIndex) + content.slice(afterMarker);
+  }
+
+  // Count brackets to find the matching ]
+  let depth = 0;
+  let endIndex = afterMarker;
+
+  for (let i = afterMarker; i < content.length; i++) {
+    if (content[i] === '[') depth++;
+    else if (content[i] === ']') {
+      depth--;
+      if (depth === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (depth !== 0) {
+    // Malformed JSON, just remove the marker
+    return content.slice(0, startIndex) + content.slice(afterMarker);
+  }
+
+  // Remove the entire signal including JSON array
+  // Also remove any leading/trailing newlines around the signal
+  const before = content.slice(0, startIndex).replace(/\n\s*$/, '');
+  const after = content.slice(endIndex + 1).replace(/^\s*\n/, '');
+
+  // Recursively clean in case there are multiple TOPICS_DISCOVERED signals
+  const result = before + after;
+  if (/TOPICS_DISCOVERED:/i.test(result)) {
+    return cleanTopicsDiscovered(result);
+  }
+  return result;
+}
+
+/**
+ * Remove all conversation signals from content for display.
+ * This is the comprehensive cleaning function that handles:
+ * - STEP_COMPLETE: marker
+ * - TOPICS_DISCOVERED: with JSON array
+ * - TOPIC_EXPLORED: marker
+ * - TOPIC_SKIPPED: marker
+ *
+ * Can be used both client-side (ChatComponent) and server-side.
+ */
+export function cleanAllSignalMarkers(content: string): string {
+  let result = content
+    // Clean STEP_COMPLETE (existing pattern)
+    .replace(/(\*{1,2}|_{1,2})?(STEP_COMPLETE:?\s*)(\w+)?(\*{1,2}|_{1,2})?/gi, '')
+    // Clean TOPIC_EXPLORED
+    .replace(/(\*{1,2}|_{1,2})?(TOPIC_EXPLORED:\s*\w+)(\*{1,2}|_{1,2})?/gi, '')
+    // Clean TOPIC_SKIPPED
+    .replace(/(\*{1,2}|_{1,2})?(TOPIC_SKIPPED:\s*\w+)(\*{1,2}|_{1,2})?/gi, '');
+
+  // Clean TOPICS_DISCOVERED with proper bracket handling
+  result = cleanTopicsDiscovered(result);
+
+  return result.trim();
+}

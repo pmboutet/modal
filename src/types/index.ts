@@ -389,6 +389,34 @@ export interface ChallengeComponentProps {
   askKey: string;
 }
 
+/**
+ * Subtopic discovered during conversation
+ * @see DiscoveredSubtopic in conversation-signals.ts
+ */
+export interface DiscoveredSubtopic {
+  id: string;
+  label: string;
+  status: 'pending' | 'explored' | 'skipped';
+  priority: 'high' | 'medium' | 'low';
+  discovered_at: string;
+  explored_at: string | null;
+  relevant_for_steps?: string[];
+}
+
+/**
+ * Extended conversation plan step with discovered subtopics
+ */
+export interface ConversationPlanStepWithSubtopics extends ConversationPlanStep {
+  discovered_subtopics?: DiscoveredSubtopic[] | null;
+}
+
+/**
+ * Extended conversation plan with steps including discovered subtopics
+ */
+export interface ConversationPlanWithSubtopics extends ConversationPlan {
+  steps?: ConversationPlanStepWithSubtopics[];
+}
+
 export interface InsightPanelProps {
   insights: Insight[];
   onRequestChallengeLink?: (insightId: string) => void;
@@ -399,6 +427,8 @@ export interface InsightPanelProps {
   isConsultantMode?: boolean;
   /** When true (and isConsultantMode), shows full content instead of summary */
   isSpokesperson?: boolean;
+  /** Conversation plan with steps and discovered subtopics for the Topics tab */
+  conversationPlan?: ConversationPlanWithSubtopics | null;
 }
 
 // Consultant mode - suggested questions

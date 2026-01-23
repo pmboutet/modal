@@ -41,7 +41,7 @@ import {
   type SemanticTurnTelemetryEvent,
 } from './turn-detection';
 import { resolveSemanticTurnDetectorConfig } from './turn-detection-config';
-import { cleanStepCompleteMarker } from '@/lib/sanitize';
+import { cleanAllSignalMarkers } from '@/lib/sanitize';
 
 // Import and re-export types for backward compatibility
 import type {
@@ -399,18 +399,31 @@ export class SpeechmaticsVoiceAgent {
           }
         }
 
-        // Get recent conversation context for echo detection (last agent message + last user message)
-        const recentContext = this.conversationHistory
-          .slice(-2)
-          .map(msg => msg.content)
-          .join(' ')
-          .slice(-200); // Last 200 chars of recent context
+        // BUG FIX: Check speaker filtering BEFORE barge-in validation
+        // This prevents parasitic voices from stopping TTS - previously, barge-in was validated
+        // before speaker filtering, so TTS would stop and not resume when we discovered it was a filtered speaker
+        const shouldFilterThisSpeaker = this.transcriptionManager?.shouldFilterSpeaker(speaker) ?? false;
 
-        // Validate barge-in with transcript content, context, and speaker (for diarization-based echo detection)
-        this.audio?.validateBargeInWithTranscript(trimmedTranscript, recentContext, speaker);
+        if (shouldFilterThisSpeaker) {
+          // Cancel any pending barge-in validation and reset VAD state
+          // This prevents the filtered speaker from interrupting TTS
+          this.audio?.resetVADStateForFilteredSpeaker();
+          // Still process the transcript for logging/callbacks (handlePartialTranscript will filter it)
+          this.transcriptionManager?.handlePartialTranscript(trimmedTranscript, startTime, endTime, speaker);
+        } else {
+          // Get recent conversation context for echo detection (last agent message + last user message)
+          const recentContext = this.conversationHistory
+            .slice(-2)
+            .map(msg => msg.content)
+            .join(' ')
+            .slice(-200); // Last 200 chars of recent context
 
-        // Process partial transcript with timestamps for deduplication
-        this.transcriptionManager?.handlePartialTranscript(trimmedTranscript, startTime, endTime, speaker);
+          // Validate barge-in with transcript content, context, and speaker (for diarization-based echo detection)
+          this.audio?.validateBargeInWithTranscript(trimmedTranscript, recentContext, speaker);
+
+          // Process partial transcript with timestamps for deduplication
+          this.transcriptionManager?.handlePartialTranscript(trimmedTranscript, startTime, endTime, speaker);
+        }
       }
       return;
     }
@@ -427,18 +440,31 @@ export class SpeechmaticsVoiceAgent {
       const speaker = this.extractDominantSpeaker(data.results);
 
       if (transcript && transcript.trim()) {
-        // Get recent conversation context for echo detection (last agent message + last user message)
-        const recentContext = this.conversationHistory
-          .slice(-2)
-          .map(msg => msg.content)
-          .join(' ')
-          .slice(-200); // Last 200 chars of recent context
+        const trimmedFinalTranscript = transcript.trim();
 
-        // Validate barge-in with transcript content, context, and speaker (for diarization-based echo detection)
-        this.audio?.validateBargeInWithTranscript(transcript.trim(), recentContext, speaker);
+        // BUG FIX: Check speaker filtering BEFORE barge-in validation (same as partial transcripts)
+        // This prevents parasitic voices from stopping TTS
+        const shouldFilterThisSpeaker = this.transcriptionManager?.shouldFilterSpeaker(speaker) ?? false;
 
-        // Process final transcript with timestamps for deduplication
-        this.transcriptionManager?.handleFinalTranscript(transcript.trim(), startTime, endTime, speaker);
+        if (shouldFilterThisSpeaker) {
+          // Cancel any pending barge-in validation and reset VAD state
+          this.audio?.resetVADStateForFilteredSpeaker();
+          // Still process the transcript for logging/callbacks (handleFinalTranscript will filter it)
+          this.transcriptionManager?.handleFinalTranscript(trimmedFinalTranscript, startTime, endTime, speaker);
+        } else {
+          // Get recent conversation context for echo detection (last agent message + last user message)
+          const recentContext = this.conversationHistory
+            .slice(-2)
+            .map(msg => msg.content)
+            .join(' ')
+            .slice(-200); // Last 200 chars of recent context
+
+          // Validate barge-in with transcript content, context, and speaker (for diarization-based echo detection)
+          this.audio?.validateBargeInWithTranscript(trimmedFinalTranscript, recentContext, speaker);
+
+          // Process final transcript with timestamps for deduplication
+          this.transcriptionManager?.handleFinalTranscript(trimmedFinalTranscript, startTime, endTime, speaker);
+        }
       }
       return;
     }
@@ -691,8 +717,8 @@ export class SpeechmaticsVoiceAgent {
       // accidentally generate a response. This is a belt-and-suspenders check.
       if (!this.config?.disableLLM && !this.config?.disableElevenLabsTTS && this.elevenLabsTTS && this.audio) {
         try {
-          // Clean STEP_COMPLETE markers before sending to TTS (we don't want to "say" them)
-          const ttsText = cleanStepCompleteMarker(llmResponse);
+          // Clean all signal markers before TTS (STEP_COMPLETE, TOPICS_DISCOVERED, etc.)
+          const ttsText = cleanAllSignalMarkers(llmResponse);
 
           // Set current assistant speech for echo detection (use cleaned text)
           this.audio.setCurrentAssistantSpeech(ttsText);
@@ -1187,17 +1213,14 @@ export class SpeechmaticsVoiceAgent {
         content: text,
       });
 
-      // Emit message callback for UI display
-      this.onMessageCallback?.({
-        role: 'agent',
-        content: text,
-        timestamp: new Date().toISOString(),
-        isInterim: false,
-        messageId: `initial-${Date.now()}`,
-      });
+      // NOTE: Do NOT emit onMessageCallback here!
+      // The initial message is already managed by the caller (either created via /respond endpoint
+      // and returned in the API response, or already exists in the messages prop).
+      // Emitting the callback would cause handleVoiceMessage to add a duplicate and persist again.
+      // This method only handles: 1) adding to conversation history for LLM context, 2) playing TTS
 
-      // Clean any STEP_COMPLETE markers before TTS
-      const ttsText = cleanStepCompleteMarker(text);
+      // Clean all signal markers before TTS (STEP_COMPLETE, TOPICS_DISCOVERED, etc.)
+      const ttsText = cleanAllSignalMarkers(text);
 
       // Set current assistant speech for echo detection
       this.audio.setCurrentAssistantSpeech(ttsText);

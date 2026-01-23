@@ -18,7 +18,7 @@ import {
   validateFileType,
   formatFileSize,
 } from "@/lib/utils";
-import { cleanStepCompleteMarker, detectStepComplete } from "@/lib/sanitize";
+import { cleanAllSignalMarkers, detectStepComplete } from "@/lib/sanitize";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -910,7 +910,7 @@ export function ChatComponent({
                     <TooltipTrigger asChild>
                       <Button
                         onClick={handleSendMessage}
-                        disabled={isLoading || (!inputValue.trim() && selectedFiles.length === 0)}
+                        disabled={!inputValue.trim() && selectedFiles.length === 0}
                         size="icon"
                         className="h-9 w-9"
                       >
@@ -1022,8 +1022,8 @@ function MessageBubble({
     ? conversationPlan?.plan_data.steps.findIndex(step => step.id === completedStep.id)! + 1
     : undefined;
 
-  // Remove the marker from display (handles all formats including markdown)
-  const cleanContent = cleanStepCompleteMarker(message.content);
+  // Remove all signal markers from display (STEP_COMPLETE, TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+  const cleanContent = cleanAllSignalMarkers(message.content);
   
   return (
     <motion.div
@@ -1078,25 +1078,10 @@ function MessageBubble({
           {/* Edit mode */}
           {isEditing && message.type === 'text' ? (
             <div className="flex flex-col gap-2">
-              <textarea
-                ref={(el) => {
-                  if (el) {
-                    el.style.height = 'auto';
-                    el.style.height = el.scrollHeight + 'px';
-                  }
-                }}
+              <EditTextarea
                 value={editContent}
-                onChange={(e) => {
-                  onEditContentChange?.(e.target.value);
-                  // Auto-resize on content change
-                  e.target.style.height = 'auto';
-                  e.target.style.height = e.target.scrollHeight + 'px';
-                }}
-                className={cn(
-                  "w-full min-h-[60px] p-2 rounded border bg-background text-foreground resize-none focus:outline-none focus:ring-2 overflow-hidden",
-                  editError ? "border-red-500 focus:ring-red-500" : "border-border focus:ring-primary"
-                )}
-                autoFocus
+                onChange={onEditContentChange}
+                hasError={!!editError}
                 disabled={isSubmittingEdit}
               />
               {/* BUG-016: Display edit error with retry option */}
@@ -1187,6 +1172,67 @@ function MessageBubble({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+/**
+ * Edit textarea component that auto-resizes without causing layout thrashing
+ * Uses requestAnimationFrame to batch DOM reads/writes
+ */
+function EditTextarea({
+  value,
+  onChange,
+  hasError,
+  disabled,
+}: {
+  value: string;
+  onChange?: (content: string) => void;
+  hasError?: boolean;
+  disabled?: boolean;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const rafRef = useRef<number | null>(null);
+
+  // Auto-resize using requestAnimationFrame to avoid forced reflows
+  const scheduleResize = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+      }
+    });
+  }, []);
+
+  // Resize on mount and value change
+  useEffect(() => {
+    scheduleResize();
+  }, [value, scheduleResize]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={(e) => onChange?.(e.target.value)}
+      className={cn(
+        "w-full min-h-[60px] p-2 rounded border bg-background text-foreground resize-none focus:outline-none focus:ring-2 overflow-hidden",
+        hasError ? "border-red-500 focus:ring-red-500" : "border-border focus:ring-primary"
+      )}
+      autoFocus
+      disabled={disabled}
+    />
   );
 }
 

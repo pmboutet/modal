@@ -11,7 +11,7 @@ import type { AiAgentLog, Insight } from '@/types';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep } from '@/lib/ai/conversation-plan';
-import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
+import { handleSubtopicSignals, cleanAllSignalMarkers } from '@/lib/ai/conversation-signals';
 import {
   buildParticipantDisplayName,
   buildDetailedMessage,
@@ -563,13 +563,17 @@ export async function POST(
                   return;
                 }
 
+                // Clean signal markers from content before storing
+                // Signals are processed separately but should not appear in stored messages
+                const cleanedContent = cleanAllSignalMarkers(fullContent.trim());
+
                 // Insert AI message via RPC wrapper to bypass RLS
                 // Pass planStepId to link message to current step (fixes context loss bug)
                 const inserted = await insertAiMessage(
                   insertClient,
                   askRow.id,
                   conversationThread?.id ?? null,
-                  fullContent.trim(),
+                  cleanedContent,
                   'Agent',
                   planStepId
                 );

@@ -26,7 +26,7 @@ import { DeepgramVoiceAgent, DeepgramMessageEvent } from '@/lib/ai/deepgram';
 import { HybridVoiceAgent, HybridVoiceAgentMessage } from '@/lib/ai/hybrid-voice-agent';
 import { SpeechmaticsVoiceAgent, SpeechmaticsMessageEvent } from '@/lib/ai/speechmatics';
 import { cn } from '@/lib/utils';
-import { cleanStepCompleteMarker, detectStepComplete } from '@/lib/sanitize';
+import { cleanAllSignalMarkers, detectStepComplete } from '@/lib/sanitize';
 import { useAuth } from '@/components/auth/AuthProvider';
 import type { ConversationPlan } from '@/types';
 import { ConversationProgressBar } from '@/components/conversation/ConversationProgressBar';
@@ -205,6 +205,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Buffers locaux pour le streaming en cours (pattern OpenAI)
   const [interimUser, setInterimUser] = useState<VoiceMessage | null>(null);
   const [interimAssistant, setInterimAssistant] = useState<VoiceMessage | null>(null);
+  // Pending final user message - shown until confirmed in props.messages to avoid "blanc" gap
+  const [pendingFinalUser, setPendingFinalUser] = useState<VoiceMessage | null>(null);
   const [semanticTelemetry, setSemanticTelemetry] = useState<SemanticTurnTelemetryEvent | null>(null);
   const [showInactivityOverlay, setShowInactivityOverlay] = useState(false);
 
@@ -282,6 +284,22 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const strictModeFirstMountRef = useRef(true);
   // Track steps being completed to prevent duplicate API calls
   const completingStepsRef = useRef<Set<string>>(new Set());
+
+  // ===== AGENT RESPONSE NUDGE MECHANISM =====
+  // Tracks when the last user message was sent (for detecting stuck agent)
+  const lastUserMessageTimestampRef = useRef<number>(0);
+  // Tracks the content of the last user message (for retry)
+  const lastUserMessageContentRef = useRef<string>('');
+  // Tracks whether we're currently waiting for an agent response
+  const awaitingAgentResponseRef = useRef<boolean>(false);
+  // Tracks whether we've already nudged for the current user message (prevent duplicate nudges)
+  const hasNudgedForCurrentMessageRef = useRef<boolean>(false);
+  // Tracks when the last user partial was received (to detect if user is still speaking)
+  const lastUserPartialTimestampRef = useRef<number>(0);
+  // Timeout for agent response nudge check (15 seconds)
+  const AGENT_RESPONSE_TIMEOUT_MS = 15000;
+  // Time window to consider user as "still speaking" after last partial (5 seconds)
+  const USER_SPEAKING_WINDOW_MS = 5000;
 
   // ===== INACTIVITY MONITOR =====
   const inactivityMonitor = useInactivityMonitor({
@@ -397,6 +415,22 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     speakerMappingsRef.current = speakerMappings;
   }, [speakerMappings]);
 
+  // Clear pendingFinalUser once the message appears in props.messages
+  // This prevents the "blanc" gap between partial disappearing and final appearing
+  useEffect(() => {
+    if (!pendingFinalUser) return;
+
+    // Check if the pending message now exists in props.messages
+    const messageConfirmed = messages.some(msg =>
+      msg.messageId === pendingFinalUser.messageId ||
+      (msg.content === pendingFinalUser.content && msg.role === 'user')
+    );
+
+    if (messageConfirmed) {
+      setPendingFinalUser(null);
+    }
+  }, [messages, pendingFinalUser]);
+
   // ===== MISE À JOUR DYNAMIQUE DES PROMPTS =====
   // Fonction réutilisable pour mettre à jour les prompts depuis l'API
   // Utilisée lors du changement de step ET périodiquement pour les variables de temps
@@ -491,6 +525,110 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     console.log('[PremiumVoiceInterface] ⏱️ Periodic time update at', elapsedMinutes.toFixed(1), 'min');
     updatePromptsFromApi(`periodic time update at ${elapsedMinutes.toFixed(1)}min`);
   }, [elapsedMinutes, isTimerPaused, updatePromptsFromApi]);
+
+  // ===== AGENT RESPONSE NUDGE - Detect stuck agent and force response =====
+  // If 15 seconds pass without agent response after a user message, nudge the agent
+  useEffect(() => {
+    // Skip in consultant mode (no AI responses expected)
+    if (consultantMode) {
+      return;
+    }
+
+    // Check every 5 seconds if we need to nudge
+    const checkInterval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastUserMessageTimestampRef.current;
+      const timeSinceLastPartial = now - lastUserPartialTimestampRef.current;
+
+      // Skip if not awaiting response or already nudged
+      if (!awaitingAgentResponseRef.current || hasNudgedForCurrentMessageRef.current) {
+        return;
+      }
+
+      // Skip if not connected
+      if (!isConnected || !agentRef.current) {
+        console.log('[PremiumVoiceInterface] 🔍 Nudge check: skipped (not connected)');
+        return;
+      }
+
+      // Skip if user is currently speaking (received a partial recently)
+      // This uses timestamp instead of checking interimUser content because
+      // partials might stop coming without a final message, leaving stale content
+      if (lastUserPartialTimestampRef.current > 0 && timeSinceLastPartial < USER_SPEAKING_WINDOW_MS) {
+        console.log('[PremiumVoiceInterface] 🔍 Nudge check: user still speaking (partial', Math.round(timeSinceLastPartial / 1000), 's ago)');
+        return;
+      }
+
+      // Log the check status
+      console.log('[PremiumVoiceInterface] 🔍 Nudge check:', {
+        elapsedSinceUserMessage: Math.round(elapsed / 1000) + 's',
+        timeSinceLastPartial: Math.round(timeSinceLastPartial / 1000) + 's',
+        threshold: Math.round(AGENT_RESPONSE_TIMEOUT_MS / 1000) + 's',
+        willNudge: elapsed >= AGENT_RESPONSE_TIMEOUT_MS,
+      });
+
+      // Check if timeout has passed
+      if (elapsed >= AGENT_RESPONSE_TIMEOUT_MS) {
+        console.log('[PremiumVoiceInterface] ⚠️ Agent response timeout - nudging after', Math.round(elapsed / 1000), 'seconds');
+
+        // Mark as nudged to prevent duplicate attempts
+        hasNudgedForCurrentMessageRef.current = true;
+
+        // Call the respond endpoint to force a response
+        const nudgeAgent = async () => {
+          try {
+            const headers: HeadersInit = { 'Content-Type': 'application/json' };
+            if (inviteToken) {
+              headers['x-invite-token'] = inviteToken;
+            }
+
+            console.log('[PremiumVoiceInterface] 🔄 Sending nudge to /respond endpoint with last user message');
+
+            const response = await fetch(`/api/ask/${askKey}/respond`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                content: lastUserMessageContentRef.current,
+                senderType: 'user',
+                metadata: {
+                  voiceGenerated: true,
+                  nudgeRetry: true, // Mark as a nudge retry for debugging
+                },
+              }),
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success && result.data?.aiResponse) {
+                console.log('[PremiumVoiceInterface] ✅ Nudge successful - got AI response');
+
+                // If Speechmatics agent, speak the response via TTS
+                const agent = agentRef.current;
+                if (agent instanceof SpeechmaticsVoiceAgent && agent.isConnected()) {
+                  await agent.speakInitialMessage(result.data.aiResponse);
+                }
+
+                // Clear awaiting state
+                awaitingAgentResponseRef.current = false;
+              } else {
+                console.warn('[PremiumVoiceInterface] ⚠️ Nudge returned no AI response:', result);
+              }
+            } else {
+              console.error('[PremiumVoiceInterface] ❌ Nudge failed:', response.status, await response.text());
+            }
+          } catch (error) {
+            console.error('[PremiumVoiceInterface] ❌ Error nudging agent:', error);
+          }
+        };
+
+        nudgeAgent();
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(checkInterval);
+    };
+  }, [askKey, inviteToken, isConnected, consultantMode]);
 
   // ===== FONCTIONS DE FUSION ET GESTION DES MESSAGES =====
   /**
@@ -942,6 +1080,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           content: baseMessage.content,
           isInterim: true,
         }));
+        // Track when we received this partial (for nudge mechanism)
+        lastUserPartialTimestampRef.current = Date.now();
       }
       return;
     }
@@ -949,6 +1089,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Cas FINAL → flush des buffers locaux
     if (role === 'assistant') {
       setInterimAssistant(null);
+
+      // Agent responded - clear awaiting response state
+      awaitingAgentResponseRef.current = false;
+      hasNudgedForCurrentMessageRef.current = false;
 
       // Detect STEP_COMPLETE in assistant messages and call API to complete the step
       const { hasMarker, stepId: detectedStepId } = detectStepComplete(rawMessage.content);
@@ -1038,16 +1182,48 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         }
       }
     } else {
+      // Clear interim and store as pending final to avoid "blanc" gap
+      // The message will stay visible until it appears in props.messages
       setInterimUser(null);
+      // Generate ID once and reuse for both pendingFinalUser and onMessage
+      // to ensure proper deduplication (fixes visual jump bug)
+      const userFinalMessageId = messageId || `msg-${Date.now()}`;
+      setPendingFinalUser({
+        role: 'user',
+        content: rawMessage.content,
+        timestamp: rawMessage.timestamp || new Date().toISOString(),
+        messageId: userFinalMessageId,
+        isInterim: false,
+        speaker,
+      });
+
+      // Track this user message as awaiting response (only in non-consultant mode)
+      // The agent should respond to this message; if not, we'll nudge after timeout
+      if (!consultantMode && rawMessage.content && rawMessage.content.trim()) {
+        lastUserMessageTimestampRef.current = Date.now();
+        lastUserMessageContentRef.current = rawMessage.content.trim();
+        awaitingAgentResponseRef.current = true;
+        hasNudgedForCurrentMessageRef.current = false;
+        console.log('[PremiumVoiceInterface] 👂 User message awaiting response:', rawMessage.content.substring(0, 50) + '...');
+      }
+
+      // Use the same ID for onMessage to ensure proper deduplication
+      onMessage({
+        ...rawMessage,
+        messageId: userFinalMessageId,
+        isInterim: false,
+      });
+      return; // Exit early for user messages
     }
 
+    // For assistant messages only (user messages exit above)
     const finalMessageId = messageId || `msg-${Date.now()}`;
     onMessage({
       ...rawMessage,
       messageId: finalMessageId,
       isInterim: false,
     });
-  }, [mergeStreamingContent, onMessage, conversationPlan, askKey, inviteToken, updatePromptsFromApi]);
+  }, [mergeStreamingContent, onMessage, conversationPlan, askKey, inviteToken, updatePromptsFromApi, consultantMode]);
 
   /**
    * Handler appelé en cas d'erreur de l'agent vocal
@@ -1634,7 +1810,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Étape 6: Réinitialiser les buffers de streaming
       setInterimUser(null);
       setInterimAssistant(null);
-      
+      setPendingFinalUser(null);
+
       console.log('[PremiumVoiceInterface] ✅ Complete disconnection finished - websocket and microphone are OFF');
     } finally {
       // Toujours réinitialiser le flag de déconnexion, même en cas d'erreur
@@ -1987,6 +2164,22 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Note: interimUser is now displayed in the bottom status area, not in the message list
     // This prevents the "jump" effect when interim messages become final
 
+    // Add pendingFinalUser to avoid "blanc" gap between partial disappearing and final appearing
+    // This shows the final user message immediately while waiting for DB confirmation
+    if (pendingFinalUser) {
+      const pendingId = pendingFinalUser.messageId || `pending-user-${Date.now()}`;
+      // Only add if not already in base messages (from props)
+      if (!seenIds.has(pendingId)) {
+        base.push({
+          ...pendingFinalUser,
+          timestamp: pendingFinalUser.timestamp || new Date().toISOString(),
+          messageId: pendingId,
+          isInterim: false, // Show as final, not streaming
+        });
+        seenIds.add(pendingId);
+      }
+    }
+
     if (interimAssistant) {
       const interimAssistantId = interimAssistant.messageId || `interim-assistant-${Date.now()}`;
       // Only add if not already finalized in base messages
@@ -2006,7 +2199,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       const timeB = new Date(b.timestamp).getTime();
       return timeA - timeB;
     });
-  }, [messages, interimAssistant]);
+  }, [messages, interimAssistant, pendingFinalUser]);
 
   const semanticStatusText = useMemo(() => {
     if (!semanticTelemetry) {
@@ -2042,12 +2235,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const hasNewMessages = displayMessages.length > previousLengthRef.current;
     previousLengthRef.current = displayMessages.length;
 
-    if (hasNewMessages) {
-      // Use instant scroll to avoid visual artifacts during message transitions
-      // The smooth scroll was causing a "lift" effect when combined with layout animations
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-      });
+    if (hasNewMessages && messagesContainerRef.current) {
+      // Use scrollTop directly instead of scrollIntoView to avoid layout recalculations
+      // that can cause visual artifacts during message transitions
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
   }, [displayMessages]);
 
@@ -2571,7 +2762,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                       ) : (
                         <>
                           <AnimatedText
-                            content={cleanStepCompleteMarker(message.content)}
+                            content={cleanAllSignalMarkers(message.content)}
                             isInterim={message.isInterim}
                           />
                           {isStreamingAssistant && (

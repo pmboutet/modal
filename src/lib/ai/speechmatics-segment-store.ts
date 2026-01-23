@@ -122,18 +122,90 @@ export class SegmentStore {
 
   /**
    * Get the full transcript by concatenating all segments in time order
+   * Performs boundary deduplication to prevent repeated phrases at segment joins
    */
   getFullTranscript(): string {
     if (this.segments.size === 0) {
       return '';
     }
 
-    return [...this.segments.values()]
-      .sort((a, b) => a.startTime - b.startTime)
-      .map((s) => s.transcript)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const sortedSegments = [...this.segments.values()]
+      .sort((a, b) => a.startTime - b.startTime);
+
+    if (sortedSegments.length === 1) {
+      return sortedSegments[0].transcript.trim();
+    }
+
+    // Join segments with boundary deduplication
+    let result = sortedSegments[0].transcript.trim();
+
+    for (let i = 1; i < sortedSegments.length; i++) {
+      const currentTranscript = sortedSegments[i].transcript.trim();
+      if (!currentTranscript) continue;
+
+      // Find how many words to skip from the current transcript
+      const wordsToSkip = this.findOverlapWordCount(result, currentTranscript);
+
+      if (wordsToSkip > 0) {
+        // Skip the overlapping words from the current transcript
+        const words = currentTranscript.split(/\s+/);
+        const remainingWords = words.slice(wordsToSkip);
+        if (remainingWords.length > 0) {
+          result += ' ' + remainingWords.join(' ');
+        }
+      } else {
+        result += ' ' + currentTranscript;
+      }
+    }
+
+    return result.replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Find the number of words to skip from `current` that overlap with the end of `previous`
+   * Compares normalized words (lowercase, stripped punctuation) to detect duplicates
+   */
+  private findOverlapWordCount(previous: string, current: string): number {
+    // Normalize and split into words
+    const normalizeWord = (w: string) =>
+      w.toLowerCase().replace(/[.,!?;:'"«»\-–—…()[\]{}]/g, '');
+
+    const prevWords = previous.trim().split(/\s+/).map(normalizeWord);
+    const currWords = current.trim().split(/\s+/).map(normalizeWord);
+
+    // Try to find the longest suffix of previous that matches a prefix of current
+    // Start from longer overlaps to shorter ones
+    const maxOverlapWords = Math.min(prevWords.length, currWords.length, 6);
+
+    for (let numWords = maxOverlapWords; numWords >= 1; numWords--) {
+      const suffix = prevWords.slice(-numWords);
+      const prefix = currWords.slice(0, numWords);
+
+      // Check if they match
+      let matches = true;
+      for (let j = 0; j < numWords; j++) {
+        if (suffix[j] !== prefix[j]) {
+          matches = false;
+          break;
+        }
+      }
+
+      if (matches) {
+        // For single-word overlap, require the word to be "substantial" (>= 4 chars)
+        // This avoids false positives on very common short words
+        // But allows "c'est" (5 chars after stripping apostrophe)
+        if (numWords === 1) {
+          const word = suffix[0];
+          if (word.length < 4) {
+            continue; // Skip single short word matches
+          }
+        }
+
+        return numWords;
+      }
+    }
+
+    return 0;
   }
 
   /**

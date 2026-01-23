@@ -10,7 +10,7 @@ import { executeAgent, fetchAgentBySlug, type AgentExecutionResult } from '@/lib
 import { INSIGHT_TYPES, mapInsightRowToInsight, type InsightRow } from '@/lib/insights';
 import { fetchInsightRowById, fetchInsightsForSession, fetchInsightsForThread, fetchInsightTypeMap, fetchInsightTypesForPrompt } from '@/lib/insightQueries';
 import { detectStepCompletion, completeStep, getConversationPlanWithSteps, getActiveStep, getCurrentStep, ensureConversationPlanExists } from '@/lib/ai/conversation-plan';
-import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
+import { handleSubtopicSignals, cleanAllSignalMarkers } from '@/lib/ai/conversation-signals';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   buildParticipantDisplayName,
@@ -954,6 +954,10 @@ async function persistInsights(
 // Average latency is ~5s, so 30s gives plenty of margin
 const JOB_TIMEOUT_MS = 30 * 1000;
 
+// Cooldown period after a job completes to prevent rapid successive detections
+// If multiple messages arrive in succession, we only want to detect once
+const JOB_COOLDOWN_MS = 10 * 1000;
+
 async function findActiveInsightJob(
   supabase: ReturnType<typeof getAdminSupabaseClient>,
   askSessionId: string,
@@ -989,6 +993,41 @@ async function findActiveInsightJob(
   }
 
   return data ?? null;
+}
+
+/**
+ * Check if a job was recently completed for this session.
+ * This prevents rapid successive detections when multiple messages arrive quickly.
+ * Returns true if we should skip creating a new job (cooldown active).
+ */
+async function isInsightJobInCooldown(
+  supabase: ReturnType<typeof getAdminSupabaseClient>,
+  askSessionId: string,
+): Promise<boolean> {
+  const cooldownThreshold = new Date(Date.now() - JOB_COOLDOWN_MS).toISOString();
+
+  const { data, error } = await supabase
+    .from('ai_insight_jobs')
+    .select('id, finished_at')
+    .eq('ask_session_id', askSessionId)
+    .eq('status', 'completed')
+    .gte('finished_at', cooldownThreshold)
+    .order('finished_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    // Don't fail if we can't check cooldown, just allow the job
+    console.warn('[Insight Job] Error checking cooldown:', error);
+    return false;
+  }
+
+  if (data) {
+    console.log(`[Insight Job] Cooldown active - job ${data.id} completed recently`);
+    return true;
+  }
+
+  return false;
 }
 
 async function createInsightJob(
@@ -1151,6 +1190,13 @@ async function triggerInsightDetection(
 ): Promise<Insight[]> {
   const activeJob = await findActiveInsightJob(supabase, options.askSessionId);
   if (activeJob) {
+    return existingInsights.map(mapInsightRowToInsight);
+  }
+
+  // Check if a job was recently completed (cooldown period)
+  // This prevents rapid successive detections when multiple messages arrive quickly
+  const inCooldown = await isInsightJobInCooldown(supabase, options.askSessionId);
+  if (inCooldown) {
     return existingInsights.map(mapInsightRowToInsight);
   }
 
@@ -1687,7 +1733,22 @@ export async function POST(
           }
         );
       } catch (planError) {
-        console.error('[respond] Failed to ensure conversation plan:', planError);
+        // Enhanced error logging to capture full error details
+        let errorMsg: string;
+        if (planError instanceof Error) {
+          errorMsg = planError.message;
+        } else if (planError && typeof planError === 'object') {
+          const errObj = planError as Record<string, unknown>;
+          errorMsg = JSON.stringify({
+            message: errObj.message,
+            code: errObj.code,
+            details: errObj.details,
+            hint: errObj.hint,
+          });
+        } else {
+          errorMsg = String(planError);
+        }
+        console.error('[respond] Failed to ensure conversation plan:', errorMsg);
         // Fallback to just retrieving
         conversationPlan = await getConversationPlanWithSteps(supabase, conversationThread.id);
       }
@@ -1847,13 +1908,18 @@ export async function POST(
           }
         }
 
+        // Clean signal markers from content before storing
+        // Keep raw content for signal detection but store cleaned content
+        const rawVoiceContent = messageContent;
+        const cleanedVoiceContent = cleanAllSignalMarkers(messageContent);
+
         // Insert AI message via RPC wrapper to bypass RLS
         // Pass voicePlanStepId to link message to current step
         const inserted = await insertAiMessage(
           supabase,
           askRow.id,
           conversationThread?.id ?? null,
-          messageContent,
+          cleanedVoiceContent,
           'Agent',
           voicePlanStepId
         );
@@ -1873,7 +1939,8 @@ export async function POST(
           };
           messages.push(message);
           detectionMessageId = message.id;
-          latestAiResponse = message.content;
+          // Use raw content for signal detection, cleaned content is already stored
+          latestAiResponse = rawVoiceContent;
 
           // Check for step completion markers in voice messages (same logic as text mode)
           console.log('[respond] 🎤 Voice message STEP_COMPLETE check:', {
@@ -1990,7 +2057,9 @@ export async function POST(
         });
 
         if (typeof aiResult.content === 'string' && aiResult.content.trim().length > 0) {
+        // Keep raw content for signal detection, store cleaned content
         latestAiResponse = aiResult.content.trim();
+        const cleanedTextContent = cleanAllSignalMarkers(latestAiResponse);
         const aiMetadata = { senderName: 'Agent' } satisfies Record<string, unknown>;
 
         // Trouver le dernier message utilisateur pour le lier comme parent
@@ -2016,11 +2085,12 @@ export async function POST(
 
         // Insert AI message via RPC wrapper to bypass RLS
         // Pass planStepId to link message to current step
+        // Store cleaned content (without signal markers)
         const inserted = await insertAiMessage(
           supabase,
           askRow.id,
           conversationThread?.id ?? null,
-          latestAiResponse,
+          cleanedTextContent,
           'Agent',
           planStepId
         );

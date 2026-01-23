@@ -2,14 +2,16 @@
 
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lightbulb, Filter, Link2, MessageSquareQuote, Pencil, Check, X, Loader2 } from "lucide-react";
+import { Lightbulb, Filter, Link2, MessageSquareQuote, Pencil, Check, X, Loader2, Tags, CheckCircle2, Circle, XCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { InsightPanelProps, Insight, ApiResponse } from "@/types";
+import { InsightPanelProps, Insight, ApiResponse, DiscoveredSubtopic, ConversationPlanStepWithSubtopics } from "@/types";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn, formatRelativeDate, getInsightTypeLabel } from "@/lib/utils";
+
+type PanelTab = 'insights' | 'topics';
 
 const insightMarkdownComponents: Components = {
   p: ({ children }) => (
@@ -298,8 +300,150 @@ function InsightCard({
   );
 }
 
-export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsightUpdate, isDetectingInsights = false, isConsultantMode = false, isSpokesperson = false }: InsightPanelProps) {
+/**
+ * Subtopic item with status indicator
+ */
+function SubtopicItem({ subtopic, stepNumber, stepTitle }: {
+  subtopic: DiscoveredSubtopic;
+  stepNumber: number;
+  stepTitle: string;
+}) {
+  const statusIcon = subtopic.status === 'explored'
+    ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+    : subtopic.status === 'skipped'
+    ? <XCircle className="h-3.5 w-3.5 text-slate-400" />
+    : <Circle className="h-3.5 w-3.5 text-amber-500" />;
+
+  const priorityBadge = subtopic.priority === 'high'
+    ? "bg-red-100 text-red-700 border-red-200"
+    : subtopic.priority === 'low'
+    ? "bg-slate-100 text-slate-600 border-slate-200"
+    : "bg-amber-100 text-amber-700 border-amber-200";
+
+  const statusClass = subtopic.status === 'skipped' ? "opacity-60 line-through" : "";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn("flex items-start gap-2 px-3 py-2 rounded-lg bg-white/80 border border-slate-200", statusClass)}
+    >
+      <div className="mt-0.5 shrink-0">{statusIcon}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-slate-800 leading-relaxed">{subtopic.label}</p>
+        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+          <span className={cn("inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium border", priorityBadge)}>
+            {subtopic.priority === 'high' ? 'Haute' : subtopic.priority === 'low' ? 'Basse' : 'Moyenne'}
+          </span>
+          <span className="text-[9px] text-slate-500">
+            Étape {stepNumber}
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/**
+ * Topics tab content - displays discovered subtopics grouped by step
+ */
+function TopicsTab({ steps }: { steps?: ConversationPlanStepWithSubtopics[] }) {
+  // Extract all subtopics with their step context
+  const subtopicsByStep = useMemo(() => {
+    if (!steps || steps.length === 0) return [];
+
+    return steps
+      .map((step, index) => ({
+        stepNumber: index + 1,
+        stepTitle: step.title,
+        stepStatus: step.status,
+        subtopics: step.discovered_subtopics ?? [],
+      }))
+      .filter(s => s.subtopics.length > 0);
+  }, [steps]);
+
+  // Count stats
+  const stats = useMemo(() => {
+    const all = subtopicsByStep.flatMap(s => s.subtopics);
+    return {
+      total: all.length,
+      pending: all.filter(st => st.status === 'pending').length,
+      explored: all.filter(st => st.status === 'explored').length,
+      skipped: all.filter(st => st.status === 'skipped').length,
+    };
+  }, [subtopicsByStep]);
+
+  if (subtopicsByStep.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white/70 py-6 text-center">
+        <Tags className="h-6 w-6 text-slate-400" />
+        <p className="text-xs text-slate-500">Aucun topic découvert pour le moment.</p>
+        <p className="text-[10px] text-slate-400">Les topics apparaîtront au fil de la conversation.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Stats summary */}
+      <div className="flex flex-wrap gap-2 text-[10px]">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+          Total: {stats.total}
+        </span>
+        {stats.pending > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+            <Circle className="h-2.5 w-2.5" /> En attente: {stats.pending}
+          </span>
+        )}
+        {stats.explored > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+            <CheckCircle2 className="h-2.5 w-2.5" /> Explorés: {stats.explored}
+          </span>
+        )}
+      </div>
+
+      {/* Subtopics grouped by step */}
+      {subtopicsByStep.map(({ stepNumber, stepTitle, subtopics }) => (
+        <div key={stepNumber} className="space-y-1.5">
+          <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-wide">
+            Étape {stepNumber}: {stepTitle}
+          </p>
+          <div className="space-y-1.5">
+            {subtopics.map((subtopic) => (
+              <SubtopicItem
+                key={subtopic.id}
+                subtopic={subtopic}
+                stepNumber={stepNumber}
+                stepTitle={stepTitle}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function InsightPanel({
+  insights,
+  askKey,
+  onRequestChallengeLink,
+  onInsightUpdate,
+  isDetectingInsights = false,
+  isConsultantMode = false,
+  isSpokesperson = false,
+  conversationPlan,
+}: InsightPanelProps) {
+  const [activeTab, setActiveTab] = useState<PanelTab>('insights');
   const [activeFilter, setActiveFilter] = useState<InsightGroup["value"]>("all");
+
+  // Count topics for tab badge
+  const topicsCount = useMemo(() => {
+    if (!conversationPlan?.steps) return 0;
+    return conversationPlan.steps.reduce((count, step) => {
+      return count + (step.discovered_subtopics?.length ?? 0);
+    }, 0);
+  }, [conversationPlan]);
 
   const filteredInsights = useMemo(() => {
     if (activeFilter === "all") {
@@ -310,83 +454,133 @@ export function InsightPanel({ insights, askKey, onRequestChallengeLink, onInsig
 
   return (
     <Card className="h-full light-aurora-card flex flex-col overflow-hidden border-0">
-      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2 pt-3">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base text-slate-800">
-            <MessageSquareQuote className="h-4 w-4 text-teal-600" />
-            Insights collectés
-          </CardTitle>
-          <p className="text-xs text-slate-500">
-            {filteredInsights.length} insight(s) pour la session {askKey}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" className="flex items-center gap-2 h-7 text-xs px-2 border-slate-200 text-slate-600 hover:bg-slate-50">
-          <Filter className="h-3 w-3" />
-          Filtrer
-        </Button>
-      </CardHeader>
-      <CardContent className="flex-1 flex flex-col overflow-hidden pt-2">
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {INSIGHT_GROUPS.map((group) => (
-            <button
-              key={group.value}
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-                activeFilter === group.value
-                  ? "border-teal-500 bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-sm"
-                  : "border-slate-200 bg-white/80 text-slate-600 hover:border-teal-400 hover:text-teal-700"
-              )}
-              onClick={() => setActiveFilter(group.value)}
-            >
-              {group.label}
-            </button>
-          ))}
+      <CardHeader className="flex flex-col gap-2 pb-2 pt-3">
+        {/* Tab navigation */}
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveTab('insights')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              activeTab === 'insights'
+                ? "bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-sm"
+                : "bg-white/80 text-slate-600 hover:bg-slate-100 border border-slate-200"
+            )}
+          >
+            <MessageSquareQuote className="h-3.5 w-3.5" />
+            Insights
+            {insights.length > 0 && (
+              <span className={cn(
+                "ml-1 px-1.5 py-0.5 rounded-full text-[10px]",
+                activeTab === 'insights' ? "bg-white/30" : "bg-teal-100 text-teal-700"
+              )}>
+                {insights.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('topics')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              activeTab === 'topics'
+                ? "bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-sm"
+                : "bg-white/80 text-slate-600 hover:bg-slate-100 border border-slate-200"
+            )}
+          >
+            <Tags className="h-3.5 w-3.5" />
+            Topics
+            {topicsCount > 0 && (
+              <span className={cn(
+                "ml-1 px-1.5 py-0.5 rounded-full text-[10px]",
+                activeTab === 'topics' ? "bg-white/30" : "bg-amber-100 text-amber-700"
+              )}>
+                {topicsCount}
+              </span>
+            )}
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-          <AnimatePresence initial={false}>
-            {filteredInsights.length === 0 ? (
-              <motion.div
-                key="empty"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex h-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white/70 py-6 text-center"
-              >
-                <Lightbulb className="h-6 w-6 text-slate-400" />
-                <p className="text-xs text-slate-500">Aucun insight à afficher pour ce filtre.</p>
-              </motion.div>
-            ) : (
-              filteredInsights.map((insight) => (
-                <InsightCard key={insight.id} insight={insight} onLink={onRequestChallengeLink} onUpdate={onInsightUpdate} isConsultantMode={isConsultantMode} isSpokesperson={isSpokesperson} />
-              ))
-            )}
-          </AnimatePresence>
-          
-          {/* Indicateur de collecte d'insights en cours */}
-          <AnimatePresence>
-            {isDetectingInsights && (
-              <motion.div
-                key="insight-detection-indicator"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-                className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-teal-700 bg-teal-50 rounded-lg border border-teal-200"
-                aria-live="polite"
-              >
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="flex h-2.5 w-2.5 items-center justify-center"
+        {/* Subtitle based on active tab */}
+        <p className="text-xs text-slate-500">
+          {activeTab === 'insights'
+            ? `${filteredInsights.length} insight(s) pour la session ${askKey}`
+            : `${topicsCount} topic(s) découvert(s)`
+          }
+        </p>
+      </CardHeader>
+
+      <CardContent className="flex-1 flex flex-col overflow-hidden pt-2">
+        {activeTab === 'insights' ? (
+          <>
+            {/* Insight filters */}
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {INSIGHT_GROUPS.map((group) => (
+                <button
+                  key={group.value}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                    activeFilter === group.value
+                      ? "border-teal-500 bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-sm"
+                      : "border-slate-200 bg-white/80 text-slate-600 hover:border-teal-400 hover:text-teal-700"
+                  )}
+                  onClick={() => setActiveFilter(group.value)}
                 >
-                  <Lightbulb className="h-2.5 w-2.5 text-teal-600" />
-                </motion.div>
-                <span className="italic">Collecte d'insights en cours...</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                  {group.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Insights list */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              <AnimatePresence initial={false}>
+                {filteredInsights.length === 0 ? (
+                  <motion.div
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="flex h-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white/70 py-6 text-center"
+                  >
+                    <Lightbulb className="h-6 w-6 text-slate-400" />
+                    <p className="text-xs text-slate-500">Aucun insight à afficher pour ce filtre.</p>
+                  </motion.div>
+                ) : (
+                  filteredInsights.map((insight) => (
+                    <InsightCard key={insight.id} insight={insight} onLink={onRequestChallengeLink} onUpdate={onInsightUpdate} isConsultantMode={isConsultantMode} isSpokesperson={isSpokesperson} />
+                  ))
+                )}
+              </AnimatePresence>
+
+              {/* Indicateur de collecte d'insights en cours */}
+              <AnimatePresence>
+                {isDetectingInsights && (
+                  <motion.div
+                    key="insight-detection-indicator"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-teal-700 bg-teal-50 rounded-lg border border-teal-200"
+                    aria-live="polite"
+                  >
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="flex h-2.5 w-2.5 items-center justify-center"
+                    >
+                      <Lightbulb className="h-2.5 w-2.5 text-teal-600" />
+                    </motion.div>
+                    <span className="italic">Collecte d'insights en cours...</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </>
+        ) : (
+          /* Topics tab */
+          <div className="flex-1 overflow-y-auto pr-1">
+            <TopicsTab steps={conversationPlan?.steps} />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

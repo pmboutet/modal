@@ -1979,13 +1979,8 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         return { href: null, canAnswer: false };
       }
 
-      // Token is required for participant access
-      const token = participant.inviteToken?.trim();
-      if (!token) {
-        return { href: null, canAnswer: false };
-      }
-
-      return { href: `/?token=${encodeURIComponent(token)}`, canAnswer: true };
+      // Use ask key for public entry flow
+      return { href: `/?ask=${encodeURIComponent(ask.askKey)}`, canAnswer: true };
     },
     [currentProfileId],
   );

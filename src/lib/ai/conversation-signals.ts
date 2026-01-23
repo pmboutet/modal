@@ -552,22 +552,10 @@ export async function handleConversationSignals(
 // SIGNAL CLEANING (for display)
 // ============================================================================
 
-/**
- * Remove all conversation signals from content for display
- * Extends the existing cleanStepCompleteMarker to handle all signal types
- */
-export function cleanAllSignalMarkers(content: string): string {
-  return content
-    // Clean STEP_COMPLETE (existing pattern)
-    .replace(/(\*{1,2}|_{1,2})?(STEP_COMPLETE:?\s*)(\w+)?(\*{1,2}|_{1,2})?/gi, '')
-    // Clean TOPICS_DISCOVERED (including JSON array)
-    .replace(/(\*{1,2}|_{1,2})?(TOPICS_DISCOVERED:\s*\[[\s\S]*?\])(\*{1,2}|_{1,2})?/gi, '')
-    // Clean TOPIC_EXPLORED
-    .replace(/(\*{1,2}|_{1,2})?(TOPIC_EXPLORED:\s*\w+)(\*{1,2}|_{1,2})?/gi, '')
-    // Clean TOPIC_SKIPPED
-    .replace(/(\*{1,2}|_{1,2})?(TOPIC_SKIPPED:\s*\w+)(\*{1,2}|_{1,2})?/gi, '')
-    .trim();
-}
+// Re-export cleanAllSignalMarkers from sanitize.ts to maintain backward compatibility
+// for server-side imports. The function is defined in sanitize.ts to be usable
+// both client-side (ChatComponent, PremiumVoiceInterface) and server-side.
+export { cleanAllSignalMarkers } from '@/lib/sanitize';
 
 // ============================================================================
 // FORMATTING FOR PROMPTS

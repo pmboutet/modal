@@ -5,12 +5,19 @@ import { getAgentConfigForAsk } from '@/lib/ai/agent-config';
 import { getAskSessionByKey } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { parseErrorMessage } from '@/lib/utils';
-import type { ApiResponse } from '@/types';
+import type { ApiResponse, Insight } from '@/types';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   fetchConversationContext,
   type AskSessionRow,
 } from '@/lib/conversation-context';
+import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
+
+interface InsightDetectionResponse {
+  success: boolean;
+  data?: { insights?: Insight[] };
+  error?: string;
+}
 
 export async function POST(
   request: NextRequest,
@@ -130,6 +137,68 @@ export async function POST(
           role: 'agent',
         },
       });
+
+      // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+      // This must be done BEFORE insight detection to ensure subtopics are tracked
+      if (context.conversationThread?.id) {
+        try {
+          const subtopicResult = await handleSubtopicSignals(
+            adminClient,
+            context.conversationThread.id,
+            content
+          );
+          if (subtopicResult) {
+            console.log('[voice-agent/log] 🎤 Subtopic signals handled:', subtopicResult);
+          }
+        } catch (subtopicError) {
+          console.error('[voice-agent/log] ⚠️ Failed to handle subtopic signals:', subtopicError);
+          // Don't fail the request if subtopic handling fails
+        }
+      }
+
+      // Trigger insight detection after agent response (same as stream route)
+      // This ensures voice mode captures insights like text mode does
+      try {
+        const respondUrl = new URL(request.url);
+        respondUrl.pathname = `/api/ask/${encodeURIComponent(key)}/respond`;
+        respondUrl.search = '';
+
+        const detectionHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          ...(request.headers.get('cookie') ? { Cookie: request.headers.get('cookie')! } : {}),
+        };
+
+        // Forward invite token if present (for authentication)
+        const inviteToken = request.headers.get('X-Invite-Token');
+        if (inviteToken) {
+          detectionHeaders['X-Invite-Token'] = inviteToken;
+        }
+
+        const detectionResponse = await fetch(respondUrl.toString(), {
+          method: 'POST',
+          headers: detectionHeaders,
+          body: JSON.stringify({
+            detectInsights: true,
+            askSessionId: askRow.id,
+          }),
+          cache: 'no-store',
+        });
+
+        if (detectionResponse.ok) {
+          const detectionJson = (await detectionResponse.json()) as InsightDetectionResponse;
+          if (detectionJson.success) {
+            const insights = detectionJson.data?.insights ?? [];
+            console.log(`[voice-agent/log] Insight detection completed: ${insights.length} insights found`);
+          } else if (detectionJson.error) {
+            console.warn('[voice-agent/log] Insight detection responded with error:', detectionJson.error);
+          }
+        } else {
+          console.error('[voice-agent/log] Insight detection request failed:', detectionResponse.status, detectionResponse.statusText);
+        }
+      } catch (insightError) {
+        // Don't fail the request if insight detection fails - log and continue
+        console.error('[voice-agent/log] Unable to detect insights:', insightError);
+      }
 
       return NextResponse.json<ApiResponse>({
         success: true,

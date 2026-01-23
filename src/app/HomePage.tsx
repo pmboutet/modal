@@ -397,6 +397,7 @@ function MobileLayout({
                 onInsightUpdate={onInsightUpdate}
                 isConsultantMode={isConsultantMode}
                 isSpokesperson={isSpokesperson}
+                conversationPlan={sessionData.conversationPlan}
               />
             </div>
           </motion.div>
@@ -470,8 +471,17 @@ export default function HomePage() {
   const insightDetectionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasPostedMessageSinceRefreshRef = useRef(false);
   const loadingTokenRef = useRef<string | null>(null); // Track which token is currently being loaded to prevent duplicates
+  const previousTokenRef = useRef<string | null>(null); // Track the previous token to detect token changes
   const [awaitingAiResponse, setAwaitingAiResponse] = useState(false);
   const activeAiResponsesRef = useRef(0);
+  // Debounce timer for AI response - resets each time user sends message or types
+  const aiResponseDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Track if AI streaming is currently in progress (prevents duplicate streams)
+  const isAiStreamingRef = useRef(false);
+  // Track the last content used for AI response scheduling (for reschedule after typing stops)
+  const lastAiResponseContentRef = useRef<string>('');
+  // Track pending message sends for optional UI indicator
+  const [pendingSendCount, setPendingSendCount] = useState(0);
   const [isDetectingInsights, setIsDetectingInsights] = useState(false);
   const participantFromUrl = searchParams.get('participant') || searchParams.get('participantName');
   const derivedParticipantName = participantFromUrl?.trim() ? participantFromUrl.trim() : null;
@@ -521,22 +531,42 @@ export default function HomePage() {
 
   // Handle scroll events from ChatComponent to hide/show header and toggle compact mode
   const handleMobileChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
+    // Ignore scroll events during header transition to prevent feedback loop
+    // When header changes size, it shifts content which triggers a scroll event
+    if (headerTransitioningRef.current) {
+      return;
+    }
+
     // Ignore tiny scroll changes (less than 2px) to avoid jitter
     if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
       return;
     }
 
+    // Helper to change header compact state with transition protection
+    const setHeaderCompactWithTransition = (compact: boolean) => {
+      setIsHeaderCompact(prev => {
+        if (prev !== compact) {
+          // Mark as transitioning and clear after animation completes
+          headerTransitioningRef.current = true;
+          setTimeout(() => {
+            headerTransitioningRef.current = false;
+          }, 250); // Match the CSS transition duration (200ms) + buffer
+        }
+        return compact;
+      });
+    };
+
     // Initial load: compact header if already scrolled down
     if (scrollDelta === 0 && scrollTop > 50) {
       setIsMobileHeaderHidden(true);
-      setIsHeaderCompact(true);
+      setHeaderCompactWithTransition(true);
       return;
     }
 
     if (scrollDelta > 0) {
       // Scrolling down - hide mobile header and compact desktop header immediately
       setIsMobileHeaderHidden(true);
-      setIsHeaderCompact(true);
+      setHeaderCompactWithTransition(true);
       mobileScrollUpAccumulator.current = 0;
       scrollUpAccumulator.current = 0;
     } else if (scrollDelta < 0) {
@@ -550,14 +580,14 @@ export default function HomePage() {
       }
       // Expand header after scrolling up
       if (scrollUpAccumulator.current >= SCROLL_UP_THRESHOLD) {
-        setIsHeaderCompact(false);
+        setHeaderCompactWithTransition(false);
       }
     }
 
     // If at the very top, always show full header
     if (scrollTop <= 10) {
       setIsMobileHeaderHidden(false);
-      setIsHeaderCompact(false);
+      setHeaderCompactWithTransition(false);
       mobileScrollUpAccumulator.current = 0;
       scrollUpAccumulator.current = 0;
     }
@@ -630,6 +660,7 @@ export default function HomePage() {
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const mobileScrollUpAccumulator = useRef(0);
   const scrollUpAccumulator = useRef(0);
+  const headerTransitioningRef = useRef(false); // Prevent scroll feedback loop during header size change
   const MOBILE_SCROLL_UP_THRESHOLD = 100;
   const SCROLL_UP_THRESHOLD = 80;
   // Desktop compact mode states (tabbed layout when content is minimal)
@@ -783,6 +814,14 @@ export default function HomePage() {
       clearTimeout(insightDetectionTimerRef.current);
       insightDetectionTimerRef.current = null;
       setIsDetectingInsights(false);
+    }
+  }, []);
+
+  // Cancel any pending debounced AI response
+  const cancelAiResponseDebounce = useCallback(() => {
+    if (aiResponseDebounceTimerRef.current) {
+      clearTimeout(aiResponseDebounceTimerRef.current);
+      aiResponseDebounceTimerRef.current = null;
     }
   }, []);
 
@@ -971,8 +1010,9 @@ export default function HomePage() {
     return () => {
       cancelResponseTimer();
       cancelInsightDetectionTimer();
+      cancelAiResponseDebounce();
     };
-  }, [cancelResponseTimer, cancelInsightDetectionTimer]);
+  }, [cancelResponseTimer, cancelInsightDetectionTimer, cancelAiResponseDebounce]);
 
   useEffect(() => {
     setIsDetailsCollapsed(false);
@@ -1069,20 +1109,70 @@ export default function HomePage() {
         console.log('[HomePage] Already loading token, skipping duplicate request');
         return;
       }
-      loadingTokenRef.current = token;
 
-      setSessionData(prev => ({
-        ...prev,
+      // Detect if this is a NEW token (different from previous session)
+      const isTokenChange = previousTokenRef.current !== null && previousTokenRef.current !== token;
+      if (isTokenChange) {
+        console.log('[HomePage] Token changed from', previousTokenRef.current, 'to', token, '- resetting all state');
+      }
+
+      loadingTokenRef.current = token;
+      previousTokenRef.current = token;
+
+      // FULL RESET: When loading a new token, reset ALL state to prevent data from previous session
+      // This is critical when user opens a different token in the same browser tab
+      setSessionData({
         askKey: '', // Will be set after loading
         inviteToken: token, // Store the invite token for authentication
         ask: null,
-        messages: [],
+        messages: [], // Complete reset - no merging with previous session
         insights: [],
         challenges: [],
+        conversationPlan: null,
+        conversationThreadId: null,
         isLoading: true,
+        isInitializing: false,
         error: null
-      }));
+      });
+
+      // Reset all refs that track session-specific state
       hasPostedMessageSinceRefreshRef.current = false;
+      isAiStreamingRef.current = false;
+      lastAiResponseContentRef.current = '';
+      activeAiResponsesRef.current = 0;
+
+      // Reset UI states that are session-specific
+      setAwaitingAiResponse(false);
+      setIsDetectingInsights(false);
+      setIsVoiceModeActive(false);
+      setSelectedInputMode(null);
+      setPendingModeSelection(null);
+      setIsVoiceConfigLoading(false);
+      setCurrentParticipantName(null);
+      setCurrentUserId(null);
+      setIsCurrentParticipantSpokesperson(false);
+      setIsDetailsCollapsed(false);
+      setVoiceModeConfig({
+        systemPrompt: null,
+        userPrompt: null,
+        promptVariables: null,
+        modelConfig: null,
+      });
+
+      // Clear any pending timers
+      if (responseTimerRef.current) {
+        clearTimeout(responseTimerRef.current);
+        responseTimerRef.current = null;
+      }
+      if (insightDetectionTimerRef.current) {
+        clearTimeout(insightDetectionTimerRef.current);
+        insightDetectionTimerRef.current = null;
+      }
+      if (aiResponseDebounceTimerRef.current) {
+        clearTimeout(aiResponseDebounceTimerRef.current);
+        aiResponseDebounceTimerRef.current = null;
+      }
+
       // Load session data using token endpoint
       loadSessionDataByToken(token);
       return;
@@ -2046,13 +2136,69 @@ export default function HomePage() {
     loadSessionData,
   ]);
 
+  // Schedule a debounced AI response - resets timer each time it's called
+  // Called when user sends a message OR stops typing
+  const scheduleAiResponse = useCallback((latestContent: string) => {
+    // Save content for potential reschedule (e.g., when typing stops)
+    lastAiResponseContentRef.current = latestContent;
+
+    // Cancel any existing timer first (debounce behavior)
+    cancelAiResponseDebounce();
+
+    // Don't schedule if already streaming (prevents duplicate responses)
+    if (isAiStreamingRef.current) {
+      return;
+    }
+
+    // Schedule AI response after 2 seconds of inactivity
+    aiResponseDebounceTimerRef.current = setTimeout(async () => {
+      aiResponseDebounceTimerRef.current = null;
+
+      // Double-check we're not already streaming
+      if (isAiStreamingRef.current) {
+        return;
+      }
+
+      isAiStreamingRef.current = true;
+      lastAiResponseContentRef.current = ''; // Clear since we're now responding
+      startAwaitingAiResponse();
+
+      try {
+        const insightsCaptured = await handleStreamingResponse(latestContent);
+        if (!insightsCaptured) {
+          scheduleInsightDetection();
+        }
+      } finally {
+        isAiStreamingRef.current = false;
+      }
+    }, 2000);
+  }, [cancelAiResponseDebounce, startAwaitingAiResponse, handleStreamingResponse, scheduleInsightDetection]);
+
+  // Handle user typing - resets AI response timer to wait for user to finish
+  const handleUserTyping = useCallback((isTyping: boolean) => {
+    // Always notify session timer for activity tracking
+    sessionTimer.notifyUserTyping(isTyping);
+
+    // Only affect AI response timer if there's a pending response scheduled
+    if (lastAiResponseContentRef.current) {
+      if (isTyping) {
+        // User is typing - cancel pending AI response (wait for them to finish)
+        cancelAiResponseDebounce();
+      } else {
+        // User stopped typing - reschedule the AI response
+        scheduleAiResponse(lastAiResponseContentRef.current);
+      }
+    }
+  }, [sessionTimer, cancelAiResponseDebounce, scheduleAiResponse]);
+
   // Handle sending messages to database and schedule AI response
   const handleSendMessage = useCallback(async (
     content: string,
     type: Message['type'] = 'text',
     metadata?: Message['metadata']
   ) => {
-    if (!sessionData.askKey || sessionData.isLoading) {
+    // Only check for required data - no longer block on isLoading to allow rapid messages
+    if (!sessionData.askKey) {
       return;
     }
 
@@ -2084,10 +2230,12 @@ export default function HomePage() {
       metadata: optimisticMetadata,
     };
 
+    // Track pending send for optional UI indicator
+    setPendingSendCount(prev => prev + 1);
+
     setSessionData(prev => ({
       ...prev,
       messages: [...prev.messages, optimisticMessage],
-      isLoading: true,
     }));
 
     // Sync timer to server BEFORE sending message
@@ -2135,12 +2283,6 @@ export default function HomePage() {
               ? { ...data.data!.message, clientId: message.clientId ?? optimisticId }
               : message
           ),
-          isLoading: false,
-        }));
-      } else {
-        setSessionData(prev => ({
-          ...prev,
-          isLoading: false,
         }));
       }
 
@@ -2158,15 +2300,8 @@ export default function HomePage() {
         return;
       }
 
-      startAwaitingAiResponse();
-      // Spec: 2 secondes de délai après POST message avant de déclencher la réponse AI
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const insightsCapturedDuringStream = await handleStreamingResponse(content);
-
-      // Programmer la détection d'insights seulement si aucune donnée n'a été envoyée pendant le streaming
-      if (!insightsCapturedDuringStream) {
-        scheduleInsightDetection();
-      }
+      // Use debounced AI response - timer resets if user sends another message or types
+      scheduleAiResponse(content);
 
     } catch (error) {
       console.error('[handleSendMessage] Error sending message:', error);
@@ -2177,28 +2312,26 @@ export default function HomePage() {
           extra: { askKey: sessionData.askKey, content },
         });
       }
-      stopAwaitingAiResponse();
+      // Remove the failed optimistic message but don't affect other messages
       setSessionData(prev => ({
         ...prev,
-        isLoading: false,
         messages: prev.messages.filter(message => message.clientId !== optimisticId),
         error: parseErrorMessage(error)
       }));
+    } finally {
+      // Decrement pending send count regardless of success or failure
+      setPendingSendCount(prev => Math.max(0, prev - 1));
     }
   }, [
     sessionData.askKey,
-    sessionData.isLoading,
     sessionData.ask?.askSessionId,
+    sessionData.ask?.conversationMode,
     sessionData.inviteToken,
-    awaitingAiResponse,
-    isDetectingInsights,
     isTestMode,
     currentParticipantName,
     markMessagePosted,
     stopAwaitingAiResponse,
-    startAwaitingAiResponse,
-    handleStreamingResponse,
-    scheduleInsightDetection,
+    scheduleAiResponse,
   ]);
 
   // Handle editing a message (for correcting transcription errors)
@@ -2468,7 +2601,7 @@ export default function HomePage() {
                 >
                   <p className="text-sm font-medium mb-2 text-indigo-400">Expected URL format:</p>
                   <code className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-300 block">
-                    https://your-domain.com/?token=your-invite-token
+                    https://your-domain.com/?ask=your-ask-key
                   </code>
                   <p className="text-xs text-slate-400 mt-2 text-center">
                     Use the link provided in your invitation email.
@@ -2902,7 +3035,7 @@ export default function HomePage() {
           isSessionTimerLoading={sessionTimer.isLoading}
           onToggleTimerPause={handleToggleTimerPause}
           onResetTimer={sessionTimer.reset}
-          onUserTyping={sessionTimer.notifyUserTyping}
+          onUserTyping={handleUserTyping}
           isConsultantMode={isConsultantMode}
           isSpokesperson={isSpokesperson}
           consultantQuestions={consultantAnalysis.questions}
@@ -2944,7 +3077,7 @@ export default function HomePage() {
                   onSendMessage={handleSendMessage}
                   isLoading={sessionData.isLoading}
                   isInitializing={sessionData.isInitializing}
-                  onHumanTyping={sessionTimer.notifyUserTyping}
+                  onHumanTyping={handleUserTyping}
                   currentParticipantName={currentParticipantName}
                   currentUserId={currentUserId}
                   isMultiUser={Boolean(sessionData.ask && sessionData.ask.participants.length > 1)}
@@ -3144,6 +3277,7 @@ export default function HomePage() {
                             onInsightUpdate={handleInsightUpdate}
                             isConsultantMode={isConsultantMode}
                             isSpokesperson={isSpokesperson}
+                            conversationPlan={sessionData.conversationPlan}
                           />
                         </motion.div>
                       )}
@@ -3297,6 +3431,7 @@ export default function HomePage() {
                       onInsightUpdate={handleInsightUpdate}
                       isConsultantMode={isConsultantMode}
                       isSpokesperson={isSpokesperson}
+                      conversationPlan={sessionData.conversationPlan}
                     />
                   </div>
                 </>

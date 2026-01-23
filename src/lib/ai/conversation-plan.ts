@@ -141,7 +141,25 @@ export async function generateConversationPlan(
 
     return planData;
   } catch (error) {
-    console.error('Error generating conversation plan:', error instanceof Error ? error.message : String(error));
+    // Enhanced error logging to capture full error details for debugging
+    let errorDetails: string;
+    if (error instanceof Error) {
+      errorDetails = error.message;
+    } else if (error && typeof error === 'object') {
+      // Supabase errors and other API errors are often plain objects
+      const errObj = error as Record<string, unknown>;
+      errorDetails = JSON.stringify({
+        message: errObj.message,
+        code: errObj.code,
+        details: errObj.details,
+        hint: errObj.hint,
+        status: errObj.status,
+        statusCode: errObj.statusCode,
+      });
+    } else {
+      errorDetails = String(error);
+    }
+    console.error('Error generating conversation plan:', errorDetails);
     throw error;
   }
 }

@@ -163,9 +163,27 @@ export async function POST(
           });
         }
       } catch (planError) {
-        const errorMsg = planError instanceof Error ? planError.message : String(planError);
-        const stack = planError instanceof Error ? planError.stack : undefined;
-        console.error('❌ [init route] Plan generation failed:', { errorMsg, stack });
+        // Enhanced error logging to capture full error details
+        let errorMsg: string;
+        let errorDetails: Record<string, unknown> | undefined;
+        if (planError instanceof Error) {
+          errorMsg = planError.message;
+          errorDetails = { stack: planError.stack };
+        } else if (planError && typeof planError === 'object') {
+          const errObj = planError as Record<string, unknown>;
+          errorMsg = String(errObj.message || 'Unknown error');
+          errorDetails = {
+            code: errObj.code,
+            details: errObj.details,
+            hint: errObj.hint,
+            status: errObj.status,
+            statusCode: errObj.statusCode,
+            fullError: JSON.stringify(errObj),
+          };
+        } else {
+          errorMsg = String(planError);
+        }
+        console.error('❌ [init route] Plan generation failed:', errorMsg, errorDetails);
         // IMPORTANT: Plan is REQUIRED - fail if generation fails
         return NextResponse.json<ApiResponse>({
           success: false,

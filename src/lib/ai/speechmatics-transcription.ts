@@ -470,6 +470,45 @@ export class TranscriptionManager {
   }
 
   /**
+   * Check if a speaker would be filtered (for barge-in prevention)
+   * Returns true if the speaker is NOT the primary speaker and NOT in whitelist
+   * Used to prevent barge-in from parasitic voices before TTS is stopped
+   *
+   * @param speaker Speaker ID to check (e.g., "S2")
+   * @returns true if this speaker should be filtered (ignored)
+   */
+  shouldFilterSpeaker(speaker: string | undefined): boolean {
+    // If speaker filtering is disabled, never filter
+    if (!this.speakerFilteringEnabled) {
+      return false;
+    }
+
+    // If no speaker info, don't filter (can't make a decision)
+    if (!speaker) {
+      return false;
+    }
+
+    // Unknown speakers are always filtered when filtering is enabled
+    if (speaker === 'UU') {
+      return true;
+    }
+
+    // During establishment phase (no primary speaker yet), don't filter
+    // This allows the first speakers to be processed normally
+    if (!this.primarySpeaker) {
+      return false;
+    }
+
+    // If this is the primary speaker or in the whitelist, don't filter
+    if (speaker === this.primarySpeaker || this.allowedSpeakers.has(speaker)) {
+      return false;
+    }
+
+    // Non-primary speaker not in whitelist → should be filtered
+    return true;
+  }
+
+  /**
    * Add a speaker to the whitelist (allows multiple speakers)
    * @param speaker Speaker ID to allow (e.g., "S2")
    */
