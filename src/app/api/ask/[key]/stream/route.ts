@@ -5,7 +5,7 @@ import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 
 // Extend timeout for streaming LLM responses
 export const maxDuration = 60;
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getLastUserMessageThread, shouldUseSharedThread } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { callModelProviderStream } from '@/lib/ai/providers';
 import { createAgentLog, markAgentLogProcessing, completeAgentLog, failAgentLog, createStreamingDebugLogger, buildStreamingResponsePayload } from '@/lib/ai/logs';
@@ -26,7 +26,6 @@ import {
   fetchUserParticipation,
   fetchUsersByIds,
   addAnonymousParticipant,
-  fetchThreadById,
   fetchMessagesWithoutThread,
   fetchMessagesBySession,
   fetchProjectById,
@@ -244,41 +243,22 @@ export async function POST(
 
     let conversationThread: { id: string; is_shared: boolean } | null = null;
 
-    // First, try to find the thread from the last user message
-    const { threadId: lastUserThreadId, userId: lastUserUserId } = await getLastUserMessageThread(
+    // BUG-042 FIX: Use profileId directly to find the thread for THIS user
+    // Don't use getLastUserMessageThread - it returns another user's thread in individual_parallel mode
+    const { thread, error: threadError } = await getOrCreateConversationThread(
       threadClient,
-      askRow.id
+      askRow.id,
+      profileId ?? null,
+      askConfig
     );
 
-    if (lastUserThreadId) {
-      // Use the same thread as the last user message via RPC wrapper
-      console.log('[stream] Using thread from last user message:', lastUserThreadId);
-      const threadAdmin = await getAdminClient();
-      const existingThread = await fetchThreadById(threadAdmin, lastUserThreadId);
-
-      if (existingThread) {
-        conversationThread = existingThread;
+    if (threadError) {
+      if (isPermissionDenied(threadError)) {
+        return permissionDeniedResponse();
       }
+      throw threadError;
     }
-
-    // Fallback: create/get thread based on profileId or last user's userId
-    if (!conversationThread) {
-      const threadUserId = profileId ?? lastUserUserId ?? null;
-      const { thread, error: threadError } = await getOrCreateConversationThread(
-        threadClient,
-        askRow.id,
-        threadUserId,
-        askConfig
-      );
-
-      if (threadError) {
-        if (isPermissionDenied(threadError)) {
-          return permissionDeniedResponse();
-        }
-        throw threadError;
-      }
-      conversationThread = thread;
-    }
+    conversationThread = thread;
 
     // Get messages for the thread (or all messages if no thread for backward compatibility)
     // BUG-005 FIX: In individual_parallel mode, ONLY show messages from the user's thread
@@ -379,9 +359,8 @@ export async function POST(
       // Ignore parsing errors - may not have a body
     }
 
-    // Find the current participant name from the last user message sender
-    // or from the profileId (user who made this request)
-    const currentUserId = profileId ?? lastUserUserId;
+    // BUG-042 FIX: Use profileId directly - the user who made this request
+    const currentUserId = profileId;
     const currentParticipant = currentUserId
       ? participants.find(p => {
           const participantRow = (participantRows ?? []).find(r => r.id === p.id);

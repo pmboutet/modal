@@ -8,7 +8,7 @@ import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 export const maxDuration = 60;
 import { createServerSupabaseClient, getCurrentUser } from '@/lib/supabaseServer';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
-import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, getLastUserMessageThread } from '@/lib/asks';
+import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { executeAgent, fetchAgentBySlug, type AgentExecutionResult } from '@/lib/ai';
 import { INSIGHT_TYPES, mapInsightRowToInsight, type InsightRow } from '@/lib/insights';
@@ -1549,41 +1549,20 @@ export async function POST(
 
     let conversationThread: { id: string; is_shared: boolean } | null = null;
 
-    // First, try to find the thread from the last user message
-    const { threadId: lastUserThreadId, userId: lastUserUserId } = await getLastUserMessageThread(
+    // BUG-042 FIX: Use currentUserId directly to find the thread for THIS user
+    // Don't use getLastUserMessageThread - it returns another user's thread in individual_parallel mode
+    const { thread, error: threadError } = await getOrCreateConversationThread(
       supabase,
-      askRow.id
+      askRow.id,
+      currentUserId ?? null,
+      askConfig
     );
 
-    if (lastUserThreadId) {
-      // Use the same thread as the last user message
-      console.log('[respond] Using thread from last user message:', lastUserThreadId);
-      const { data: existingThread, error: fetchError } = await supabase
-        .from('conversation_threads')
-        .select('id, is_shared')
-        .eq('id', lastUserThreadId)
-        .single();
-
-      if (!fetchError && existingThread) {
-        conversationThread = existingThread;
-      }
+    if (threadError) {
+      throw threadError;
     }
 
-    // Fallback: create/get thread based on currentUserId or last user's userId
-    if (!conversationThread) {
-      const threadUserId = currentUserId ?? lastUserUserId ?? null;
-      const { thread, error: threadError } = await getOrCreateConversationThread(
-        supabase,
-        askRow.id,
-        threadUserId,
-        askConfig
-      );
-
-      if (threadError) {
-        throw threadError;
-      }
-      conversationThread = thread;
-    }
+    conversationThread = thread;
 
     // Get messages for the thread (or all messages if no thread for backward compatibility)
     let messageRows: MessageRow[] = [];
@@ -1760,11 +1739,10 @@ export async function POST(
 
     // Find the current participant (same as stream/route.ts for DRY)
     // Used to filter participants in individual_parallel mode
-    const resolvedUserId = currentUserId ?? lastUserUserId;
-    const currentParticipant = resolvedUserId
+    const currentParticipant = currentUserId
       ? participants.find(p => {
           const participantRow = (participantRows ?? []).find(r => r.id === p.id);
-          return participantRow?.user_id === resolvedUserId;
+          return participantRow?.user_id === currentUserId;
         })
       : null;
 
@@ -1774,47 +1752,9 @@ export async function POST(
     // - @groupRapporteur (group_reporter): Attribute to speaker (diarization if voice, else message author)
     // - @individual_parallel: Attribute to current user (default)
     const conversationMode = askRow.conversation_mode;
-    let insightAuthorFallbackId: string | null = currentUserId;
-
-    if (isConsultantMode && currentUserId) {
-      // BUG-SECTION-H FIX (@consultant): If currentUserId is the spokesperson (consultant),
-      // use lastUserUserId instead for insight attribution.
-      const currentUserParticipant = (participantRows ?? []).find(
-        row => row.user_id === currentUserId
-      );
-      const isCurrentUserSpokesperson = currentUserParticipant?.is_spokesperson === true ||
-                                         currentUserParticipant?.role === 'spokesperson';
-
-      if (isCurrentUserSpokesperson && lastUserUserId && lastUserUserId !== currentUserId) {
-        // The consultant is logged in, but we should attribute insights to the actual message author
-        insightAuthorFallbackId = lastUserUserId;
-        console.log('[respond] BUG-SECTION-H FIX (@consultant): Using lastUserUserId for insight attribution:', {
-          currentUserId,
-          lastUserUserId,
-          isCurrentUserSpokesperson,
-        });
-      }
-    } else if (conversationMode === 'collaborative') {
-      // BUG-H-GROUP FIX (@group): Attribute to whoever posted the message (brought it to debate)
-      // Use lastUserUserId which represents the message poster
-      if (lastUserUserId) {
-        insightAuthorFallbackId = lastUserUserId;
-        console.log('[respond] BUG-H-GROUP FIX (@collaborative): Attributing insight to message poster:', {
-          lastUserUserId,
-        });
-      }
-    } else if (conversationMode === 'group_reporter') {
-      // BUG-H-RAPPORTEUR FIX (@groupRapporteur): Attribute to speaker (diarization if voice, else message author)
-      // TODO: Integrate voice diarization to identify speaker in voice messages
-      // For now, fall back to message poster (lastUserUserId) as best approximation
-      if (lastUserUserId) {
-        insightAuthorFallbackId = lastUserUserId;
-        console.log('[respond] BUG-H-RAPPORTEUR FIX (@group_reporter): Attributing insight to message poster (diarization not yet integrated):', {
-          lastUserUserId,
-        });
-      }
-    }
-    // For individual_parallel mode, default attribution to currentUserId is correct
+    // BUG-042 FIX: Simplified insight attribution - always use currentUserId
+    // The complex lastUserUserId logic was causing bugs and is no longer needed
+    const insightAuthorFallbackId: string | null = currentUserId;
 
     // Fetch elapsed times using centralized helper (DRY)
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
