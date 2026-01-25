@@ -1098,15 +1098,34 @@ export async function fetchElapsedTime(options: FetchElapsedTimeOptions): Promis
         stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
       }
     } else {
-      // Fallback: current_step_id is already the DB record ID
+      // Fallback: No steps array, but we have current_step_id (step_identifier)
+      // We need to find the plan_id first, then query by step_identifier
+      // Check if current_step_id looks like a UUID
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationPlan.current_step_id);
       const dataClient = adminClient ?? supabase;
-      const { data: stepTimer } = await dataClient
-        .from('ask_conversation_plan_steps')
-        .select('elapsed_active_seconds')
-        .eq('id', conversationPlan.current_step_id)
-        .maybeSingle();
 
-      stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
+      if (isUuid) {
+        // current_step_id is a UUID - query directly
+        const { data: stepTimer } = await dataClient
+          .from('ask_conversation_plan_steps')
+          .select('elapsed_active_seconds')
+          .eq('id', conversationPlan.current_step_id)
+          .maybeSingle();
+        stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
+      } else {
+        // current_step_id is a step_identifier - need plan_id to query
+        // The plan should have an id we can use
+        const planId = 'id' in conversationPlan ? (conversationPlan as { id: string }).id : null;
+        if (planId) {
+          const { data: stepTimer } = await dataClient
+            .from('ask_conversation_plan_steps')
+            .select('elapsed_active_seconds')
+            .eq('plan_id', planId)
+            .eq('step_identifier', conversationPlan.current_step_id)
+            .maybeSingle();
+          stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
+        }
+      }
     }
   }
 
