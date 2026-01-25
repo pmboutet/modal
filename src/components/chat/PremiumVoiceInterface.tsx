@@ -33,6 +33,7 @@ import { ConversationProgressBar } from '@/components/conversation/ConversationP
 import { StepCompletionCard } from '@/components/conversation/StepCompletionCard';
 import type { SemanticTurnTelemetryEvent } from '@/lib/ai/turn-detection';
 import { useInactivityMonitor } from '@/hooks/useInactivityMonitor';
+import { useScrollHideShow } from '@/hooks/useScrollHideShow';
 import { SpeakerAssignmentOverlay, type ParticipantOption, type SpeakerAssignmentDecision, type SpeakerMessage } from './SpeakerAssignmentOverlay';
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -338,6 +339,29 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setShowInactivityOverlay(false);
     }, []),
   });
+
+  // ===== SCROLL HIDE/SHOW FOR MOBILE HEADER =====
+  // Track last scroll position for delta calculation
+  const lastScrollTopRef = useRef(0);
+
+  // Hook for hiding/showing header on scroll
+  const { isHidden: isHeaderHidden, handleScroll: handleScrollHideShow } = useScrollHideShow({
+    showThreshold: 100, // Show after 100px scroll up
+    minScrollDelta: 2,  // Ignore tiny changes
+    topThreshold: 10,   // Always show at top
+    transitionDuration: 200,
+  });
+
+  // Handle messages scroll for header hide/show
+  const handleMessagesScroll = useCallback(() => {
+    if (!messagesContainerRef.current) return;
+
+    const currentScrollTop = messagesContainerRef.current.scrollTop;
+    const scrollDelta = currentScrollTop - lastScrollTopRef.current;
+    lastScrollTopRef.current = currentScrollTop;
+
+    handleScrollHideShow(currentScrollTop, scrollDelta);
+  }, [handleScrollHideShow]);
 
   // ===== WAKE LOCK FUNCTIONS =====
   /**
@@ -2574,8 +2598,20 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
       {/* Content */}
       <div className="relative z-20 h-full flex flex-col">
-        {/* Compact top bar */}
-        <div className="flex items-center justify-between px-3 py-2 pt-3">
+        {/* Compact top bar - hides on scroll down, shows on scroll up */}
+        <motion.div
+          className="flex items-center justify-between px-3 py-2 pt-3"
+          initial={false}
+          animate={{
+            opacity: isHeaderHidden ? 0 : 1,
+            y: isHeaderHidden ? -20 : 0,
+            height: isHeaderHidden ? 0 : 'auto',
+            paddingTop: isHeaderHidden ? 0 : '0.75rem',
+            paddingBottom: isHeaderHidden ? 0 : '0.5rem',
+          }}
+          transition={{ duration: 0.2, ease: 'easeInOut' }}
+          style={{ overflow: 'hidden' }}
+        >
           <div className="flex items-center gap-2">
             {user?.fullName && (
               <div className="h-7 w-7 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white font-medium text-xs">
@@ -2702,10 +2738,21 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               <X className="h-4 w-4" />
             </Button>
           </div>
-        </div>
+        </motion.div>
 
+        {/* Progress bar - also hides on scroll down */}
         {hasConversationSteps && (
-          <div className="px-3 pb-1">
+          <motion.div
+            className="px-3 pb-1"
+            initial={false}
+            animate={{
+              opacity: isHeaderHidden ? 0 : 1,
+              height: isHeaderHidden ? 0 : 'auto',
+              paddingBottom: isHeaderHidden ? 0 : '0.25rem',
+            }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            style={{ overflow: 'hidden' }}
+          >
             <ConversationProgressBar
               steps={conversationSteps}
               currentStepId={currentConversationStepId ?? ''}
@@ -2717,12 +2764,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               expectedDurationMinutes={expectedDurationMinutes}
               variant="dark"
             />
-          </div>
+          </motion.div>
         )}
 
         {/* Messages area with floating bubbles */}
-        <div 
+        <div
           ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
           className="flex-1 overflow-y-auto px-4 py-6 space-y-4"
         >
           {displayMessages.length === 0 && (
