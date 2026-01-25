@@ -112,13 +112,11 @@ export async function GET(
     }
 
     // Fetch complete conversation context using centralized function (DRY!)
-    // BUG-042 FIX: When token is provided, use profileId to find the correct thread for THIS participant
-    // Don't use useLastUserMessageThread when we have a specific user - it would return another user's thread
+    // BUG-042 FIX: Use profileId to find the correct thread for THIS participant
     const context = await fetchConversationContext(adminClient, askSession, {
       adminClient,
       token: token || undefined,
       profileId: participantUserId, // Use participant's user_id to find their thread
-      useLastUserMessageThread: !participantUserId, // Only use last message thread if no specific user
     });
 
     // Debug logging for STEP_COMPLETE troubleshooting

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { createAgentLog, completeAgentLog } from '@/lib/ai/logs';
 import { getAgentConfigForAsk } from '@/lib/ai/agent-config';
-import { getAskSessionByKey, getLastUserMessageThread } from '@/lib/asks';
+import { getAskSessionByKey } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { parseErrorMessage } from '@/lib/utils';
 import type { ApiResponse, Insight } from '@/types';
@@ -82,27 +82,14 @@ export async function POST(
     }
 
     // Fetch complete conversation context using centralized function (DRY!)
-    // BUG-042 FIX: When token is provided, use profileId to find the correct thread for THIS participant
+    // BUG-042 FIX: Use profileId to find the correct thread for THIS participant
     const context = await fetchConversationContext(adminClient, askRow, {
       adminClient,
       profileId: participantUserId,
-      useLastUserMessageThread: !participantUserId, // Only use last message thread if no specific user
     });
 
     if (context.conversationPlan?.plan_data) {
       console.log('📋 Voice agent log: Loaded conversation plan with', context.conversationPlan.plan_data.steps.length, 'steps');
-    }
-
-    // Fallback: If no token, determine participant from last user message (legacy behavior)
-    if (!currentParticipantName) {
-      const { userId: lastUserUserId } = await getLastUserMessageThread(adminClient, askRow.id);
-      if (lastUserUserId) {
-        const participantIndex = context.participantRows.findIndex(row => row.user_id === lastUserUserId);
-        if (participantIndex !== -1) {
-          currentParticipantName = context.participants[participantIndex]?.name ?? null;
-          console.log(`[voice-agent/log] Current participant from last message: ${currentParticipantName}`);
-        }
-      }
     }
 
     // Use centralized function for ALL prompt variables - no manual overrides
