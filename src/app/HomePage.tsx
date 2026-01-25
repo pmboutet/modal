@@ -519,9 +519,25 @@ export default function HomePage() {
     error: string | null;
   } | null>(null);
 
-  // Get current step ID for timer tracking
-  // The timer endpoint uses step_identifier (e.g., "step_1"), which is what current_step_id contains
-  const currentStepId = sessionData.conversationPlan?.current_step_id ?? null;
+  // Get current step's DATABASE ID (UUID) for timer tracking
+  // IMPORTANT: We use the UUID (not step_identifier) because step_identifier is not globally unique
+  const currentStepId = useMemo(() => {
+    const plan = sessionData.conversationPlan;
+    if (!plan?.current_step_id) return null;
+
+    // Find the step by step_identifier and get its UUID
+    // Check both normalized format (steps array) and legacy format (plan_data.steps)
+    const steps = 'steps' in plan && Array.isArray(plan.steps)
+      ? plan.steps
+      : plan.plan_data?.steps ?? [];
+
+    const currentStep = steps.find((s: { step_identifier?: string; id?: string }) =>
+      s.step_identifier === plan.current_step_id
+    );
+
+    // Return the UUID, or fallback to step_identifier for legacy compatibility
+    return currentStep?.id ?? plan.current_step_id;
+  }, [sessionData.conversationPlan]);
 
   // Session timer with intelligent pause/resume logic and persistence
   const sessionTimer = useSessionTimer({

@@ -924,6 +924,14 @@ export class SpeechmaticsVoiceAgent {
   }
 
   /**
+   * Check if TTS audio is currently playing
+   * Used by the inactivity monitor to avoid showing the overlay while audio is playing
+   */
+  isAudioPlaying(): boolean {
+    return this.audio?.isPlaying() || false;
+  }
+
+  /**
    * Set text-only mode (disables TTS audio responses)
    * When enabled, the agent will only respond with text, no audio playback
    *

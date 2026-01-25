@@ -344,6 +344,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         devLog('[PremiumVoiceInterface] ⏰ User inactive but mic already muted - skipping overlay');
         return;
       }
+      // Don't show overlay if ElevenLabs TTS audio is currently playing
+      // The timer should be paused during playback, but this is a safety check
+      if (agentRef.current instanceof SpeechmaticsVoiceAgent && agentRef.current.isAudioPlaying()) {
+        devLog('[PremiumVoiceInterface] ⏰ User inactive but audio is playing - skipping overlay');
+        return;
+      }
       devLog('[PremiumVoiceInterface] ⏰ User inactive - showing overlay and muting');
       setShowInactivityOverlay(true);
       // Mute microphone when inactive

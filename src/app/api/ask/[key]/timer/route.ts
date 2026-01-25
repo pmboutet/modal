@@ -80,16 +80,18 @@ async function fetchStepElapsedTime(
     return {};
   }
 
-  // Get the step elapsed time
+  // Get the step with its UUID and elapsed time
+  // We return the UUID so the client can use it for future syncs (UUID is globally unique)
   const { data: stepData } = await adminClient
     .from('ask_conversation_plan_steps')
-    .select('elapsed_active_seconds')
+    .select('id, elapsed_active_seconds')
     .eq('plan_id', planData.id)
     .eq('step_identifier', planData.current_step_id)
     .maybeSingle();
 
   return {
-    currentStepId: planData.current_step_id,
+    // Return the UUID (preferred) for syncs, not the step_identifier
+    currentStepId: stepData?.id ?? planData.current_step_id,
     stepElapsedSeconds: stepData?.elapsed_active_seconds ?? 0,
   };
 }
@@ -484,55 +486,78 @@ export async function PATCH(
     }
 
     // Update step elapsed time if provided
-    // Note: currentStepId is a step_identifier (e.g. "step_1"), not an UUID
+    // currentStepId can be either:
+    // - A UUID (preferred, globally unique) - 36 characters with dashes
+    // - A step_identifier (legacy, e.g. "step_1") - requires plan_id to be unique
     let stepElapsedSeconds: number | undefined;
     if (body.currentStepId && typeof body.stepElapsedSeconds === 'number') {
       // IMPORTANT: Clear cache and get fresh admin client to ensure service_role bypasses RLS
-      // The cached client sometimes doesn't have the correct permissions for step updates
       const { clearAdminClientCache, getAdminSupabaseClient } = await import('@/lib/supabaseAdmin');
       clearAdminClientCache();
       const admin = getAdminSupabaseClient();
 
-      // Step 1: Find conversation thread for this ASK session AND user
-      // Uses shared helper that handles individual_parallel vs shared mode
-      const threadId = await getConversationThreadId(admin, askRow.id, profileId);
+      // Check if currentStepId is a UUID (36 chars with specific format)
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.currentStepId);
 
-      if (threadId) {
-        // Step 2: Find the plan for this thread using RPC (bypasses RLS)
-        const { data: planResult } = await admin
-          .rpc('get_conversation_plan_with_steps', { p_conversation_thread_id: threadId });
+      if (isUuid) {
+        // UUID path: Update directly by step ID (globally unique)
+        console.log('[timer] Updating step by UUID:', {
+          stepId: body.currentStepId,
+          stepElapsedSeconds: Math.floor(body.stepElapsedSeconds),
+        });
 
-        const planData = planResult?.plan as { id: string } | null;
+        const { data: updateResult, error: stepUpdateError } = await admin
+          .from('ask_conversation_plan_steps')
+          .update({ elapsed_active_seconds: Math.floor(body.stepElapsedSeconds) })
+          .eq('id', body.currentStepId)
+          .select();
 
-        if (planData) {
-          // Step 3: Update the step by step_identifier within this plan
-          console.log('[timer] Updating step:', {
-            planId: planData.id,
-            stepIdentifier: body.currentStepId,
-            stepElapsedSeconds: Math.floor(body.stepElapsedSeconds),
-          });
+        if (stepUpdateError) {
+          console.error('[timer] Failed to update step by UUID:', stepUpdateError.message);
+        } else if (updateResult && updateResult.length > 0) {
+          console.log('[timer] Step updated successfully by UUID:', updateResult[0]);
+          stepElapsedSeconds = Math.floor(body.stepElapsedSeconds);
+        } else {
+          console.warn('[timer] Step update by UUID returned 0 rows:', body.currentStepId);
+        }
+      } else {
+        // Legacy path: Find thread/plan and update by step_identifier
+        const threadId = await getConversationThreadId(admin, askRow.id, profileId);
 
-          const { data: updateResult, error: stepUpdateError } = await admin
-            .from('ask_conversation_plan_steps')
-            .update({ elapsed_active_seconds: Math.floor(body.stepElapsedSeconds) })
-            .eq('plan_id', planData.id)
-            .eq('step_identifier', body.currentStepId)
-            .select();
+        if (threadId) {
+          const { data: planResult } = await admin
+            .rpc('get_conversation_plan_with_steps', { p_conversation_thread_id: threadId });
 
-          if (stepUpdateError) {
-            console.error('[timer] Failed to update step elapsed time:', stepUpdateError.message, stepUpdateError.details, stepUpdateError.hint);
-          } else if (updateResult && updateResult.length > 0) {
-            console.log('[timer] Step updated successfully:', updateResult[0]);
-            stepElapsedSeconds = Math.floor(body.stepElapsedSeconds);
-          } else {
-            console.warn('[timer] Step update returned 0 rows - step_identifier might not match:', {
+          const planData = planResult?.plan as { id: string } | null;
+
+          if (planData) {
+            console.log('[timer] Updating step by step_identifier:', {
               planId: planData.id,
               stepIdentifier: body.currentStepId,
-              updateResult,
+              stepElapsedSeconds: Math.floor(body.stepElapsedSeconds),
             });
+
+            const { data: updateResult, error: stepUpdateError } = await admin
+              .from('ask_conversation_plan_steps')
+              .update({ elapsed_active_seconds: Math.floor(body.stepElapsedSeconds) })
+              .eq('plan_id', planData.id)
+              .eq('step_identifier', body.currentStepId)
+              .select();
+
+            if (stepUpdateError) {
+              console.error('[timer] Failed to update step:', stepUpdateError.message);
+            } else if (updateResult && updateResult.length > 0) {
+              console.log('[timer] Step updated successfully:', updateResult[0]);
+              stepElapsedSeconds = Math.floor(body.stepElapsedSeconds);
+            } else {
+              console.warn('[timer] Step update returned 0 rows:', {
+                planId: planData.id,
+                stepIdentifier: body.currentStepId,
+              });
+            }
+          } else {
+            console.warn('[timer] No plan found for thread:', threadId);
           }
-        } else {
-          console.warn('[timer] No plan found for thread:', threadId);
         }
       }
     }

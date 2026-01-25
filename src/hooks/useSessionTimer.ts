@@ -935,11 +935,14 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
   useEffect(() => {
     if (currentStepId !== previousStepIdRef.current) {
       // Step changed - sync old step time first, then reset
-      if (previousStepIdRef.current && askKey) {
+      const oldStepId = previousStepIdRef.current;
+      if (oldStepId && askKey) {
+        // Sync the OLD step's final time before updating refs
+        console.log('[useSessionTimer] Step changing:', { oldStepId, newStepId: currentStepId, oldStepTime: stepElapsedSecondsRef.current });
         syncToServer();
       }
 
-      // Update refs
+      // Update refs AFTER syncing old step
       previousStepIdRef.current = currentStepId;
       currentStepIdRef.current = currentStepId;
 
