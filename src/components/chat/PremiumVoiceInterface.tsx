@@ -790,6 +790,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Mark as nudged to prevent duplicate attempts
         hasNudgedForCurrentMessageRef.current = true;
 
+        // BUG-041 FIX: Pause inactivity timer during nudge API call
+        // The timer will resume when TTS finishes (via onPlaybackEnd callback)
+        // or when we explicitly resume it on failure
+        inactivityMonitor.pauseTimer();
+
         // Call the respond endpoint to force a response
         const nudgeAgent = async () => {
           try {
@@ -804,11 +809,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             const response = await fetch(`/api/ask/${askKey}/respond`, {
               method: 'POST',
               headers,
+              // BUG-040 FIX: Do NOT set voiceGenerated: true for nudge requests!
+              // voiceGenerated: true tells /respond to persist the message content as AI response
+              // (for real voice AI responses from Speechmatics). But nudge wants to TRIGGER
+              // a new AI response, not persist the user's message as AI response.
               body: JSON.stringify({
                 message: lastUserMessageContentRef.current,
                 senderType: 'user',
                 metadata: {
-                  voiceGenerated: true,
+                  voiceGenerated: false, // Nudge should trigger AI response, not persist user message
                   nudgeRetry: true, // Mark as a nudge retry for debugging
                 },
               }),
@@ -829,14 +838,21 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
                 // Clear awaiting state
                 awaitingAgentResponseRef.current = false;
+                // Note: Timer will resume via onPlaybackEnd when TTS finishes
               } else {
                 devWarn('[PremiumVoiceInterface] ⚠️ Nudge returned no AI response:', result);
+                // Resume timer on failure - no TTS will play
+                inactivityMonitor.resumeTimerAfterDelay(0);
               }
             } else {
               devError('[PremiumVoiceInterface] ❌ Nudge failed:', response.status, await response.text());
+              // Resume timer on failure - no TTS will play
+              inactivityMonitor.resumeTimerAfterDelay(0);
             }
           } catch (error) {
             devError('[PremiumVoiceInterface] ❌ Error nudging agent:', error);
+            // Resume timer on error - no TTS will play
+            inactivityMonitor.resumeTimerAfterDelay(0);
           }
         };
 
@@ -847,7 +863,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     return () => {
       clearInterval(checkInterval);
     };
-  }, [askKey, inviteToken, isConnected, consultantMode]);
+  }, [askKey, inviteToken, isConnected, consultantMode, inactivityMonitor]);
 
   // ===== FONCTIONS DE FUSION ET GESTION DES MESSAGES =====
   /**
