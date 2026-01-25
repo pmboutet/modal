@@ -1241,4 +1241,26 @@ export class SpeechmaticsVoiceAgent {
       // Don't throw - initial message failure shouldn't break the session
     }
   }
+
+  /**
+   * Inject a text message and trigger AI response
+   * Used when user edits a transcription in voice mode
+   *
+   * @param text - The edited/corrected message text
+   */
+  async injectUserMessageAndRespond(text: string): Promise<void> {
+    if (!text?.trim()) {
+      console.warn('[Speechmatics] injectUserMessageAndRespond: empty text, skipping');
+      return;
+    }
+
+    console.log('[Speechmatics] 📝 Injecting edited message and triggering response:', text.substring(0, 50) + '...');
+
+    try {
+      await this.processUserMessage(text);
+    } catch (error) {
+      console.error('[Speechmatics] Error processing injected message:', error);
+      this.onErrorCallback?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
 }

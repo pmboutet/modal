@@ -35,6 +35,7 @@ import type { SemanticTurnTelemetryEvent } from '@/lib/ai/turn-detection';
 import { useInactivityMonitor } from '@/hooks/useInactivityMonitor';
 import { useScrollHideShow } from '@/hooks/useScrollHideShow';
 import { SpeakerAssignmentOverlay, type ParticipantOption, type SpeakerAssignmentDecision, type SpeakerMessage } from './SpeakerAssignmentOverlay';
+import { VoiceModeTutorial } from './VoiceModeTutorial';
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -256,6 +257,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     transcripts: string[]; // Stack of transcripts from this speaker
   } | null>(null);
   const filteredSpeakerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ===== TUTORIAL STATE =====
+  // Show voice mode tutorial on first usage
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   // Track speakers the user chose to ignore (don't ask again)
   const ignoredSpeakersRef = useRef<Set<string>>(new Set());
 
@@ -488,6 +494,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     setInAppBrowserInfo(browserInfo);
     if (browserInfo.isInApp) {
       console.warn('[PremiumVoiceInterface] ⚠️ In-app browser detected:', browserInfo.appName);
+    }
+  }, []);
+
+  // ===== TUTORIAL CHECK =====
+  // Check if user has seen the voice mode tutorial on first usage
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('voiceTutorial_hasSeenOnboarding');
+    if (!hasSeenTutorial) {
+      setShowTutorial(true);
     }
   }, []);
 
@@ -2051,10 +2066,25 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     console.log('[PremiumVoiceInterface] 💾 Submitting edit for message:', editingMessageId);
     setIsSubmittingEdit(true);
 
+    const trimmedContent = editContent.trim();
+
     try {
-      await onEditMessage(editingMessageId, editContent.trim());
+      await onEditMessage(editingMessageId, trimmedContent);
       setEditingMessageId(null);
       setEditContent("");
+
+      // Trigger AI response for the edited message in voice mode
+      // The agent will generate a response and speak it via TTS
+      const agent = agentRef.current;
+      if (agent && 'injectUserMessageAndRespond' in agent) {
+        console.log('[PremiumVoiceInterface] 🎯 Triggering agent response for edited message');
+        try {
+          await (agent as SpeechmaticsVoiceAgent | HybridVoiceAgent).injectUserMessageAndRespond(trimmedContent);
+        } catch (agentError) {
+          console.error('[PremiumVoiceInterface] ❌ Error triggering agent response:', agentError);
+        }
+      }
+
       // Keep mic muted - the AI will respond and we want to let the user hear it
       // The mic will stay muted, user can unmute when ready
     } catch (error) {
@@ -2063,6 +2093,21 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setIsSubmittingEdit(false);
     }
   }, [editingMessageId, editContent, onEditMessage]);
+
+  // ===== TUTORIAL HANDLERS =====
+  const handleTutorialComplete = useCallback(() => {
+    localStorage.setItem('voiceTutorial_hasSeenOnboarding', 'true');
+    setShowTutorial(false);
+    setTutorialStep(0);
+  }, []);
+
+  const handleTutorialNext = useCallback(() => {
+    setTutorialStep(prev => Math.min(prev + 1, 2));
+  }, []);
+
+  const handleTutorialPrev = useCallback(() => {
+    setTutorialStep(prev => Math.max(prev - 1, 0));
+  }, []);
 
   const handleCloseClick = useCallback(async () => {
     console.log('[PremiumVoiceInterface] ❌ Close button clicked - disconnecting everything');
@@ -3481,6 +3526,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Voice Mode Tutorial Overlay */}
+      <AnimatePresence>
+        {showTutorial && (
+          <VoiceModeTutorial
+            currentStep={tutorialStep}
+            onNext={handleTutorialNext}
+            onPrev={handleTutorialPrev}
+            onComplete={handleTutorialComplete}
+            onSkip={handleTutorialComplete}
+          />
         )}
       </AnimatePresence>
     </div>

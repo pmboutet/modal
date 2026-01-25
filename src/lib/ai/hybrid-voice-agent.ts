@@ -1092,4 +1092,33 @@ export class HybridVoiceAgent {
   isConnected(): boolean {
     return this.deepgramClient !== null;
   }
+
+  /**
+   * Inject a text message and trigger AI response
+   * Used when user edits a transcription in voice mode
+   *
+   * @param text - The edited/corrected message text
+   */
+  async injectUserMessageAndRespond(text: string): Promise<void> {
+    if (!text?.trim()) {
+      console.warn('[HybridVoiceAgent] injectUserMessageAndRespond: empty text, skipping');
+      return;
+    }
+
+    console.log('[HybridVoiceAgent] 📝 Injecting edited message and triggering response:', text.substring(0, 50) + '...');
+
+    try {
+      // Add user message to conversation history
+      this.conversationHistory.push({
+        role: 'user',
+        content: text
+      });
+
+      // Generate and speak the AI response
+      await this.generateAndSpeakResponse(text);
+    } catch (error) {
+      console.error('[HybridVoiceAgent] Error processing injected message:', error);
+      this.onErrorCallback?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
 }
