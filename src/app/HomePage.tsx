@@ -184,8 +184,8 @@ function MobileLayout({
 
   return (
     <div className={`flex flex-col overflow-hidden min-w-0 w-full max-w-full overflow-x-hidden touch-pan-y transition-[height] duration-200 ${isHeaderHidden ? 'h-[100dvh]' : 'h-[calc(100dvh-44px)]'}`}>
-      {/* Collapsible Header - Compact - hides on scroll down AND in voice mode */}
-      {askDetails && !isVoiceModeActive && (
+      {/* Collapsible Header - Compact - hides on scroll down */}
+      {askDetails && (
         <motion.div
           initial={false}
           animate={{
@@ -409,9 +409,8 @@ function MobileLayout({
         </motion.div>
       </div>
 
-      {/* Panel Indicator - with safe area for mobile browsers, hides on scroll down AND in voice mode */}
-      {!isVoiceModeActive && (
-        <motion.div
+      {/* Panel Indicator - with safe area for mobile browsers, hides on scroll down */}
+      <motion.div
           initial={false}
           animate={{
             height: isHeaderHidden ? 0 : 'auto',
@@ -448,7 +447,6 @@ function MobileLayout({
           <span className="text-sm font-medium">Insights</span>
         </button>
       </motion.div>
-      )}
     </div>
   );
 }
