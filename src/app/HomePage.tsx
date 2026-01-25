@@ -1876,9 +1876,11 @@ export default function HomePage() {
     } finally {
       setIsVoiceConfigLoading(false);
     }
-  }, [sessionData.askKey, sessionData.ask?.askSessionId]);
+  }, [sessionData.askKey, sessionData.ask?.askSessionId, sessionData.inviteToken]);
 
   // Load voice mode config when session loads
+  // BUG-042 FIX: Also depend on inviteToken to ensure config reloads when token changes
+  // This fixes the bug where switching between participant tokens wouldn't reload the prompts
   useEffect(() => {
     if (sessionData.ask?.askSessionId) {
       loadVoiceModeConfig();
