@@ -206,6 +206,8 @@ export interface DetailedMessage {
 export interface ConversationContextResult {
   askSession: AskSessionRow;
   participants: ConversationParticipantSummary[];
+  /** Raw participant rows with user_id mapping (for ID-based participant lookup) */
+  participantRows: ParticipantRow[];
   messages: ConversationMessageSummary[];
   project: ProjectRow | null;
   challenge: ChallengeRow | null;
@@ -1004,6 +1006,7 @@ export async function fetchConversationContext(
   return {
     askSession,
     participants,
+    participantRows, // For ID-based participant lookup
     messages,
     project,
     challenge,

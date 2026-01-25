@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { createAgentLog, completeAgentLog } from '@/lib/ai/logs';
 import { getAgentConfigForAsk } from '@/lib/ai/agent-config';
-import { getAskSessionByKey } from '@/lib/asks';
+import { getAskSessionByKey, getLastUserMessageThread } from '@/lib/asks';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { parseErrorMessage } from '@/lib/utils';
 import type { ApiResponse, Insight } from '@/types';
@@ -72,6 +72,23 @@ export async function POST(
       console.log('📋 Voice agent log: Loaded conversation plan with', context.conversationPlan.plan_data.steps.length, 'steps');
     }
 
+    // BUG-037 FIX: Determine current participant from last user message using ID-based matching
+    // Without this, filterActiveParticipants returns ALL participants in individual_parallel mode,
+    // causing the AI to potentially address the wrong person (first in participant list)
+    let currentParticipantName: string | null = null;
+
+    // Get the user_id of the last user message
+    const { userId: lastUserUserId } = await getLastUserMessageThread(adminClient, askRow.id);
+    if (lastUserUserId) {
+      // Find the participant row with this user_id (ID-based matching, not name-based)
+      const participantIndex = context.participantRows.findIndex(row => row.user_id === lastUserUserId);
+      if (participantIndex !== -1) {
+        // Use the same index to get the participant name from the parallel array
+        currentParticipantName = context.participants[participantIndex]?.name ?? null;
+        console.log(`[voice-agent/log] Current participant from user_id ${lastUserUserId}: ${currentParticipantName}`);
+      }
+    }
+
     // Use centralized function for ALL prompt variables - no manual overrides
     const promptVariables = buildConversationAgentVariables({
       ask: askRow,
@@ -79,6 +96,7 @@ export async function POST(
       challenge: context.challenge,
       messages: context.messages, // Already in ConversationMessageSummary format with planStepId
       participants: context.participants,
+      currentParticipantName, // BUG-037 FIX: Pass current participant for filtering in individual_parallel mode
       conversationPlan: context.conversationPlan,
       elapsedActiveSeconds: context.elapsedActiveSeconds,
       stepElapsedActiveSeconds: context.stepElapsedActiveSeconds,
