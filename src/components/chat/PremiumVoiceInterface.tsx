@@ -1719,7 +1719,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Établir la connexion WebSocket et démarrer le microphone
         await agent.connect(config);
         await agent.startMicrophone(selectedMicrophoneId || undefined, voiceIsolationEnabled);
-        
+
+        // BUG FIX: If tutorial is active, immediately mute the microphone after starting it
+        if (tutorialActiveRef.current && 'setMicrophoneMuted' in agent) {
+          console.log('[PremiumVoiceInterface] 🔇 Tutorial active - muting Hybrid agent microphone after start');
+          (agent as any).setMicrophoneMuted(true);
+        }
+
         // Configurer la visualisation audio après le démarrage du microphone
         // On crée un stream séparé pour la visualisation (indépendant de l'agent)
         startAudioVisualization();
@@ -1830,6 +1836,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Établir la connexion WebSocket et démarrer le microphone
         await agent.connect(config);
         await agent.startMicrophone(selectedMicrophoneId || undefined, voiceIsolationEnabled);
+
+        // BUG FIX: If tutorial is active, immediately mute the microphone after starting it
+        // The React state (isMuted) is already true from the tutorial useEffect,
+        // but we need to actually mute the Speechmatics agent
+        if (tutorialActiveRef.current) {
+          console.log('[PremiumVoiceInterface] 🔇 Tutorial active - muting microphone after start');
+          agent.setMicrophoneMuted(true);
+        }
 
         // Configurer la visualisation audio
         startAudioVisualization();
