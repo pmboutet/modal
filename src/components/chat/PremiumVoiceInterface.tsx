@@ -19,13 +19,13 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MicOff, Volume2, Pencil, Check, Settings, ChevronDown, UserX } from 'lucide-react';
+import { X, MicOff, Volume2, Pencil, Check, Settings, ChevronDown, UserX, ExternalLink, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DeepgramVoiceAgent, DeepgramMessageEvent } from '@/lib/ai/deepgram';
 import { HybridVoiceAgent, HybridVoiceAgentMessage } from '@/lib/ai/hybrid-voice-agent';
 import { SpeechmaticsVoiceAgent, SpeechmaticsMessageEvent } from '@/lib/ai/speechmatics';
-import { cn } from '@/lib/utils';
+import { cn, isInAppBrowser, getMicrophonePermissionErrorMessage } from '@/lib/utils';
 import { cleanAllSignalMarkers, detectStepComplete } from '@/lib/sanitize';
 import { useAuth } from '@/components/auth/AuthProvider';
 import type { ConversationPlan } from '@/types';
@@ -212,6 +212,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const [pendingFinalUser, setPendingFinalUser] = useState<VoiceMessage | null>(null);
   const [semanticTelemetry, setSemanticTelemetry] = useState<SemanticTurnTelemetryEvent | null>(null);
   const [showInactivityOverlay, setShowInactivityOverlay] = useState(false);
+  // État de détection d'in-app browser (Gmail, Facebook, etc.)
+  const [inAppBrowserInfo, setInAppBrowserInfo] = useState<{ isInApp: boolean; appName: string | null } | null>(null);
 
   // ===== ÉTATS D'ÉDITION DE MESSAGE =====
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -453,6 +455,58 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceAgentLogData.signature]);
+
+  // ===== DÉTECTION IN-APP BROWSER =====
+  // Détecte si on est dans un in-app browser (Gmail, Facebook, etc.)
+  // Ces navigateurs ne supportent souvent pas l'accès au microphone
+  useEffect(() => {
+    const browserInfo = isInAppBrowser();
+    setInAppBrowserInfo(browserInfo);
+    if (browserInfo.isInApp) {
+      console.warn('[PremiumVoiceInterface] ⚠️ In-app browser detected:', browserInfo.appName);
+    }
+  }, []);
+
+  // Fonction pour ouvrir le lien dans Safari/Chrome
+  const openInExternalBrowser = useCallback(() => {
+    const currentUrl = window.location.href;
+
+    // Sur iOS, on peut essayer plusieurs méthodes
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+    if (isIOS) {
+      // Méthode 1: Utiliser x-safari-https pour forcer Safari
+      const safariUrl = currentUrl.replace(/^https?:\/\//, 'x-safari-https://');
+      window.location.href = safariUrl;
+
+      // Fallback après 500ms si ça n'a pas marché
+      setTimeout(() => {
+        // Méthode 2: Utiliser l'API de partage native si disponible
+        if (navigator.share) {
+          navigator.share({
+            title: 'Ouvrir dans Safari',
+            url: currentUrl,
+          }).catch(() => {
+            // Méthode 3: Copier l'URL dans le presse-papier
+            navigator.clipboard?.writeText(currentUrl);
+            alert('Lien copié ! Collez-le dans Safari pour utiliser le mode vocal.');
+          });
+        } else {
+          // Copier dans le presse-papier
+          navigator.clipboard?.writeText(currentUrl);
+          alert('Lien copié ! Collez-le dans Safari pour utiliser le mode vocal.');
+        }
+      }, 500);
+    } else {
+      // Sur Android, window.open peut fonctionner
+      const newWindow = window.open(currentUrl, '_system');
+      if (!newWindow) {
+        // Fallback: copier l'URL
+        navigator.clipboard?.writeText(currentUrl);
+        alert('Lien copié ! Collez-le dans Chrome pour utiliser le mode vocal.');
+      }
+    }
+  }, []);
 
   // Synchronisation de la référence mutable avec l'état mute
   // Permet aux callbacks audio d'accéder à la valeur actuelle sans stale closure
@@ -1822,7 +1876,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setIsConnecting(false);
       isConnectingRef.current = false;
       cleanupAudioAnalysis(true); // Close audio context on connection error
-      const errorMessage = err instanceof Error ? err.message : 'Failed to connect to voice agent';
+
+      // Utiliser le message d'erreur amélioré pour les erreurs de permission micro
+      const errorMessage = err instanceof Error
+        ? getMicrophonePermissionErrorMessage(err)
+        : 'Impossible de se connecter au mode vocal.';
       setError(errorMessage);
       handleError(err instanceof Error ? err : new Error(errorMessage));
     }
@@ -2428,6 +2486,53 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
+      {/* In-app browser warning overlay */}
+      {inAppBrowserInfo?.isInApp && (
+        <div className="absolute inset-0 z-[100] bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center p-6">
+          <div className="max-w-sm text-center">
+            <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-amber-500/20 flex items-center justify-center">
+              <ExternalLink className="w-8 h-8 text-amber-400" />
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-3">
+              Navigateur non compatible
+            </h2>
+            <p className="text-white/70 text-sm mb-6">
+              {inAppBrowserInfo.appName
+                ? `Le navigateur intégré de ${inAppBrowserInfo.appName} ne supporte pas le microphone.`
+                : "Ce navigateur intégré ne supporte pas le microphone."}
+              {' '}Ouvrez ce lien dans Safari ou Chrome pour utiliser le mode vocal.
+            </p>
+            <div className="space-y-3">
+              <Button
+                onClick={openInExternalBrowser}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Ouvrir dans Safari
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard?.writeText(window.location.href);
+                  alert('Lien copié !');
+                }}
+                className="w-full border-white/20 text-white hover:bg-white/10"
+              >
+                <Copy className="w-4 h-4 mr-2" />
+                Copier le lien
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setInAppBrowserInfo({ isInApp: false, appName: null })}
+                className="w-full text-white/50 hover:text-white hover:bg-white/5"
+              >
+                Essayer quand même
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Deep blue gradient background */}
       <div
         className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950"
@@ -3026,7 +3131,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               {/* Partial transcript or placeholder */}
               <div className="min-h-[1rem]">
                 {error ? (
-                  <p className="text-red-300 text-xs">{error}</p>
+                  <div className="space-y-1">
+                    <p className="text-red-300 text-xs">{error}</p>
+                    {error.includes('Safari') || error.includes('Chrome') || error.includes('navigateur') ? (
+                      <button
+                        onClick={openInExternalBrowser}
+                        className="text-blue-400 text-xs underline hover:text-blue-300"
+                      >
+                        Ouvrir dans Safari →
+                      </button>
+                    ) : null}
+                  </div>
                 ) : interimUser ? (
                   // RTL direction + LTR content = ellipsis at START, showing the END of text
                   <p

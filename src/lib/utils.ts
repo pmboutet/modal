@@ -363,3 +363,107 @@ export function isPermissionDenied(error: unknown): boolean {
 
   return false;
 }
+
+/**
+ * Detect if running in an in-app browser (Gmail, Facebook, Instagram, etc.)
+ * These browsers often don't support microphone access
+ */
+export function isInAppBrowser(): { isInApp: boolean; appName: string | null } {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') {
+    return { isInApp: false, appName: null };
+  }
+
+  const ua = navigator.userAgent || navigator.vendor || (window as any).opera || '';
+
+  // Common in-app browser patterns
+  const inAppPatterns: Array<{ pattern: RegExp; name: string }> = [
+    { pattern: /FBAN|FBAV/i, name: 'Facebook' },
+    { pattern: /Instagram/i, name: 'Instagram' },
+    { pattern: /Twitter/i, name: 'Twitter/X' },
+    { pattern: /LinkedIn/i, name: 'LinkedIn' },
+    { pattern: /Snapchat/i, name: 'Snapchat' },
+    { pattern: /Pinterest/i, name: 'Pinterest' },
+    { pattern: /TikTok/i, name: 'TikTok' },
+    { pattern: /Line\//i, name: 'LINE' },
+    { pattern: /WeChat|MicroMessenger/i, name: 'WeChat' },
+    { pattern: /GSA\//i, name: 'Google Search App' },
+    // Gmail in-app browser on iOS doesn't have a clear signature
+    // but we can detect "Safari" without "CriOS" or "FxiOS" when not standalone
+  ];
+
+  for (const { pattern, name } of inAppPatterns) {
+    if (pattern.test(ua)) {
+      return { isInApp: true, appName: name };
+    }
+  }
+
+  // iOS detection: in-app browsers on iOS often have limited getUserMedia support
+  // Check if we're on iOS and in a WebView (not Safari or Chrome)
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
+  if (isIOS) {
+    const isStandaloneSafari = /Safari/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua);
+    const isChrome = /CriOS/.test(ua);
+    const isFirefox = /FxiOS/.test(ua);
+
+    // If on iOS but not in Safari, Chrome, or Firefox, likely in-app browser
+    if (!isStandaloneSafari && !isChrome && !isFirefox) {
+      return { isInApp: true, appName: 'application' };
+    }
+  }
+
+  return { isInApp: false, appName: null };
+}
+
+/**
+ * Get a user-friendly error message for microphone permission errors
+ */
+export function getMicrophonePermissionErrorMessage(error: Error): string {
+  const errorMessage = error.message.toLowerCase();
+  const errorName = error.name || '';
+
+  // Check if in in-app browser first
+  const { isInApp, appName } = isInAppBrowser();
+  if (isInApp) {
+    const appText = appName ? `l'application ${appName}` : 'cette application';
+    return `Le microphone n'est pas disponible dans ${appText}. Ouvrez ce lien dans Safari ou Chrome pour utiliser le mode vocal.`;
+  }
+
+  // NotAllowedError: user denied permission or browser policy blocks it
+  if (errorName === 'NotAllowedError' ||
+      errorMessage.includes('not allowed') ||
+      errorMessage.includes('permission denied')) {
+    // Check for iOS Safari specific message
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+      return "Accès au microphone refusé. Vérifiez que Safari a l'autorisation d'accéder au microphone dans Réglages > Safari.";
+    }
+    return "Accès au microphone refusé. Veuillez autoriser l'accès dans les paramètres de votre navigateur.";
+  }
+
+  // NotFoundError: no microphone available
+  if (errorName === 'NotFoundError' || errorMessage.includes('not found')) {
+    return "Aucun microphone détecté. Vérifiez que votre appareil possède un microphone fonctionnel.";
+  }
+
+  // NotReadableError: hardware error
+  if (errorName === 'NotReadableError' || errorMessage.includes('not readable')) {
+    return "Impossible d'accéder au microphone. Il est peut-être utilisé par une autre application.";
+  }
+
+  // OverconstrainedError: constraints cannot be satisfied
+  if (errorName === 'OverconstrainedError') {
+    return "Configuration audio incompatible. Essayez avec un autre microphone.";
+  }
+
+  // AbortError: operation was aborted
+  if (errorName === 'AbortError') {
+    return "L'accès au microphone a été interrompu. Veuillez réessayer.";
+  }
+
+  // SecurityError: insecure context (non-HTTPS)
+  if (errorName === 'SecurityError' || errorMessage.includes('secure context')) {
+    return "L'accès au microphone requiert une connexion sécurisée (HTTPS).";
+  }
+
+  // Generic fallback
+  return "Impossible d'accéder au microphone. Vérifiez les autorisations de votre navigateur.";
+}
