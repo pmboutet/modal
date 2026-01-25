@@ -142,58 +142,6 @@ type VoiceMessage = {
 };
 
 /**
- * Deduplicate a new partial transcript against the history.
- * Returns null if the new content is already contained in the history (duplicate).
- * Otherwise, returns the new portion that should be added.
- */
-function deduplicatePartial(history: string[], newContent: string): string | null {
-  if (!newContent.trim()) return null;
-
-  const newWords = newContent.trim().toLowerCase().split(/\s+/);
-  if (newWords.length === 0) return null;
-
-  // Check if this content is already in history (exact or substantial overlap)
-  for (const prev of history) {
-    const prevWords = prev.trim().toLowerCase().split(/\s+/);
-
-    // If new content is shorter or same as previous entry, check for containment
-    if (newWords.length <= prevWords.length) {
-      const newText = newWords.join(' ');
-      const prevText = prevWords.join(' ');
-      if (prevText.includes(newText)) {
-        return null; // Already contained in previous entry
-      }
-    }
-  }
-
-  // Find what's new compared to the last entry
-  if (history.length > 0) {
-    const lastEntry = history[history.length - 1];
-    const lastWords = lastEntry.trim().toLowerCase().split(/\s+/);
-
-    // Find how many words from the start of newContent overlap with the end of lastEntry
-    let overlapCount = 0;
-    for (let i = Math.min(lastWords.length, newWords.length); i >= 2; i--) {
-      const lastSuffix = lastWords.slice(-i).join(' ');
-      const newPrefix = newWords.slice(0, i).join(' ');
-      if (lastSuffix === newPrefix) {
-        overlapCount = i;
-        break;
-      }
-    }
-
-    // Return only the new portion
-    if (overlapCount > 0) {
-      const originalWords = newContent.trim().split(/\s+/);
-      const newPortion = originalWords.slice(overlapCount).join(' ');
-      return newPortion.trim() || null;
-    }
-  }
-
-  return newContent.trim();
-}
-
-/**
  * Composant principal PremiumVoiceInterface
  * 
  * Gère toute la logique de l'interface vocale :
@@ -267,8 +215,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const [audioLevel, setAudioLevel] = useState(0);
   // Buffers locaux pour le streaming en cours (pattern OpenAI)
   const [interimUser, setInterimUser] = useState<VoiceMessage | null>(null);
-  // History of partial transcripts for stacking display (max 5, deduplicated)
-  const [interimUserHistory, setInterimUserHistory] = useState<string[]>([]);
   const [interimAssistant, setInterimAssistant] = useState<VoiceMessage | null>(null);
   // Pending final user message - shown until confirmed in props.messages to avoid "blanc" gap
   const [pendingFinalUser, setPendingFinalUser] = useState<VoiceMessage | null>(null);
@@ -706,7 +652,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
 
     try {
-      const response = await fetch(`/api/ask/${askKey}/agent-config`);
+      // BUG-039 FIX: Pass inviteToken to agent-config for proper participant filtering
+      // Without token, individual_parallel mode shows ALL participants instead of current one
+      const url = inviteToken
+        ? `/api/ask/${askKey}/agent-config?token=${encodeURIComponent(inviteToken)}`
+        : `/api/ask/${askKey}/agent-config`;
+      const response = await fetch(url);
       if (!response.ok) {
         devError(`[PremiumVoiceInterface] ❌ Failed to fetch agent config (${reason}):`, response.status, response.statusText);
         return;
@@ -731,7 +682,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     } catch (error) {
       devError('[PremiumVoiceInterface] ❌ Error updating prompts:', reason, error);
     }
-  }, [askKey]);
+  }, [askKey, inviteToken]);
 
   // ===== MISE À JOUR LORS DU CHANGEMENT DE STEP =====
   const previousStepIdRef = useRef<string | null | undefined>(currentConversationStepId);
@@ -1354,15 +1305,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           content: baseMessage.content,
           isInterim: true,
         }));
-        // Stack partial in history with deduplication
-        setInterimUserHistory(prev => {
-          const newPortion = deduplicatePartial(prev, baseMessage.content);
-          if (newPortion) {
-            // Add new portion and keep max 5 entries
-            return [...prev, newPortion].slice(-5);
-          }
-          return prev;
-        });
         // Track when we received this partial (for nudge mechanism)
         lastUserPartialTimestampRef.current = Date.now();
       }
@@ -1473,7 +1415,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Clear interim and store as pending final to avoid "blanc" gap
       // The message will stay visible until it appears in props.messages
       setInterimUser(null);
-      setInterimUserHistory([]); // Clear history on final message
       // Generate ID once and reuse for both pendingFinalUser and onMessage
       // to ensure proper deduplication (fixes visual jump bug)
       const userFinalMessageId = messageId || `msg-${Date.now()}`;
@@ -2172,7 +2113,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
       // Étape 6: Réinitialiser les buffers de streaming
       setInterimUser(null);
-      setInterimUserHistory([]); // Clear history on disconnect
       setInterimAssistant(null);
       setPendingFinalUser(null);
 
@@ -3547,26 +3487,16 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                       </button>
                     ) : null}
                   </div>
-                ) : interimUserHistory.length > 0 ? (
-                  // Display stacked partial transcripts (deduplicated)
-                  <div className="space-y-0.5">
-                    {interimUserHistory.map((text, index) => (
-                      <p
-                        key={index}
-                        className={cn(
-                          "text-xs italic truncate",
-                          index === interimUserHistory.length - 1
-                            ? "text-white/70"
-                            : "text-white/40"
-                        )}
-                        style={{ direction: 'rtl', textAlign: 'left' }}
-                      >
-                        <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>
-                          {text}
-                        </span>
-                      </p>
-                    ))}
-                  </div>
+                ) : interimUser?.content ? (
+                  // Display single partial transcript that scrolls/updates
+                  <p
+                    className="text-white/70 text-xs italic truncate"
+                    style={{ direction: 'rtl', textAlign: 'left' }}
+                  >
+                    <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>
+                      {interimUser.content}
+                    </span>
+                  </p>
                 ) : (
                   <p className="text-white/40 text-xs italic">
                     {isMuted ? "Cliquez sur le micro pour reprendre" : "Parlez naturellement..."}

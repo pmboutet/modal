@@ -411,6 +411,14 @@ export class TranscriptionManager {
    * Process pending transcript when silence is detected
    */
   async processPendingTranscript(force: boolean = false, absoluteFailsafe: boolean = false): Promise<void> {
+    // BUG-039 FIX: Skip processing if awaiting speaker confirmation
+    // This prevents the AI from responding to its own echo while the user
+    // is confirming their identity in individual voice mode
+    if (this.awaitingSpeakerConfirmation) {
+      devLog('[Transcription] Skipping processPendingTranscript - awaiting speaker confirmation');
+      return;
+    }
+
     // Clear timeouts
     if (this.silenceTimeout) {
       clearTimeout(this.silenceTimeout);

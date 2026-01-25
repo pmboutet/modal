@@ -66,6 +66,21 @@ export async function POST(request: Request) {
         };
       }
 
+      // LOG ACTUAL PAYLOAD SENT TO LLM
+      console.log('[API /speechmatics-llm] 📤 Anthropic request:', JSON.stringify({
+        model,
+        systemPromptLength: (systemPrompt || '').length,
+        systemPromptPreview: (systemPrompt || '').substring(0, 500),
+        messagesCount: conversationMessages.length,
+        messages: conversationMessages.map((m: any) => ({
+          role: m.role,
+          contentLength: m.content?.length,
+          contentPreview: m.content?.substring(0, 200),
+        })),
+        enableThinking,
+        thinkingBudget,
+      }, null, 2));
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -87,6 +102,14 @@ export async function POST(request: Request) {
 
       const data = await response.json();
       const content = data.content[0]?.text || '';
+
+      // LOG LLM RESPONSE
+      console.log('[API /speechmatics-llm] 📥 Anthropic response:', JSON.stringify({
+        contentLength: content.length,
+        contentPreview: content.substring(0, 300),
+        usage: data.usage,
+      }, null, 2));
+
       return NextResponse.json({ content });
     } else {
       // OpenAI

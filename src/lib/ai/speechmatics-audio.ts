@@ -1084,7 +1084,10 @@ export class SpeechmaticsAudio {
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '') // Remove accents
-      .replace(/[.,!?;:'"«»\-–—…()[\]{}]/g, ' ') // Remove punctuation
+      // BUG-039 FIX: Comprehensive hyphen/dash normalization for names like "Pierre-Marie" vs "Pierre Marie"
+      // Covers: hyphen-minus (-), en-dash (–), em-dash (—), hyphen (‐), non-breaking hyphen (‑), minus sign (−)
+      .replace(/[\u002D\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g, ' ')
+      .replace(/[.,!?;:'"«»…()[\]{}]/g, ' ') // Remove other punctuation
       .replace(/\s+/g, ' ')
       .trim();
   }
