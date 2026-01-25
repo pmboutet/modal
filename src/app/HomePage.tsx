@@ -184,8 +184,8 @@ function MobileLayout({
 
   return (
     <div className={`flex flex-col overflow-hidden min-w-0 w-full max-w-full overflow-x-hidden touch-pan-y transition-[height] duration-200 ${isHeaderHidden ? 'h-[100dvh]' : 'h-[calc(100dvh-44px)]'}`}>
-      {/* Collapsible Header - Compact - hides on scroll down */}
-      {askDetails && (
+      {/* Collapsible Header - Compact - hides on scroll down AND in voice mode */}
+      {askDetails && !isVoiceModeActive && (
         <motion.div
           initial={false}
           animate={{
@@ -409,21 +409,22 @@ function MobileLayout({
         </motion.div>
       </div>
 
-      {/* Panel Indicator - with safe area for mobile browsers, hides on scroll down */}
-      <motion.div
-        initial={false}
-        animate={{
-          height: isHeaderHidden ? 0 : 'auto',
-          opacity: isHeaderHidden ? 0 : 1,
-        }}
-        transition={{ duration: 0.2 }}
-        className="flex items-center justify-center gap-2 bg-white/80 backdrop-blur-lg border-t border-slate-200/60 overflow-hidden"
-        style={{
-          paddingTop: isHeaderHidden ? 0 : 8,
-          // Extra padding for Safari iOS toolbar (~44px) + safe area for home indicator
-          paddingBottom: isHeaderHidden ? 0 : 'max(56px, calc(env(safe-area-inset-bottom) + 44px))',
-        }}
-      >
+      {/* Panel Indicator - with safe area for mobile browsers, hides on scroll down AND in voice mode */}
+      {!isVoiceModeActive && (
+        <motion.div
+          initial={false}
+          animate={{
+            height: isHeaderHidden ? 0 : 'auto',
+            opacity: isHeaderHidden ? 0 : 1,
+          }}
+          transition={{ duration: 0.2 }}
+          className="flex items-center justify-center gap-2 bg-white/80 backdrop-blur-lg border-t border-slate-200/60 overflow-hidden"
+          style={{
+            paddingTop: isHeaderHidden ? 0 : 8,
+            // Extra padding for Safari iOS toolbar (~44px) + safe area for home indicator
+            paddingBottom: isHeaderHidden ? 0 : 'max(56px, calc(env(safe-area-inset-bottom) + 44px))',
+          }}
+        >
         <button
           onClick={() => setMobileActivePanel('chat')}
           className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all ${
@@ -447,6 +448,7 @@ function MobileLayout({
           <span className="text-sm font-medium">Insights</span>
         </button>
       </motion.div>
+      )}
     </div>
   );
 }

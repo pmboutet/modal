@@ -3350,7 +3350,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         {/* Voice control bar - mic button left, status/partials right */}
         <div
           className="flex items-center gap-4 px-4"
-          style={{ paddingBottom: 'max(56px, calc(env(safe-area-inset-bottom, 0px) + 44px))' }}
+          style={{ paddingBottom: 'max(80px, calc(env(safe-area-inset-bottom, 0px) + 60px))' }}
         >
           {/* Mic button - left, smaller */}
           <div className="flex-shrink-0 relative">
