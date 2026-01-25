@@ -109,6 +109,46 @@ export async function POST(
       .select('id, user_id, participant_name, participant_email, role, is_spokesperson')
       .eq('ask_session_id', askSessionId);
 
+    // BUG-037 FIX: Get the user_id from the thread to identify the correct participant
+    // Previously, we used participants[0].name which was always the first participant (wrong!)
+    // Now we find the participant whose user_id matches the thread's user_id
+    const { data: threadData } = await adminClient
+      .from('conversation_threads')
+      .select('user_id')
+      .eq('id', conversationThreadId)
+      .single();
+
+    const threadUserId = threadData?.user_id ?? null;
+
+    // Get profile name for the thread owner if they have a user_id
+    let threadOwnerName: string | null = null;
+    if (threadUserId) {
+      const { data: profileData } = await adminClient
+        .from('profiles')
+        .select('first_name, last_name, full_name')
+        .eq('id', threadUserId)
+        .single();
+
+      if (profileData) {
+        threadOwnerName = profileData.full_name
+          || (profileData.first_name && profileData.last_name
+              ? `${profileData.first_name} ${profileData.last_name}`
+              : profileData.first_name)
+          || null;
+      }
+    }
+
+    // Find the participant that matches the thread's user_id
+    const currentParticipantRow = threadUserId
+      ? (participantRows ?? []).find(p => p.user_id === threadUserId)
+      : null;
+
+    // Build the current participant name using profile first, then participant data
+    const currentParticipantName = threadOwnerName
+      || currentParticipantRow?.participant_name
+      || currentParticipantRow?.participant_email
+      || null;
+
     const participants = (participantRows ?? []).map((p, index) => ({
       name: p.participant_name || p.participant_email || `Participant ${index + 1}`,
       role: p.role ?? null,
@@ -122,9 +162,8 @@ export async function POST(
     if (!conversationPlan) {
       console.log(`📋 [init route] Generating conversation plan...`);
       try {
-        // BUG FIX: Pass currentParticipantName to ensure participant_name/participant_details are populated
-        // even when messages array is empty (initial greeting)
-        const firstParticipantName = participants.length > 0 ? participants[0].name : null;
+        // BUG-037 FIX: Use currentParticipantName derived from thread's user_id
+        // This ensures the AI greets the correct participant (Victoire, not Pierre-Marie)
         const planGenerationVariables = buildConversationAgentVariables({
           ask: {
             ask_key: askRow.ask_key,
@@ -136,7 +175,7 @@ export async function POST(
           challenge: null,
           messages: [],
           participants,
-          currentParticipantName: firstParticipantName,
+          currentParticipantName,
           conversationPlan: null,
         });
 
@@ -232,9 +271,8 @@ export async function POST(
           participantRows: participantRows ?? [],
         });
 
-        // BUG FIX: Pass currentParticipantName to ensure participant_name/participant_details are populated
-        // even when messages array is empty (initial greeting)
-        const firstParticipant = participants.length > 0 ? participants[0].name : null;
+        // BUG-037 FIX: Use currentParticipantName derived from thread's user_id
+        // This ensures the AI greets the correct participant (Victoire, not Pierre-Marie)
         const agentVariables = buildConversationAgentVariables({
           ask: {
             ask_key: askRow.ask_key,
@@ -246,7 +284,7 @@ export async function POST(
           challenge: null,
           messages: [],
           participants,
-          currentParticipantName: firstParticipant,
+          currentParticipantName,
           conversationPlan,
           elapsedActiveSeconds,
           stepElapsedActiveSeconds,
