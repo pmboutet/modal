@@ -2770,11 +2770,6 @@ export default function HomePage() {
                 <h3 className="text-lg font-medium text-white leading-relaxed">
                   {sessionData.ask.question}
                 </h3>
-                {sessionData.ask.description && (
-                  <p className="mt-4 text-slate-300 text-sm leading-relaxed">
-                    {sessionData.ask.description}
-                  </p>
-                )}
               </motion.div>
             )}
           </div>
@@ -2832,11 +2827,6 @@ export default function HomePage() {
             <h3 className="text-lg font-medium text-white leading-relaxed">
               {sessionData.ask.question}
             </h3>
-            {sessionData.ask.description && (
-              <p className="mt-4 text-slate-300 text-sm leading-relaxed">
-                {sessionData.ask.description}
-              </p>
-            )}
           </motion.div>
 
           {/* Mode selection prompt or loading message */}

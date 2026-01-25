@@ -9,6 +9,9 @@ import type { ApiResponse, Insight } from '@/types';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';
 import {
   fetchConversationContext,
+  fetchParticipantByToken,
+  fetchUsersByIds,
+  buildParticipantDisplayName,
   type AskSessionRow,
 } from '@/lib/conversation-context';
 import { handleSubtopicSignals } from '@/lib/ai/conversation-signals';
@@ -59,33 +62,46 @@ export async function POST(
       }, { status: 404 });
     }
 
+    // BUG-042 FIX: Get participant info from token BEFORE fetching context
+    // This allows us to use the participant's user_id to find the correct thread
+    const inviteToken = request.headers.get('X-Invite-Token');
+    let currentParticipantName: string | null = null;
+    let participantUserId: string | null = null;
+
+    if (inviteToken) {
+      const participantRow = await fetchParticipantByToken(adminClient, inviteToken);
+      if (participantRow) {
+        participantUserId = participantRow.user_id ?? null;
+        const usersById = participantRow.user_id
+          ? await fetchUsersByIds(adminClient, [participantRow.user_id])
+          : {};
+        const user = participantRow.user_id ? usersById[participantRow.user_id] ?? null : null;
+        currentParticipantName = buildParticipantDisplayName(participantRow, user, 0);
+        console.log(`[voice-agent/log] Current participant from token: ${currentParticipantName} (user_id: ${participantUserId})`);
+      }
+    }
+
     // Fetch complete conversation context using centralized function (DRY!)
-    // Uses admin client to bypass RLS for voice agent access
-    // useLastUserMessageThread: true to find the correct thread in individual_parallel mode
+    // BUG-042 FIX: When token is provided, use profileId to find the correct thread for THIS participant
     const context = await fetchConversationContext(adminClient, askRow, {
       adminClient,
-      profileId: null, // voice-agent log doesn't have a specific user context
-      useLastUserMessageThread: true, // Important: find thread from last user message
+      profileId: participantUserId,
+      useLastUserMessageThread: !participantUserId, // Only use last message thread if no specific user
     });
 
     if (context.conversationPlan?.plan_data) {
       console.log('📋 Voice agent log: Loaded conversation plan with', context.conversationPlan.plan_data.steps.length, 'steps');
     }
 
-    // BUG-037 FIX: Determine current participant from last user message using ID-based matching
-    // Without this, filterActiveParticipants returns ALL participants in individual_parallel mode,
-    // causing the AI to potentially address the wrong person (first in participant list)
-    let currentParticipantName: string | null = null;
-
-    // Get the user_id of the last user message
-    const { userId: lastUserUserId } = await getLastUserMessageThread(adminClient, askRow.id);
-    if (lastUserUserId) {
-      // Find the participant row with this user_id (ID-based matching, not name-based)
-      const participantIndex = context.participantRows.findIndex(row => row.user_id === lastUserUserId);
-      if (participantIndex !== -1) {
-        // Use the same index to get the participant name from the parallel array
-        currentParticipantName = context.participants[participantIndex]?.name ?? null;
-        console.log(`[voice-agent/log] Current participant from user_id ${lastUserUserId}: ${currentParticipantName}`);
+    // Fallback: If no token, determine participant from last user message (legacy behavior)
+    if (!currentParticipantName) {
+      const { userId: lastUserUserId } = await getLastUserMessageThread(adminClient, askRow.id);
+      if (lastUserUserId) {
+        const participantIndex = context.participantRows.findIndex(row => row.user_id === lastUserUserId);
+        if (participantIndex !== -1) {
+          currentParticipantName = context.participants[participantIndex]?.name ?? null;
+          console.log(`[voice-agent/log] Current participant from last message: ${currentParticipantName}`);
+        }
       }
     }
 

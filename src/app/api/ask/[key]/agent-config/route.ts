@@ -92,31 +92,34 @@ export async function GET(
       );
     }
 
-    // Fetch complete conversation context using centralized function (DRY!)
-    // Uses token-based RPCs when token is provided (voice mode)
-    // useLastUserMessageThread: true to find the correct thread in individual_parallel mode
-    const context = await fetchConversationContext(adminClient, askSession, {
-      adminClient,
-      token: token || undefined,
-      profileId: null, // agent-config doesn't have a specific user context
-      useLastUserMessageThread: true, // Important: find thread from last user message
-    });
-
-    // BUG FIX: Determine current participant name from token (critical for individual_parallel mode)
-    // Without this, all participants are shown to the AI instead of just the current one
+    // BUG-042 FIX: Get participant info from token BEFORE fetching context
+    // This allows us to use the participant's user_id to find the correct thread
+    // Without this, useLastUserMessageThread would return another participant's thread
     let currentParticipantName: string | null = null;
+    let participantUserId: string | null = null;
     if (token) {
       const participantRow = await fetchParticipantByToken(adminClient, token);
       if (participantRow) {
+        participantUserId = participantRow.user_id ?? null;
         // Get user data for the participant to build display name
         const usersById = participantRow.user_id
           ? await fetchUsersByIds(adminClient, [participantRow.user_id])
           : {};
         const user = participantRow.user_id ? usersById[participantRow.user_id] ?? null : null;
         currentParticipantName = buildParticipantDisplayName(participantRow, user, 0);
-        console.log(`[agent-config] Current participant from token: ${currentParticipantName}`);
+        console.log(`[agent-config] Current participant from token: ${currentParticipantName} (user_id: ${participantUserId})`);
       }
     }
+
+    // Fetch complete conversation context using centralized function (DRY!)
+    // BUG-042 FIX: When token is provided, use profileId to find the correct thread for THIS participant
+    // Don't use useLastUserMessageThread when we have a specific user - it would return another user's thread
+    const context = await fetchConversationContext(adminClient, askSession, {
+      adminClient,
+      token: token || undefined,
+      profileId: participantUserId, // Use participant's user_id to find their thread
+      useLastUserMessageThread: !participantUserId, // Only use last message thread if no specific user
+    });
 
     // Debug logging for STEP_COMPLETE troubleshooting
     console.log('[agent-config] 📋 Conversation context loaded:', {
