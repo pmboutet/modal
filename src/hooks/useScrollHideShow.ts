@@ -62,8 +62,8 @@ const DEFAULT_MIN_SCROLL_DELTA = 2;
 const DEFAULT_TOP_THRESHOLD = 10;
 const DEFAULT_TRANSITION_DURATION = 200;
 
-// Only log in development
-const DEBUG = process.env.NODE_ENV === 'development' && typeof window !== 'undefined' && window.location.hostname === 'localhost';
+// Disabled - too verbose, enable manually for debugging scroll issues
+const DEBUG = false;
 
 export function useScrollHideShow(
   config: ScrollHideShowConfig = {}

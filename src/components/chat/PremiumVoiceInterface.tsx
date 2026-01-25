@@ -849,11 +849,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
             devLog('[PremiumVoiceInterface] 🔄 Sending nudge to /respond endpoint with last user message');
 
+            // Note: Use 'message' property (not 'content') to match /respond API contract
             const response = await fetch(`/api/ask/${askKey}/respond`, {
               method: 'POST',
               headers,
               body: JSON.stringify({
-                content: lastUserMessageContentRef.current,
+                message: lastUserMessageContentRef.current,
                 senderType: 'user',
                 metadata: {
                   voiceGenerated: true,
@@ -864,13 +865,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
             if (response.ok) {
               const result = await response.json();
-              if (result.success && result.data?.aiResponse) {
+              // Note: /respond returns { message: Message } not { aiResponse: string }
+              const aiResponseContent = result.data?.message?.content;
+              if (result.success && aiResponseContent) {
                 devLog('[PremiumVoiceInterface] ✅ Nudge successful - got AI response');
 
                 // If Speechmatics agent, speak the response via TTS
                 const agent = agentRef.current;
                 if (agent instanceof SpeechmaticsVoiceAgent && agent.isConnected()) {
-                  await agent.speakInitialMessage(result.data.aiResponse);
+                  await agent.speakInitialMessage(aiResponseContent);
                 }
 
                 // Clear awaiting state
@@ -1979,25 +1982,28 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               }
 
               // Use respond endpoint to generate initial AI message (same as text mode)
+              // Note: Use 'message' property (not 'content') to match /respond API contract
               const response = await fetch(`/api/ask/${askKey}/respond`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                  content: '', // Empty content triggers initial greeting
+                  message: '', // Empty message triggers initial greeting
                   senderType: 'system', // System-triggered initial message
                 }),
               });
 
               if (response.ok) {
                 const result = await response.json();
-                if (result.success && result.data?.aiResponse) {
+                // Note: /respond returns { message: Message } not { aiResponse: string }
+                const aiResponseContent = result.data?.message?.content;
+                if (result.success && aiResponseContent) {
                   // If tutorial is showing, store the message to speak later
                   if (tutorialActiveRef.current) {
                     devLog('[PremiumVoiceInterface] 📝 Tutorial active - storing initial message for later');
-                    pendingInitialMessageRef.current = result.data.aiResponse;
+                    pendingInitialMessageRef.current = aiResponseContent;
                   } else {
                     // Speak the initial message via TTS
-                    await agent.speakInitialMessage(result.data.aiResponse);
+                    await agent.speakInitialMessage(aiResponseContent);
                     devLog('[PremiumVoiceInterface] ✅ Initial message spoken');
                   }
                 }
