@@ -2547,20 +2547,26 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     previousLengthRef.current = displayMessages.length;
     previousLastContentRef.current = lastContent;
 
-    if ((hasNewMessages || lastMessageChanged) && messagesContainerRef.current) {
-      // Use scrollTop directly instead of scrollIntoView to avoid layout recalculations
-      // that can cause visual artifacts during message transitions
+    if ((hasNewMessages || lastMessageChanged) && messagesEndRef.current && messagesContainerRef.current) {
+      // Use scrollIntoView like text mode - works better on mobile/touch devices
+      // than directly setting scrollTop which can fail on iOS Safari
       const previousScrollTop = messagesContainerRef.current.scrollTop;
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      const newScrollTop = messagesContainerRef.current.scrollTop;
+      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
 
-      // Programmatic scroll doesn't trigger DOM scroll events, so manually notify
-      // the hide/show hook that we scrolled down (positive delta = hide header)
-      if (newScrollTop > previousScrollTop) {
-        handleScrollHideShow(newScrollTop, newScrollTop - previousScrollTop);
-        // Update lastScrollTopRef so manual scrolls calculate correct delta
-        lastScrollTopRef.current = newScrollTop;
-      }
+      // After scrollIntoView, get the new scroll position and notify hide/show hook
+      // Use requestAnimationFrame to ensure the scroll has completed
+      requestAnimationFrame(() => {
+        if (messagesContainerRef.current) {
+          const newScrollTop = messagesContainerRef.current.scrollTop;
+          // Programmatic scroll doesn't trigger DOM scroll events, so manually notify
+          // the hide/show hook that we scrolled down (positive delta = hide header)
+          if (newScrollTop > previousScrollTop) {
+            handleScrollHideShow(newScrollTop, newScrollTop - previousScrollTop);
+            // Update lastScrollTopRef so manual scrolls calculate correct delta
+            lastScrollTopRef.current = newScrollTop;
+          }
+        }
+      });
     }
   }, [displayMessages, handleScrollHideShow]);
 
