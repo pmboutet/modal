@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronLeft, ChevronRight, Mic, MicOff, Users, Pencil, AlertTriangle } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Mic, MicOff, Users, Pencil, AlertTriangle, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +22,7 @@ interface TutorialStep {
  * Props for the VoiceModeTutorial component
  */
 export interface VoiceModeTutorialProps {
-  /** Current step index (0-2) */
+  /** Current step index (0-3) */
   currentStep: number;
   /** Callback to go to next step */
   onNext: () => void;
@@ -38,6 +38,48 @@ export interface VoiceModeTutorialProps {
  * Tutorial steps content
  */
 const TUTORIAL_STEPS: TutorialStep[] = [
+  {
+    id: 'quiet-environment',
+    title: 'Environnement calme recommandé',
+    description: 'Le mode voix fonctionne mieux dans un environnement calme. Évitez les bruits de fond (musique, conversations, ventilation) pour une meilleure reconnaissance vocale.',
+    icon: Volume2,
+    illustration: (
+      <div className="flex items-center justify-center py-4">
+        <div className="relative">
+          {/* Central icon */}
+          <div className="w-16 h-16 rounded-full bg-green-500/20 border-2 border-green-400/40 flex items-center justify-center">
+            <Volume2 className="h-7 w-7 text-green-300" />
+          </div>
+          {/* Sound waves animation */}
+          <motion.div
+            className="absolute inset-0 rounded-full border-2 border-green-400/30"
+            animate={{
+              scale: [1, 1.4, 1.4],
+              opacity: [0.6, 0, 0],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeOut",
+            }}
+          />
+          <motion.div
+            className="absolute inset-0 rounded-full border-2 border-green-400/30"
+            animate={{
+              scale: [1, 1.4, 1.4],
+              opacity: [0.6, 0, 0],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeOut",
+              delay: 0.5,
+            }}
+          />
+        </div>
+      </div>
+    ),
+  },
   {
     id: 'mute-button',
     title: 'Contrôler le microphone',
@@ -137,7 +179,8 @@ const TUTORIAL_STEPS: TutorialStep[] = [
 /**
  * VoiceModeTutorial - Onboarding tutorial for voice mode features
  *
- * Shows a 3-step tutorial explaining:
+ * Shows a 4-step tutorial explaining:
+ * 0. Quiet environment recommendation for better recognition
  * 1. How to mute/unmute the microphone
  * 2. How to manage detected voices (ignore/add/replace)
  * 3. How to edit transcriptions and the consequences
