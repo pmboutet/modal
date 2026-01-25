@@ -97,6 +97,8 @@ export function ChatComponent({
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const previousVoiceModeRef = useRef(false);
+  // BUG-042: Track if close button was clicked (window.close() doesn't work for direct navigation)
+  const [closeAttempted, setCloseAttempted] = useState(false);
 
   // Handle scroll events for mobile header hide/show
   const handleMessagesScroll = useCallback(() => {
@@ -725,14 +727,24 @@ export function ChatComponent({
                     <span>Toutes les étapes complétées</span>
                   </motion.div>
 
-                  {/* Close tab button */}
-                  <button
-                    onClick={() => window.close()}
-                    className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-sm font-medium transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                    <span>Fermer</span>
-                  </button>
+                  {/* Close tab button - BUG-042: window.close() only works for JS-opened windows */}
+                  {closeAttempted ? (
+                    <p className="mt-2 text-sm text-slate-500 text-center">
+                      Vous pouvez fermer cet onglet.
+                    </p>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        window.close();
+                        // If window.close() didn't work, show fallback message after a short delay
+                        setTimeout(() => setCloseAttempted(true), 100);
+                      }}
+                      className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-sm font-medium transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                      <span>Fermer</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -1018,7 +1030,16 @@ function MessageBubble({
   const isInterim = message.metadata?.isInterim === true;
 
   // Detect and extract step completion marker (handles markdown formatting like **STEP_COMPLETE:**)
-  const { hasMarker: hasStepComplete, stepId: completedStepId } = detectStepComplete(message.content);
+  // Also check metadata for completedStepId (set when message is persisted after streaming)
+  const { hasMarker: hasMarkerInContent, stepId: stepIdFromContent } = detectStepComplete(message.content);
+
+  // FIX: Check metadata for completedStepId (persisted messages have marker cleaned but metadata preserved)
+  // This fixes the bug where the green step completion card disappears after streaming ends
+  const stepIdFromMetadata = message.metadata?.completedStepId as string | null;
+
+  // Use marker from content (during streaming) or metadata (after persistence)
+  const hasStepComplete = hasMarkerInContent || !!stepIdFromMetadata;
+  const completedStepId = stepIdFromContent || stepIdFromMetadata;
 
   // Find the completed step in conversation plan
   // If no step_id in marker, use the current active step

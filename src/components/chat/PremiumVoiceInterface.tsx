@@ -139,6 +139,7 @@ type VoiceMessage = {
   messageId?: string;
   isInterim?: boolean;
   speaker?: string; // Speaker identifier from diarization (consultant mode)
+  metadata?: { completedStepId?: string; [key: string]: unknown }; // FIX: Support metadata for step completion
 };
 
 /**
@@ -242,6 +243,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     ? conversationPlan.plan_data.steps.every(step => step.status === 'completed')
     : false;
 
+  // Track when step summary generation is in progress
+  const [isGeneratingStepSummary, setIsGeneratingStepSummary] = useState(false);
+
   // ===== ÉTATS DES CONTRÔLES MICROPHONE =====
   // ID du microphone sélectionné (null = microphone par défaut)
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string | null>(null);
@@ -268,6 +272,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Show voice mode tutorial on first usage
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
+  // BUG-042: Track if close button was clicked (window.close() doesn't work for direct navigation)
+  const [closeAttempted, setCloseAttempted] = useState(false);
   // Ref to track if tutorial is/was showing (to avoid race conditions with state)
   const tutorialActiveRef = useRef(false);
   // Ref to store pending initial message to speak after tutorial completes
@@ -1349,6 +1355,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         } else if (stepIdToComplete && askKey) {
           // Mark step as being completed to prevent duplicate calls
           completingStepsRef.current.add(stepIdToComplete);
+          // Show loading indicator while generating step summary
+          setIsGeneratingStepSummary(true);
 
           devLog('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
             detectedStepId,
@@ -1423,8 +1431,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             return false;
           };
 
-          // Execute with retry logic (fire and forget, but with proper error handling)
-          completeStepWithRetry();
+          // Execute with retry logic and hide loading indicator when done
+          completeStepWithRetry().finally(() => {
+            setIsGeneratingStepSummary(false);
+          });
         }
       }
     } else {
@@ -2716,7 +2726,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
+    <div className="fixed inset-0 z-[60] overflow-hidden">
       {/* In-app browser warning overlay */}
       {inAppBrowserInfo?.isInApp && (
         <div className="absolute inset-0 z-[100] bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center p-6">
@@ -3021,7 +3031,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               const canEdit = isUser && !message.isInterim && hasRealId && onEditMessage;
 
               // Detect step completion marker (handles markdown formatting like **STEP_COMPLETE:**)
-              const { hasMarker: hasStepComplete, stepId: completedStepId } = detectStepComplete(message.content);
+              // Also check metadata for completedStepId (set when message is persisted after streaming)
+              const { hasMarker: hasMarkerInContent, stepId: stepIdFromContent } = detectStepComplete(message.content);
+
+              // FIX: Check metadata for completedStepId (persisted messages have marker cleaned but metadata preserved)
+              const stepIdFromMetadata = message.metadata?.completedStepId as string | null;
+
+              // Use marker from content (during streaming) or metadata (after persistence)
+              const hasStepComplete = hasMarkerInContent || !!stepIdFromMetadata;
+              const completedStepId = stepIdFromContent || stepIdFromMetadata;
 
               // Find the completed step in conversation plan
               const completedStep = hasStepComplete && conversationPlan
@@ -3256,6 +3274,40 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               );
             })}
           </AnimatePresence>
+          {/* Step summary generation loading indicator */}
+          {isGeneratingStepSummary && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-center justify-center gap-3 py-4 px-4"
+            >
+              <div className="flex items-center gap-3 rounded-xl border border-cyan-500/30 bg-cyan-900/20 backdrop-blur-sm px-5 py-3">
+                {/* Animated loading dots */}
+                <div className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="h-2 w-2 rounded-full bg-cyan-400"
+                      animate={{
+                        scale: [1, 1.3, 1],
+                        opacity: [0.5, 1, 0.5],
+                      }}
+                      transition={{
+                        duration: 1,
+                        repeat: Infinity,
+                        delay: i * 0.15,
+                        ease: "easeInOut",
+                      }}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm text-cyan-300">
+                  Génération des synthèses en cours, veuillez patienter...
+                </span>
+              </div>
+            </motion.div>
+          )}
           {/* Interview completion celebration - inline */}
           {allStepsCompleted && (
             <motion.div
@@ -3346,14 +3398,24 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     <span>Toutes les étapes complétées</span>
                   </motion.div>
 
-                  {/* Close tab button */}
-                  <button
-                    onClick={() => window.close()}
-                    className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-white/20 hover:bg-white/30 border border-white/30 text-white text-sm font-medium transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                    <span>Fermer</span>
-                  </button>
+                  {/* Close tab button - BUG-042: window.close() only works for JS-opened windows */}
+                  {closeAttempted ? (
+                    <p className="mt-2 text-sm text-white/70 text-center">
+                      Vous pouvez fermer cet onglet.
+                    </p>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        window.close();
+                        // If window.close() didn't work, show fallback message after a short delay
+                        setTimeout(() => setCloseAttempted(true), 100);
+                      }}
+                      className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-white/20 hover:bg-white/30 border border-white/30 text-white text-sm font-medium transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                      <span>Fermer</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

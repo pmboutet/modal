@@ -591,6 +591,16 @@ export async function POST(
                   });
                   controller.enqueue(encoder.encode(`data: ${errorData}\n\n`));
                 } else {
+                  // FIX: Detect step completion BEFORE sending message event
+                  // This ensures completedStepId is included in metadata so UI can display the green card
+                  const detectedStepId = conversationThread ? detectStepCompletion(fullContent.trim()) : null;
+
+                  // Build metadata with completedStepId if a step was completed
+                  const baseMetadata = normaliseMessageMetadata(inserted.metadata);
+                  const messageMetadata = detectedStepId
+                    ? { ...baseMetadata, completedStepId: detectedStepId }
+                    : baseMetadata;
+
                   const message = {
                     id: inserted.id,
                     askKey: askRow.ask_key,
@@ -601,7 +611,7 @@ export async function POST(
                     senderId: inserted.user_id ?? null,
                     senderName: 'Agent',
                     timestamp: inserted.created_at ?? new Date().toISOString(),
-                    metadata: normaliseMessageMetadata(inserted.metadata),
+                    metadata: messageMetadata,
                   };
 
                   // Send final message
@@ -611,11 +621,9 @@ export async function POST(
                   });
                   controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
 
-                  // Check for step completion markers
-                  if (conversationThread) {
-                    const detectedStepId = detectStepCompletion(fullContent.trim());
-                    if (detectedStepId) {
-                      try {
+                  // Process step completion if detected
+                  if (conversationThread && detectedStepId) {
+                    try {
                         // Use admin client to ensure we can read the plan regardless of RLS
                         const adminForPlan = await getAdminClient();
                         const plan = await getConversationPlanWithSteps(adminForPlan, conversationThread.id);
@@ -692,9 +700,11 @@ export async function POST(
                         console.error('Failed to update conversation plan in stream:', planError);
                         // Don't fail the stream if plan update fails
                       }
-                    }
+                  }
 
-                    // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+                  // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+                  // Note: This runs for all messages, not just step completions
+                  if (conversationThread) {
                     try {
                       const adminForSubtopics = await getAdminClient();
                       const subtopicResult = await handleSubtopicSignals(

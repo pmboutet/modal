@@ -1917,6 +1917,10 @@ export async function POST(
         const rawVoiceContent = messageContent;
         const cleanedVoiceContent = cleanAllSignalMarkers(messageContent);
 
+        // FIX: Detect step completion BEFORE building message response
+        // This ensures completedStepId is included in metadata so UI can display the green card
+        const voiceDetectedStepId = conversationThread ? detectStepCompletion(rawVoiceContent) : null;
+
         // Insert AI message via RPC wrapper to bypass RLS
         // Pass voicePlanStepId to link message to current step
         const inserted = await insertAiMessage(
@@ -1929,6 +1933,12 @@ export async function POST(
         );
 
         if (inserted) {
+          // Build metadata with completedStepId if a step was completed
+          const baseVoiceMetadata = normaliseMessageMetadata(inserted.metadata);
+          const voiceMessageMetadata = voiceDetectedStepId
+            ? { ...baseVoiceMetadata, completedStepId: voiceDetectedStepId }
+            : baseVoiceMetadata;
+
           message = {
             id: inserted.id,
             askKey: askRow.ask_key,
@@ -1939,7 +1949,7 @@ export async function POST(
             senderId: inserted.user_id ?? null,
             senderName: 'Agent',
             timestamp: inserted.created_at ?? new Date().toISOString(),
-            metadata: normaliseMessageMetadata(inserted.metadata),
+            metadata: voiceMessageMetadata,
           };
           messages.push(message);
           detectionMessageId = message.id;
@@ -1955,60 +1965,61 @@ export async function POST(
             containsStepComplete: latestAiResponse.includes('STEP_COMPLETE'),
           });
 
-          if (conversationThread) {
-            const detectedStepId = detectStepCompletion(latestAiResponse);
+          if (conversationThread && voiceDetectedStepId) {
+            const detectedStepId = voiceDetectedStepId;
             console.log('[respond] 🎤 Voice message detectStepCompletion result:', detectedStepId);
-            if (detectedStepId) {
-              try {
-                const plan = await getConversationPlanWithSteps(supabase, conversationThread.id);
-                if (plan) {
-                  const currentStep = getCurrentStep(plan);
+            try {
+              const plan = await getConversationPlanWithSteps(supabase, conversationThread.id);
+              if (plan) {
+                const currentStep = getCurrentStep(plan);
 
-                  // Support both normalized and legacy step structures
-                  const currentStepIdentifier = currentStep && 'step_identifier' in currentStep
-                    ? currentStep.step_identifier
-                    : currentStep?.id;
+                // Support both normalized and legacy step structures
+                const currentStepIdentifier = currentStep && 'step_identifier' in currentStep
+                  ? currentStep.step_identifier
+                  : currentStep?.id;
 
-                  // If 'CURRENT' was returned, use the current step identifier
-                  // Otherwise validate that detected ID matches current step
-                  const stepIdToComplete = detectedStepId === 'CURRENT'
-                    ? currentStepIdentifier
-                    : detectedStepId;
+                // If 'CURRENT' was returned, use the current step identifier
+                // Otherwise validate that detected ID matches current step
+                const stepIdToComplete = detectedStepId === 'CURRENT'
+                  ? currentStepIdentifier
+                  : detectedStepId;
 
-                  // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
-                  if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
-                    console.warn('[respond] ⚠️ Voice STEP_COMPLETE marker detected but step ID mismatch:', {
-                      detectedStepId,
-                      currentStepIdentifier,
-                      planId: plan.id,
-                      threadId: conversationThread.id,
-                    });
-                  }
-
-                  if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
-                    // Complete the step (summary will be generated asynchronously)
-                    // Use admin client for RLS bypass
-                    const adminSupabase = getAdminSupabaseClient();
-                    await completeStep(
-                      adminSupabase,
-                      conversationThread.id,
-                      stepIdToComplete!,
-                      undefined, // No pre-generated summary - let the async agent generate it
-                      askRow.id // Pass askSessionId to trigger async summary generation
-                    );
-                    console.log('[respond] ✅ Voice message step completed:', stepIdToComplete);
-
-                    // Fetch the updated plan to return to the client
-                    updatedConversationPlan = await getConversationPlanWithSteps(adminSupabase, conversationThread.id);
-                  }
+                // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
+                if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
+                  console.warn('[respond] ⚠️ Voice STEP_COMPLETE marker detected but step ID mismatch:', {
+                    detectedStepId,
+                    currentStepIdentifier,
+                    planId: plan.id,
+                    threadId: conversationThread.id,
+                  });
                 }
-              } catch (planError) {
-                console.error('[respond] ⚠️ Failed to update conversation plan for voice message:', planError);
-                // Don't fail the request if plan update fails
-              }
-            }
 
-            // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+                if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
+                  // Complete the step (summary will be generated asynchronously)
+                  // Use admin client for RLS bypass
+                  const adminSupabase = getAdminSupabaseClient();
+                  await completeStep(
+                    adminSupabase,
+                    conversationThread.id,
+                    stepIdToComplete!,
+                    undefined, // No pre-generated summary - let the async agent generate it
+                    askRow.id // Pass askSessionId to trigger async summary generation
+                  );
+                  console.log('[respond] ✅ Voice message step completed:', stepIdToComplete);
+
+                  // Fetch the updated plan to return to the client
+                  updatedConversationPlan = await getConversationPlanWithSteps(adminSupabase, conversationThread.id);
+                }
+              }
+            } catch (planError) {
+              console.error('[respond] ⚠️ Failed to update conversation plan for voice message:', planError);
+              // Don't fail the request if plan update fails
+            }
+          }
+
+          // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+          // Note: This runs for all voice messages, not just step completions
+          if (conversationThread) {
             try {
               const adminSupabase = getAdminSupabaseClient();
               const subtopicResult = await handleSubtopicSignals(
@@ -2087,6 +2098,10 @@ export async function POST(
           }
         }
 
+        // FIX: Detect step completion BEFORE building message response
+        // This ensures completedStepId is included in metadata so UI can display the green card
+        const textDetectedStepId = conversationThread ? detectStepCompletion(latestAiResponse) : null;
+
         // Insert AI message via RPC wrapper to bypass RLS
         // Pass planStepId to link message to current step
         // Store cleaned content (without signal markers)
@@ -2103,6 +2118,12 @@ export async function POST(
           throw new Error('Unable to store AI response');
         }
 
+        // Build metadata with completedStepId if a step was completed
+        const baseTextMetadata = normaliseMessageMetadata(inserted.metadata);
+        const textMessageMetadata = textDetectedStepId
+          ? { ...baseTextMetadata, completedStepId: textDetectedStepId }
+          : baseTextMetadata;
+
         message = {
           id: inserted.id,
           askKey: askRow.ask_key,
@@ -2113,62 +2134,63 @@ export async function POST(
           senderId: inserted.user_id ?? null,
           senderName: 'Agent',
           timestamp: inserted.created_at ?? new Date().toISOString(),
-          metadata: normaliseMessageMetadata(inserted.metadata),
+          metadata: textMessageMetadata,
         };
 
         messages.push(message);
         detectionMessageId = message.id;
 
-        // Check for step completion markers
-        if (conversationThread) {
-          const detectedStepId = detectStepCompletion(latestAiResponse);
-          if (detectedStepId) {
-            try {
-              const plan = await getConversationPlanWithSteps(supabase, conversationThread.id);
-              if (plan) {
-                const currentStep = getCurrentStep(plan);
+        // Process step completion if detected
+        if (conversationThread && textDetectedStepId) {
+          const detectedStepId = textDetectedStepId;
+          try {
+            const plan = await getConversationPlanWithSteps(supabase, conversationThread.id);
+            if (plan) {
+              const currentStep = getCurrentStep(plan);
 
-                // Support both normalized and legacy step structures
-                const currentStepIdentifier = currentStep && 'step_identifier' in currentStep
-                  ? currentStep.step_identifier
-                  : currentStep?.id;
+              // Support both normalized and legacy step structures
+              const currentStepIdentifier = currentStep && 'step_identifier' in currentStep
+                ? currentStep.step_identifier
+                : currentStep?.id;
 
-                // If 'CURRENT' was returned, use the current step identifier
-                // Otherwise validate that detected ID matches current step
-                const stepIdToComplete = detectedStepId === 'CURRENT'
-                  ? currentStepIdentifier
-                  : detectedStepId;
+              // If 'CURRENT' was returned, use the current step identifier
+              // Otherwise validate that detected ID matches current step
+              const stepIdToComplete = detectedStepId === 'CURRENT'
+                ? currentStepIdentifier
+                : detectedStepId;
 
-                // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
-                if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
-                  console.warn('[respond] ⚠️ STEP_COMPLETE marker detected but step ID mismatch:', {
-                    detectedStepId,
-                    currentStepIdentifier,
-                    planId: plan.id,
-                    threadId: conversationThread.id,
-                  });
-                }
-
-                if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
-                  // Complete the step (summary will be generated asynchronously)
-                  // Use admin client for RLS bypass
-                  const adminSupabase = getAdminSupabaseClient();
-                  await completeStep(
-                    adminSupabase,
-                    conversationThread.id,
-                    stepIdToComplete!,
-                    undefined, // No pre-generated summary - let the async agent generate it
-                    askRow.id // Pass askSessionId to trigger async summary generation
-                  );
-                }
+              // BUG-024 FIX: Add explicit logging when step ID doesn't match current step
+              if (detectedStepId !== 'CURRENT' && currentStepIdentifier !== detectedStepId) {
+                console.warn('[respond] ⚠️ STEP_COMPLETE marker detected but step ID mismatch:', {
+                  detectedStepId,
+                  currentStepIdentifier,
+                  planId: plan.id,
+                  threadId: conversationThread.id,
+                });
               }
-            } catch (planError) {
-              console.error('Failed to update conversation plan:', planError);
-              // Don't fail the request if plan update fails
-            }
-          }
 
-          // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+              if (currentStep && (detectedStepId === 'CURRENT' || currentStepIdentifier === detectedStepId)) {
+                // Complete the step (summary will be generated asynchronously)
+                // Use admin client for RLS bypass
+                const adminSupabase = getAdminSupabaseClient();
+                await completeStep(
+                  adminSupabase,
+                  conversationThread.id,
+                  stepIdToComplete!,
+                  undefined, // No pre-generated summary - let the async agent generate it
+                  askRow.id // Pass askSessionId to trigger async summary generation
+                );
+              }
+            }
+          } catch (planError) {
+            console.error('Failed to update conversation plan:', planError);
+            // Don't fail the request if plan update fails
+          }
+        }
+
+        // Handle subtopic signals (TOPICS_DISCOVERED, TOPIC_EXPLORED, TOPIC_SKIPPED)
+        // Note: This runs for all messages, not just step completions
+        if (conversationThread) {
           try {
             const adminSupabase = getAdminSupabaseClient();
             const subtopicResult = await handleSubtopicSignals(
