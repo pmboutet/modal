@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { executeAgent } from './service';
 import type { PromptVariables } from './agent-config';
 import { detectStepComplete } from '@/lib/sanitize';
+import { captureDbError } from '@/lib/supabaseQuery';
 
 /**
  * Represents a single step in the conversation plan (database record)
@@ -337,7 +338,7 @@ export async function getConversationPlan(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to fetch conversation plan:', error);
+    captureDbError(error, 'ask_conversation_plans', 'select', { conversationThreadId });
     return null;
   }
 
@@ -358,7 +359,7 @@ export async function getConversationPlanWithSteps(
   });
 
   if (rpcError) {
-    console.error('Failed to fetch conversation plan via RPC:', rpcError);
+    captureDbError(rpcError, 'get_conversation_plan_with_steps', 'rpc', { conversationThreadId });
     return null;
   }
 
@@ -418,7 +419,7 @@ export async function getPlanStep(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to fetch plan step:', error);
+    captureDbError(error, 'ask_conversation_plan_steps', 'select', { planId, stepIdentifier });
     return null;
   }
 
@@ -442,7 +443,7 @@ export async function getActiveStep(
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to fetch active step:', error);
+    captureDbError(error, 'ask_conversation_plan_steps', 'select', { planId, status: 'active' });
     return null;
   }
 

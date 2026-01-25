@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as Sentry from '@sentry/nextjs';
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiResponse, Insight, Message } from '@/types';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
@@ -2259,6 +2260,9 @@ export async function POST(
     });
   } catch (error) {
     console.error('Error executing AI response pipeline:', error);
+    Sentry.captureException(error, {
+      tags: { route: 'ask/[key]/respond', method: 'POST' },
+    });
     return NextResponse.json<ApiResponse>({
       success: false,
       error: parseErrorMessage(error)

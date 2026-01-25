@@ -1,4 +1,5 @@
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
+import * as Sentry from '@sentry/nextjs';
 
 export interface ConversationThread {
   id: string;
@@ -151,22 +152,11 @@ export function shouldUseSharedThread(askSession: AskSessionConfig): boolean {
  *   → Chaque utilisateur a son propre thread isolé
  *   → Pas de visibilité croisée des messages et insights
  *
- * - collaborative: Shared thread (is_shared = true, user_id = NULL)
+ * - collaborative/group_reporter/consultant: Shared thread (is_shared = true, user_id = creator)
  *   → Tous les participants partagent le même thread
- *   → Tout le monde voit tous les messages et insights
+ *   → user_id = le premier participant qui a créé le thread
  *
- * - group_reporter: Shared thread (is_shared = true, user_id = NULL)
- *   → Tous les participants partagent le même thread
- *   → Tout le monde voit tous les messages et insights
- *   → Un participant est désigné comme rapporteur (via is_spokesperson)
- *
- * - consultant: Shared thread (is_shared = true, user_id = NULL)
- *   → Tous les participants partagent le même thread
- *   → Seul le facilitator voit les questions suggérées
- *   → L'IA n'envoie pas de réponses automatiques
- *
- * Important: Si userId est fourni en mode individuel, le thread sera créé/recherché pour cet utilisateur spécifique.
- * Si userId est NULL en mode individuel, on bascule vers un thread partagé (fallback).
+ * IMPORTANT: user_id est TOUJOURS requis. Pas de threads anonymes.
  */
 export async function getOrCreateConversationThread(
   supabase: SupabaseClient,
@@ -175,66 +165,54 @@ export async function getOrCreateConversationThread(
   askConfig: AskSessionConfig
 ): Promise<{ thread: ConversationThread | null; error: PostgrestError | null }> {
   const useShared = shouldUseSharedThread(askConfig);
-  const threadUserId = useShared ? null : userId;
+
+  // userId is ALWAYS required - no anonymous threads
+  if (!userId) {
+    const errorMessage = 'userId is required for all conversation threads. No anonymous threads allowed.';
+    console.error('[getOrCreateConversationThread] userId is required but was not provided. This is a bug.');
+
+    // Capture in Sentry for visibility
+    Sentry.captureException(new Error(errorMessage), {
+      tags: {
+        component: 'asks',
+        function: 'getOrCreateConversationThread',
+      },
+      extra: {
+        askSessionId,
+        conversationMode: askConfig.conversation_mode,
+      },
+    });
+
+    return {
+      thread: null,
+      error: {
+        message: errorMessage,
+        details: 'userId was null or undefined',
+        hint: 'Ensure participantInfo.user_id is set before calling getOrCreateConversationThread',
+        code: 'PGRST116',
+      } as PostgrestError,
+    };
+  }
 
   console.log('[getOrCreateConversationThread] Starting...', {
     askSessionId,
     userId,
     conversationMode: askConfig.conversation_mode,
     useShared,
-    threadUserId,
   });
 
   // Try to find existing thread
-  // NOTE: For shared threads (user_id = NULL), PostgreSQL unique indexes don't prevent duplicates
-  // because NULL values are considered distinct. We use .limit(1) to handle potential duplicates.
   let query = supabase
     .from('conversation_threads')
     .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
     .eq('ask_session_id', askSessionId);
 
   if (useShared) {
-    query = query.is('user_id', null).eq('is_shared', true);
+    // For shared threads, find ANY existing shared thread (first one created)
+    query = query.eq('is_shared', true);
   } else {
-    // In individual mode, we need a userId. If not provided, fallback to shared thread
-    if (!threadUserId) {
-      console.warn('Individual thread mode requires userId, but none provided. Falling back to shared thread behavior.');
-      // Try to get or create shared thread as fallback
-      // Use .limit(1) to handle potential duplicates due to NULL uniqueness
-      const { data: sharedThreads, error: sharedError } = await supabase
-        .from('conversation_threads')
-        .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
-        .eq('ask_session_id', askSessionId)
-        .is('user_id', null)
-        .eq('is_shared', true)
-        .order('created_at', { ascending: true })
-        .limit(1);
-
-      if (!sharedError && sharedThreads && sharedThreads.length > 0) {
-        return { thread: sharedThreads[0] as ConversationThread, error: null };
-      }
-
-      // If no shared thread exists, CREATE one as fallback
-      console.log('No shared thread exists, creating one as fallback for plan generation...');
-      const { data: newSharedThread, error: createSharedError } = await supabase
-        .from('conversation_threads')
-        .insert({
-          ask_session_id: askSessionId,
-          user_id: null,
-          is_shared: true,
-        })
-        .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
-        .single<ConversationThread>();
-
-      if (createSharedError) {
-        console.error('Failed to create shared thread fallback:', createSharedError);
-        return { thread: null, error: createSharedError };
-      }
-
-      console.log('Created shared thread fallback:', newSharedThread?.id);
-      return { thread: newSharedThread, error: null };
-    }
-    query = query.eq('user_id', threadUserId).eq('is_shared', false);
+    // For individual threads, find the thread for this specific user
+    query = query.eq('user_id', userId).eq('is_shared', false);
   }
 
   // Use order + limit(1) instead of maybeSingle to handle potential duplicates
@@ -266,7 +244,7 @@ export async function getOrCreateConversationThread(
   // Create new thread
   console.log('[getOrCreateConversationThread] Creating new thread...', {
     askSessionId,
-    userId: threadUserId,
+    userId,
     isShared: useShared,
   });
 
@@ -274,7 +252,7 @@ export async function getOrCreateConversationThread(
     .from('conversation_threads')
     .insert({
       ask_session_id: askSessionId,
-      user_id: threadUserId,
+      user_id: userId,
       is_shared: useShared,
     })
     .select('id, ask_session_id, user_id, is_shared, is_initializing, created_at')
@@ -297,9 +275,9 @@ export async function getOrCreateConversationThread(
         .eq('ask_session_id', askSessionId);
 
       if (useShared) {
-        retryQuery = retryQuery.is('user_id', null).eq('is_shared', true);
+        retryQuery = retryQuery.eq('is_shared', true);
       } else {
-        retryQuery = retryQuery.eq('user_id', threadUserId).eq('is_shared', false);
+        retryQuery = retryQuery.eq('user_id', userId).eq('is_shared', false);
       }
 
       const { data: existingThreadsRetry, error: retryError } = await retryQuery

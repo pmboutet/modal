@@ -351,3 +351,44 @@ export function setUserContext(user: {
 export function clearUserContext(): void {
   Sentry.setUser(null);
 }
+
+/**
+ * Captures a database/RLS error to Sentry with context.
+ * Use this when you handle errors manually instead of using safeQuery.
+ *
+ * @example
+ * const { data, error } = await supabase.from('insights').select('*');
+ * if (error) {
+ *   captureDbError(error, 'insights', 'select', { askSessionId });
+ *   throw error;
+ * }
+ */
+export function captureDbError(
+  error: PostgrestError | Error,
+  table: string,
+  operation: string,
+  extra?: Record<string, unknown>
+): void {
+  const isPostgrestError = 'code' in error && 'details' in error;
+
+  Sentry.captureException(error, {
+    tags: {
+      db_table: table,
+      db_operation: operation,
+      db_error_code: isPostgrestError ? (error as PostgrestError).code : undefined,
+      error_type: isPostgrestError ? 'postgrest' : 'unexpected',
+    },
+    extra: {
+      ...extra,
+      errorDetails: isPostgrestError ? (error as PostgrestError).details : undefined,
+      errorHint: isPostgrestError ? (error as PostgrestError).hint : undefined,
+    },
+    level: 'error',
+  });
+
+  console.error(`[DB ERROR] ${operation} ${table}:`, {
+    message: error.message,
+    code: isPostgrestError ? (error as PostgrestError).code : undefined,
+    ...extra,
+  });
+}

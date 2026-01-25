@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { InsightAuthorRow, InsightRow } from './insights';
+import { captureDbError } from './supabaseQuery';
 
 const INSIGHT_COLUMNS_COMMON = 'challenge_id, content, summary, category, status, priority, created_at, updated_at, related_challenge_ids, source_message_id';
 const INSIGHT_COLUMNS_COMMON_NO_REL = 'challenge_id, content, summary, category, status, priority, created_at, updated_at, source_message_id';
@@ -39,6 +40,7 @@ async function hydrateInsightAuthors(
     .in('insight_id', insightIds);
 
   if (error) {
+    captureDbError(error, 'insight_authors', 'select', { insightIds });
     throw error;
   }
 
@@ -102,6 +104,7 @@ async function hydrateInsightKpis(
     .in('insight_id', insightIds);
 
   if (error) {
+    captureDbError(error, 'kpi_estimations', 'select', { insightIds });
     throw error;
   }
 
@@ -170,6 +173,7 @@ async function attachInsightTypeNames(
     .in('id', typeIds);
 
   if (error) {
+    captureDbError(error, 'insight_types', 'select', { typeIds });
     throw error;
   }
 
@@ -347,6 +351,7 @@ export async function fetchInsightTypeMap(
     .select('id, name');
 
   if (error) {
+    captureDbError(error, 'insight_types', 'select');
     throw error;
   }
 
@@ -372,6 +377,7 @@ export async function fetchInsightTypesForPrompt(
     .order('name', { ascending: true });
 
   if (error) {
+    captureDbError(error, 'insight_types', 'select');
     throw error;
   }
 

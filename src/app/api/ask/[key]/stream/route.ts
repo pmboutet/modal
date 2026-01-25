@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 
@@ -843,6 +844,9 @@ export async function POST(
 
   } catch (error) {
     console.error('Error in streaming endpoint:', error);
+    Sentry.captureException(error, {
+      tags: { route: 'ask/[key]/stream', method: 'POST' },
+    });
     return new Response(parseErrorMessage(error), { status: 500 });
   }
 }

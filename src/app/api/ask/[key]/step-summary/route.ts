@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { generateStepSummary } from '@/lib/ai/conversation-plan';
 import type { ApiResponse } from '@/types';

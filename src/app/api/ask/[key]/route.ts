@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
+import * as Sentry from '@sentry/nextjs';
 import { ApiResponse, Ask, AskParticipant, Insight, Message } from '@/types';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
+import { captureDbError } from '@/lib/supabaseQuery';
 import { mapInsightRowToInsight } from '@/lib/insights';
 import { fetchInsightsForSession, fetchInsightsForThread } from '@/lib/insightQueries';
 import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, resolveThreadUserId } from '@/lib/asks';
@@ -781,6 +783,9 @@ export async function GET(
     });
   } catch (error) {
     console.error('Error retrieving ASK from database:', error);
+    Sentry.captureException(error, {
+      tags: { route: 'ask/[key]', method: 'GET' },
+    });
     return NextResponse.json<ApiResponse>({
       success: false,
       error: parseErrorMessage(error)
@@ -1390,6 +1395,9 @@ export async function POST(
     });
   } catch (error) {
     console.error('Error saving message to database:', error);
+    Sentry.captureException(error, {
+      tags: { route: 'ask/[key]', method: 'POST' },
+    });
     const errorMessage = parseErrorMessage(error);
     console.error('Error details:', {
       message: errorMessage,

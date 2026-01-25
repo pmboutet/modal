@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { type SupabaseClient } from "@supabase/supabase-js";
+import * as Sentry from "@sentry/nextjs";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
 import { getAdminSupabaseClient } from "@/lib/supabaseAdmin";
+import { captureDbError } from "@/lib/supabaseQuery";
 import { type ApiResponse, type Message, type AskConversationMode, type Insight } from "@/types";
 import { getOrCreateConversationThread, shouldUseSharedThread, getMessagesForThread } from "@/lib/asks";
 import { fetchInsightsForThread, fetchInsightsForSession } from "@/lib/insightQueries";
@@ -710,6 +712,9 @@ export async function GET(
     });
   } catch (error) {
     console.error('Error in GET /api/ask/token/[token]:', error);
+    Sentry.captureException(error, {
+      tags: { route: 'ask/token', method: 'GET' },
+    });
     return NextResponse.json<ApiResponse>({
       success: false,
       error: error instanceof Error ? error.message : "Une erreur est survenue"

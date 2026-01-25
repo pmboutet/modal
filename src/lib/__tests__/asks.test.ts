@@ -320,18 +320,8 @@ describe('getOrCreateConversationThread', () => {
       expect(result.thread?.is_shared).toBe(false);
     });
 
-    it('should fallback to shared thread when no userId provided in individual mode', async () => {
-      const mockFrom = jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        is: jest.fn().mockReturnThis(),
-        order: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue({
-          data: [mockThread],
-          error: null,
-        }),
-      });
-
+    it('should return error when no userId provided (no anonymous threads allowed)', async () => {
+      const mockFrom = jest.fn();
       const supabase = { from: mockFrom } as unknown as SupabaseClient;
 
       const result = await getOrCreateConversationThread(
@@ -341,8 +331,12 @@ describe('getOrCreateConversationThread', () => {
         { conversation_mode: 'individual_parallel' }
       );
 
-      expect(result.thread).toEqual(mockThread);
-      expect(result.thread?.is_shared).toBe(true);
+      // Should return error, not a thread
+      expect(result.thread).toBeNull();
+      expect(result.error).not.toBeNull();
+      expect(result.error?.message).toContain('userId is required');
+      // Should not even call the database
+      expect(mockFrom).not.toHaveBeenCalled();
     });
   });
 
@@ -441,7 +435,7 @@ describe('getOrCreateConversationThread', () => {
       const existingThread: ConversationThread = {
         id: 'thread-created-by-concurrent-request',
         ask_session_id: 'ask-session-456',
-        user_id: null,
+        user_id: 'user-creator-123',
         is_shared: true,
         created_at: '2024-01-01T00:00:00Z',
       };
@@ -488,7 +482,7 @@ describe('getOrCreateConversationThread', () => {
       const result = await getOrCreateConversationThread(
         supabase,
         'ask-session-456',
-        null, // shared thread
+        'user-creator-123', // userId is now required
         { conversation_mode: 'collaborative' }
       );
 
