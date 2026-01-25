@@ -14,6 +14,7 @@ import { ConversationProgressBar } from "@/components/conversation/ConversationP
 import { useSessionTimer } from "@/hooks/useSessionTimer";
 import { useConsultantAnalysis } from "@/hooks/useConsultantAnalysis";
 import { useRealtimeMessages } from "@/hooks/useRealtimeMessages";
+import { useScrollHideShow } from "@/hooks/useScrollHideShow";
 import {
   cn,
   validateAskKey,
@@ -533,69 +534,29 @@ export default function HomePage() {
     }
   }, [sessionTimer]);
 
+  // Mobile header hide/show on scroll (using shared hook)
+  const { isHidden: isMobileHeaderHidden, handleScroll: handleMobileHeaderScroll } = useScrollHideShow({
+    showThreshold: 100,
+    minScrollDelta: 2,
+    topThreshold: 10,
+    transitionDuration: 200,
+  });
+
+  // Desktop header compact mode on scroll (using shared hook with different threshold)
+  const { isHidden: isHeaderCompact, handleScroll: handleHeaderCompactScroll } = useScrollHideShow({
+    showThreshold: 80,
+    minScrollDelta: 2,
+    topThreshold: 10,
+    transitionDuration: 250, // Slightly longer for desktop transitions
+  });
+
   // Handle scroll events from ChatComponent to hide/show header and toggle compact mode
+  // Uses shared useScrollHideShow hook for DRY implementation
   const handleMobileChatScroll = useCallback((scrollTop: number, scrollDelta: number) => {
-    // Ignore scroll events during header transition to prevent feedback loop
-    // When header changes size, it shifts content which triggers a scroll event
-    if (headerTransitioningRef.current) {
-      return;
-    }
-
-    // Ignore tiny scroll changes (less than 2px) to avoid jitter
-    if (Math.abs(scrollDelta) < 2 && scrollDelta !== 0) {
-      return;
-    }
-
-    // Helper to change header compact state with transition protection
-    const setHeaderCompactWithTransition = (compact: boolean) => {
-      setIsHeaderCompact(prev => {
-        if (prev !== compact) {
-          // Mark as transitioning and clear after animation completes
-          headerTransitioningRef.current = true;
-          setTimeout(() => {
-            headerTransitioningRef.current = false;
-          }, 250); // Match the CSS transition duration (200ms) + buffer
-        }
-        return compact;
-      });
-    };
-
-    // Initial load: compact header if already scrolled down
-    if (scrollDelta === 0 && scrollTop > 50) {
-      setIsMobileHeaderHidden(true);
-      setHeaderCompactWithTransition(true);
-      return;
-    }
-
-    if (scrollDelta > 0) {
-      // Scrolling down - hide mobile header and compact desktop header immediately
-      setIsMobileHeaderHidden(true);
-      setHeaderCompactWithTransition(true);
-      mobileScrollUpAccumulator.current = 0;
-      scrollUpAccumulator.current = 0;
-    } else if (scrollDelta < 0) {
-      // Scrolling up - accumulate scroll distance
-      mobileScrollUpAccumulator.current += Math.abs(scrollDelta);
-      scrollUpAccumulator.current += Math.abs(scrollDelta);
-
-      // Show mobile header only after scrolling up significantly
-      if (mobileScrollUpAccumulator.current >= MOBILE_SCROLL_UP_THRESHOLD) {
-        setIsMobileHeaderHidden(false);
-      }
-      // Expand header after scrolling up
-      if (scrollUpAccumulator.current >= SCROLL_UP_THRESHOLD) {
-        setHeaderCompactWithTransition(false);
-      }
-    }
-
-    // If at the very top, always show full header
-    if (scrollTop <= 10) {
-      setIsMobileHeaderHidden(false);
-      setHeaderCompactWithTransition(false);
-      mobileScrollUpAccumulator.current = 0;
-      scrollUpAccumulator.current = 0;
-    }
-  }, []);
+    // Both hooks handle their own transition protection and accumulator logic
+    handleMobileHeaderScroll(scrollTop, scrollDelta);
+    handleHeaderCompactScroll(scrollTop, scrollDelta);
+  }, [handleMobileHeaderScroll, handleHeaderCompactScroll]);
 
   // Consultant analysis for AI-assisted question suggestions
   const isConsultantMode = sessionData.ask?.conversationMode === 'consultant';
@@ -660,13 +621,6 @@ export default function HomePage() {
   const [mobileActivePanel, setMobileActivePanel] = useState<'chat' | 'insights'>('chat');
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [isMobileHeaderHidden, setIsMobileHeaderHidden] = useState(false);
-  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
-  const mobileScrollUpAccumulator = useRef(0);
-  const scrollUpAccumulator = useRef(0);
-  const headerTransitioningRef = useRef(false); // Prevent scroll feedback loop during header size change
-  const MOBILE_SCROLL_UP_THRESHOLD = 100;
-  const SCROLL_UP_THRESHOLD = 80;
   // Desktop compact mode states (tabbed layout when content is minimal)
   const [desktopRightPanelTab, setDesktopRightPanelTab] = useState<'questions' | 'details' | 'insights'>('insights');
   const [useCompactMode, setUseCompactMode] = useState(false);
