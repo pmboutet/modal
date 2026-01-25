@@ -2520,7 +2520,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   useEffect(() => {
     // Small delay to ensure DOM is ready
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Use scrollTop instead of scrollIntoView to avoid iOS Safari viewport lifting bug
+      // scrollIntoView can affect the window scroll position when inside a fixed container
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
     }, 100);
   }, []);
 
@@ -2636,13 +2640,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     previousLengthRef.current = displayMessages.length;
     previousLastContentRef.current = lastContent;
 
-    if ((hasNewMessages || lastMessageChanged) && messagesEndRef.current && messagesContainerRef.current) {
-      // Use scrollIntoView like text mode - works better on mobile/touch devices
-      // than directly setting scrollTop which can fail on iOS Safari
+    if ((hasNewMessages || lastMessageChanged) && messagesContainerRef.current) {
+      // Use scrollTop directly instead of scrollIntoView to avoid iOS Safari viewport lifting bug
+      // scrollIntoView can affect the window scroll position when inside a fixed container
       const previousScrollTop = messagesContainerRef.current.scrollTop;
-      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
 
-      // After scrollIntoView, get the new scroll position and notify hide/show hook
+      // Get the new scroll position and notify hide/show hook
       // Use requestAnimationFrame to ensure the scroll has completed
       requestAnimationFrame(() => {
         if (messagesContainerRef.current) {
