@@ -552,10 +552,10 @@ export async function handleConversationSignals(
 // SIGNAL CLEANING (for display)
 // ============================================================================
 
-// Re-export cleanAllSignalMarkers from sanitize.ts to maintain backward compatibility
-// for server-side imports. The function is defined in sanitize.ts to be usable
+// Re-export cleaning functions from sanitize.ts to maintain backward compatibility
+// for server-side imports. The functions are defined in sanitize.ts to be usable
 // both client-side (ChatComponent, PremiumVoiceInterface) and server-side.
-export { cleanAllSignalMarkers } from '@/lib/sanitize';
+export { cleanAllSignalMarkers, cleanTextForTTS } from '@/lib/sanitize';
 
 // ============================================================================
 // FORMATTING FOR PROMPTS

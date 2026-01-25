@@ -146,3 +146,100 @@ export function cleanAllSignalMarkers(content: string): string {
 
   return result.trim();
 }
+
+/**
+ * Clean text for Text-to-Speech synthesis.
+ * Removes markdown formatting and other elements that should not be vocalized.
+ *
+ * This function handles:
+ * - Bold: **text** or __text__ → text
+ * - Italic: *text* or _text_ → text
+ * - Strikethrough: ~~text~~ → text
+ * - Headers: # ## ### etc → removes the # symbols
+ * - Links: [text](url) → text
+ * - Images: ![alt](url) → removes entirely
+ * - Inline code: `code` → code
+ * - Code blocks: ```code``` → removes entirely
+ * - Blockquotes: > text → text
+ * - Horizontal rules: ---, ***, ___ → removes entirely
+ * - Lists: - item, * item, 1. item → item
+ * - Tables: | cell | → cell
+ * - Special delimiters: ⟦⟦ ⟧⟧ → removes
+ * - HTML tags: <tag> → removes
+ * - Multiple spaces/newlines → single space
+ */
+export function cleanTextForTTS(content: string): string {
+  let result = content;
+
+  // First, clean all signal markers (STEP_COMPLETE, TOPICS_DISCOVERED, etc.)
+  result = cleanAllSignalMarkers(result);
+
+  // Remove code blocks (``` ... ```) - must be done before inline code
+  result = result.replace(/```[\s\S]*?```/g, '');
+
+  // Remove inline code (`code`)
+  result = result.replace(/`([^`]+)`/g, '$1');
+
+  // Remove images ![alt](url) - remove entirely as images can't be spoken
+  result = result.replace(/!\[([^\]]*)\]\([^)]+\)/g, '');
+
+  // Convert links [text](url) → text
+  result = result.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+  // Remove horizontal rules (---, ***, ___, or longer variants)
+  result = result.replace(/^[\s]*[-*_]{3,}[\s]*$/gm, '');
+
+  // Remove headers (# ## ### etc.) - keep the text
+  result = result.replace(/^#{1,6}\s+/gm, '');
+
+  // Remove blockquote markers (> text → text)
+  result = result.replace(/^>\s*/gm, '');
+
+  // Remove bold (**text** or __text__) - keep the text
+  result = result.replace(/\*\*([^*]+)\*\*/g, '$1');
+  result = result.replace(/__([^_]+)__/g, '$1');
+
+  // Remove italic (*text* or _text_) - keep the text
+  // Be careful not to match already-processed bold or list items
+  result = result.replace(/(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)/g, '$1');
+  result = result.replace(/(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)/g, '$1');
+
+  // Remove strikethrough (~~text~~) - keep the text
+  result = result.replace(/~~([^~]+)~~/g, '$1');
+
+  // Remove list markers at the beginning of lines
+  // Unordered: - item, * item, + item
+  result = result.replace(/^[\s]*[-*+]\s+/gm, '');
+  // Ordered: 1. item, 2. item, etc.
+  result = result.replace(/^[\s]*\d+\.\s+/gm, '');
+
+  // Remove table formatting (| cell |)
+  result = result.replace(/\|/g, ' ');
+  // Remove table separator rows (|---|---|)
+  result = result.replace(/^[\s]*[-|:\s]+$/gm, '');
+
+  // Remove special delimiters used in prompts
+  result = result.replace(/⟦⟦/g, '');
+  result = result.replace(/⟧⟧/g, '');
+  result = result.replace(/\[\[/g, '');
+  result = result.replace(/\]\]/g, '');
+
+  // Remove HTML tags
+  result = result.replace(/<[^>]+>/g, '');
+
+  // Remove leftover markdown artifacts
+  result = result.replace(/\*+/g, ''); // Leftover asterisks
+  result = result.replace(/_+/g, ' '); // Leftover underscores (replace with space)
+
+  // Clean up whitespace
+  // Multiple spaces → single space
+  result = result.replace(/[ \t]+/g, ' ');
+  // Multiple newlines → single newline
+  result = result.replace(/\n{2,}/g, '\n');
+  // Trim each line
+  result = result.split('\n').map(line => line.trim()).join('\n');
+  // Trim overall
+  result = result.trim();
+
+  return result;
+}

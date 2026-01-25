@@ -20,6 +20,7 @@
 
 import { DeepgramClient, AgentLiveClient, AgentEvents } from '@deepgram/sdk';
 import { ElevenLabsTTS, type ElevenLabsConfig } from './elevenlabs';
+import { cleanTextForTTS } from '@/lib/sanitize';
 import type { AiModelConfig } from '@/types';
 
 export interface HybridVoiceAgentConfig {
@@ -661,8 +662,11 @@ export class HybridVoiceAgent {
     }
 
     try {
+      // Clean text for TTS (remove markdown, special characters, etc.)
+      const ttsText = cleanTextForTTS(text);
+
       // Stream audio from ElevenLabs
-      const audioStream = await this.elevenLabsTTS.streamTextToSpeech(text);
+      const audioStream = await this.elevenLabsTTS.streamTextToSpeech(ttsText);
       const reader = audioStream.getReader();
       const chunks: Uint8Array[] = [];
 

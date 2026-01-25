@@ -34,7 +34,7 @@ import {
   type SemanticTurnTelemetryEvent,
 } from './turn-detection';
 import { resolveSemanticTurnDetectorConfig } from './turn-detection-config';
-import { cleanAllSignalMarkers } from '@/lib/sanitize';
+import { cleanTextForTTS } from '@/lib/sanitize';
 
 // Import and re-export types for backward compatibility
 import type {
@@ -711,7 +711,7 @@ export class SpeechmaticsVoiceAgent {
       if (!this.config?.disableLLM && !this.config?.disableElevenLabsTTS && this.elevenLabsTTS && this.audio) {
         try {
           // Clean all signal markers before TTS (STEP_COMPLETE, TOPICS_DISCOVERED, etc.)
-          const ttsText = cleanAllSignalMarkers(llmResponse);
+          const ttsText = cleanTextForTTS(llmResponse);
 
           // Set current assistant speech for echo detection (use cleaned text)
           this.audio.setCurrentAssistantSpeech(ttsText);
@@ -1236,7 +1236,7 @@ export class SpeechmaticsVoiceAgent {
       // This method only handles: 1) adding to conversation history for LLM context, 2) playing TTS
 
       // Clean all signal markers before TTS (STEP_COMPLETE, TOPICS_DISCOVERED, etc.)
-      const ttsText = cleanAllSignalMarkers(text);
+      const ttsText = cleanTextForTTS(text);
 
       // Set current assistant speech for echo detection
       this.audio.setCurrentAssistantSpeech(ttsText);

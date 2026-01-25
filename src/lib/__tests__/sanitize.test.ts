@@ -3,7 +3,7 @@
  * Text sanitization utilities - no database dependencies
  */
 
-import { sanitizeText, sanitizeOptional, cleanStepCompleteMarker, detectStepComplete } from '../sanitize';
+import { sanitizeText, sanitizeOptional, cleanStepCompleteMarker, detectStepComplete, cleanTextForTTS } from '../sanitize';
 
 // ============================================================================
 // sanitizeText TESTS
@@ -377,6 +377,225 @@ describe('detectStepComplete', () => {
       const result = detectStepComplete('STEP_COMPLETE: ');
       expect(result.hasMarker).toBe(true);
       expect(result.stepId).toBeNull();
+    });
+  });
+});
+
+// ============================================================================
+// cleanTextForTTS TESTS
+// ============================================================================
+
+describe('cleanTextForTTS', () => {
+  describe('bold and italic formatting', () => {
+    test('should remove **bold** formatting', () => {
+      expect(cleanTextForTTS('This is **bold** text')).toBe('This is bold text');
+    });
+
+    test('should remove __bold__ formatting', () => {
+      expect(cleanTextForTTS('This is __bold__ text')).toBe('This is bold text');
+    });
+
+    test('should remove *italic* formatting', () => {
+      expect(cleanTextForTTS('This is *italic* text')).toBe('This is italic text');
+    });
+
+    test('should remove _italic_ formatting', () => {
+      expect(cleanTextForTTS('This is _italic_ text')).toBe('This is italic text');
+    });
+
+    test('should remove ~~strikethrough~~ formatting', () => {
+      expect(cleanTextForTTS('This is ~~deleted~~ text')).toBe('This is deleted text');
+    });
+
+    test('should handle nested formatting', () => {
+      expect(cleanTextForTTS('This is **bold and *italic*** text')).toBe('This is bold and italic text');
+    });
+  });
+
+  describe('headers', () => {
+    test('should remove # header markers', () => {
+      expect(cleanTextForTTS('# Title')).toBe('Title');
+    });
+
+    test('should remove ## header markers', () => {
+      expect(cleanTextForTTS('## Subtitle')).toBe('Subtitle');
+    });
+
+    test('should remove ### header markers', () => {
+      expect(cleanTextForTTS('### Section')).toBe('Section');
+    });
+
+    test('should handle multiple headers', () => {
+      expect(cleanTextForTTS('# Title\n## Subtitle')).toBe('Title\nSubtitle');
+    });
+  });
+
+  describe('links and images', () => {
+    test('should convert [text](url) links to just text', () => {
+      expect(cleanTextForTTS('Click [here](https://example.com) for more')).toBe('Click here for more');
+    });
+
+    test('should remove ![alt](url) images entirely', () => {
+      expect(cleanTextForTTS('See image ![photo](image.jpg) below')).toBe('See image below');
+    });
+
+    test('should handle links with special characters in URL', () => {
+      expect(cleanTextForTTS('[link](https://example.com/path?query=1&other=2)')).toBe('link');
+    });
+  });
+
+  describe('code blocks and inline code', () => {
+    test('should remove `inline code` backticks', () => {
+      expect(cleanTextForTTS('Use `console.log()` to debug')).toBe('Use console.log() to debug');
+    });
+
+    test('should remove ```code blocks```', () => {
+      expect(cleanTextForTTS('Example:\n```\nconst x = 1;\n```\nEnd')).toBe('Example:\nEnd');
+    });
+
+    test('should remove code blocks with language specifier', () => {
+      expect(cleanTextForTTS('```javascript\nconst x = 1;\n```')).toBe('');
+    });
+  });
+
+  describe('lists', () => {
+    test('should remove - unordered list markers', () => {
+      expect(cleanTextForTTS('- Item 1\n- Item 2')).toBe('Item 1\nItem 2');
+    });
+
+    test('should remove * unordered list markers', () => {
+      expect(cleanTextForTTS('* Item 1\n* Item 2')).toBe('Item 1\nItem 2');
+    });
+
+    test('should remove + unordered list markers', () => {
+      expect(cleanTextForTTS('+ Item 1\n+ Item 2')).toBe('Item 1\nItem 2');
+    });
+
+    test('should remove numbered list markers', () => {
+      expect(cleanTextForTTS('1. First\n2. Second\n3. Third')).toBe('First\nSecond\nThird');
+    });
+
+    test('should handle indented list items', () => {
+      expect(cleanTextForTTS('  - Nested item')).toBe('Nested item');
+    });
+  });
+
+  describe('blockquotes', () => {
+    test('should remove > blockquote markers', () => {
+      expect(cleanTextForTTS('> This is a quote')).toBe('This is a quote');
+    });
+
+    test('should handle multiple blockquote lines', () => {
+      expect(cleanTextForTTS('> Line 1\n> Line 2')).toBe('Line 1\nLine 2');
+    });
+  });
+
+  describe('horizontal rules', () => {
+    test('should remove --- horizontal rules', () => {
+      expect(cleanTextForTTS('Text\n---\nMore text')).toBe('Text\nMore text');
+    });
+
+    test('should remove *** horizontal rules', () => {
+      expect(cleanTextForTTS('Text\n***\nMore text')).toBe('Text\nMore text');
+    });
+
+    test('should remove ___ horizontal rules', () => {
+      expect(cleanTextForTTS('Text\n___\nMore text')).toBe('Text\nMore text');
+    });
+
+    test('should remove longer horizontal rules', () => {
+      expect(cleanTextForTTS('Text\n---------\nMore text')).toBe('Text\nMore text');
+    });
+  });
+
+  describe('tables', () => {
+    test('should remove | table delimiters', () => {
+      expect(cleanTextForTTS('| Cell 1 | Cell 2 |')).toBe('Cell 1 Cell 2');
+    });
+
+    test('should remove table separator rows', () => {
+      expect(cleanTextForTTS('|---|---|\n| A | B |')).toBe('A B');
+    });
+  });
+
+  describe('special delimiters', () => {
+    test('should remove ⟦⟦ delimiters', () => {
+      expect(cleanTextForTTS('Question: ⟦⟦ What is this? ⟧⟧')).toBe('Question: What is this?');
+    });
+
+    test('should remove [[ ]] delimiters', () => {
+      expect(cleanTextForTTS('Template [[variable]]')).toBe('Template variable');
+    });
+  });
+
+  describe('HTML tags', () => {
+    test('should remove HTML tags', () => {
+      expect(cleanTextForTTS('<b>bold</b> and <i>italic</i>')).toBe('bold and italic');
+    });
+
+    test('should remove self-closing tags', () => {
+      expect(cleanTextForTTS('Line 1<br/>Line 2')).toBe('Line 1Line 2');
+    });
+  });
+
+  describe('whitespace cleanup', () => {
+    test('should collapse multiple spaces', () => {
+      expect(cleanTextForTTS('Too    many    spaces')).toBe('Too many spaces');
+    });
+
+    test('should collapse multiple newlines', () => {
+      expect(cleanTextForTTS('Line 1\n\n\n\nLine 2')).toBe('Line 1\nLine 2');
+    });
+
+    test('should trim each line', () => {
+      expect(cleanTextForTTS('  Line 1  \n  Line 2  ')).toBe('Line 1\nLine 2');
+    });
+  });
+
+  describe('signal markers', () => {
+    test('should remove STEP_COMPLETE markers', () => {
+      expect(cleanTextForTTS('Great! STEP_COMPLETE:step_1 Moving on')).toBe('Great! Moving on');
+    });
+
+    test('should remove TOPICS_DISCOVERED markers', () => {
+      expect(cleanTextForTTS('Found topics TOPICS_DISCOVERED:[{"label":"A"}] Continue')).toBe('Found topics Continue');
+    });
+  });
+
+  describe('combined scenarios', () => {
+    test('should clean complex markdown response', () => {
+      const input = `## Réponse
+
+Voici les points **importants**:
+- Premier point
+- Deuxième point
+
+> Citation importante
+
+---
+
+Pour plus d'infos, visitez [ce lien](https://example.com).
+
+STEP_COMPLETE:step_1`;
+
+      const expected = `Réponse
+Voici les points importants:
+Premier point
+Deuxième point
+Citation importante
+Pour plus d'infos, visitez ce lien.`;
+
+      expect(cleanTextForTTS(input)).toBe(expected);
+    });
+
+    test('should preserve natural speech text', () => {
+      const input = "Bonjour! Comment allez-vous aujourd'hui? C'est une belle journée.";
+      expect(cleanTextForTTS(input)).toBe(input);
+    });
+
+    test('should handle French text with accents', () => {
+      const input = 'Très bien, passons à la **prochaine étape**: découverte des besoins.';
+      expect(cleanTextForTTS(input)).toBe('Très bien, passons à la prochaine étape: découverte des besoins.');
     });
   });
 });
