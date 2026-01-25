@@ -2324,9 +2324,10 @@ export default function AiConfigurationPage() {
                                   }}
                                 >
                                   <option value="">Aucun</option>
-                                  <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (Rapide, par défaut)</option>
+                                  <option value="eleven_flash_v2_5">eleven_flash_v2_5 (Ultra-rapide ~75ms)</option>
+                                  <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (Qualité, par défaut)</option>
                                   <option value="eleven_multilingual_v2">eleven_multilingual_v2 (Multilingue)</option>
-                                  <option value="eleven_monolingual_v1">eleven_monolingual_v1 (Anglais uniquement)</option>
+                                  <option value="eleven_v3">eleven_v3 (Alpha - Non temps réel)</option>
                                 </select>
                                 <p className="text-xs text-slate-400">
                                   Modèle de synthèse vocale ElevenLabs.
