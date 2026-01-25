@@ -50,6 +50,7 @@ export function ChatComponent({
   showAgentTyping,
   voiceModeEnabled = false,
   initialVoiceMode = false,
+  voiceInterfaceRenderedExternally = false,
   voiceModeSystemPrompt,
   voiceModeUserPrompt,
   voiceModePromptVariables,
@@ -535,7 +536,8 @@ export function ChatComponent({
   }
 
   // Show premium voice interface when voice mode is active
-  if (isVoiceMode && voiceModeEnabled && voiceModeSystemPrompt) {
+  // iOS fix: skip if voice interface is rendered externally (at root level to fix fixed positioning)
+  if (isVoiceMode && voiceModeEnabled && voiceModeSystemPrompt && !voiceInterfaceRenderedExternally) {
     // Convert AskParticipant[] to ParticipantOption[] for speaker assignment
     const participantOptions = participants.map(p => ({
       id: p.id,

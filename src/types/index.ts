@@ -355,6 +355,7 @@ export interface ChatComponentProps {
   // Voice mode props
   voiceModeEnabled?: boolean;
   initialVoiceMode?: boolean; // Start in voice mode immediately
+  voiceInterfaceRenderedExternally?: boolean; // iOS fix: voice interface is rendered at root level, skip internal rendering
   voiceModeSystemPrompt?: string;
   voiceModeUserPrompt?: string; // User prompt template (same as text mode)
   voiceModePromptVariables?: Record<string, string | null | undefined>; // Variables for userPrompt template rendering

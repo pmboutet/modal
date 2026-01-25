@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Clock, Sparkles, ChevronDown, ChevronUp, MessageCircle, Lightbulb, RefreshCw, Info, Mic, MessageSquareText, Lock, Loader2 } from "lucide-react";
 import { ChatComponent } from "@/components/chat/ChatComponent";
+import { PremiumVoiceInterface } from "@/components/chat/PremiumVoiceInterface";
+import type { DeepgramMessageEvent } from "@/lib/ai/deepgram";
+import type { HybridVoiceAgentMessage } from "@/lib/ai/hybrid-voice-agent";
+import type { SpeechmaticsMessageEvent } from "@/lib/ai/speechmatics";
 import { InsightPanel } from "@/components/insight/InsightPanel";
 import { SuggestedQuestionsPanel } from "@/components/consultant/SuggestedQuestionsPanel";
 import { Button } from "@/components/ui/button";
@@ -357,6 +361,7 @@ function MobileLayout({
                   showAgentTyping={awaitingAiResponse && !isDetectingInsights}
                   voiceModeEnabled={!!voiceModeConfig?.systemPrompt}
                   initialVoiceMode={isVoiceModeActive}
+                  voiceInterfaceRenderedExternally={true}
                   voiceModeSystemPrompt={voiceModeConfig?.systemPrompt || undefined}
                   voiceModeUserPrompt={voiceModeConfig?.userPrompt || undefined}
                   voiceModePromptVariables={voiceModeConfig?.promptVariables || undefined}
@@ -2440,6 +2445,66 @@ export default function HomePage() {
     }
   }, [isVoiceModeActive, reloadMessagesAfterVoiceMode]);
 
+  // Convert messages to voice format for PremiumVoiceInterface (rendered at root level on mobile for iOS fix)
+  const voiceMessages = useMemo(() => {
+    return sessionData.messages
+      .filter(msg => msg.senderType === 'user' || msg.senderType === 'ai')
+      .map(msg => ({
+        role: msg.senderType === 'user' ? 'user' as const : 'assistant' as const,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        messageId: msg.id,
+        metadata: msg.metadata,
+      }));
+  }, [sessionData.messages]);
+
+  // Memoized model config for voice interface (same as ChatComponent)
+  const memoizedVoiceModeModelConfig = useMemo(() => ({
+    ...(voiceModeConfig?.modelConfig || {}),
+    promptVariables: voiceModeConfig?.promptVariables,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any), [voiceModeConfig?.modelConfig, voiceModeConfig?.promptVariables]);
+
+  // Handle voice message callback for root-level voice interface
+  const handleVoiceMessageFromRootInterface = useCallback((message: DeepgramMessageEvent | HybridVoiceAgentMessage | SpeechmaticsMessageEvent) => {
+    const speechmaticsMessage = message as SpeechmaticsMessageEvent;
+    const speaker = speechmaticsMessage.speaker;
+
+    // Detect speaker change for consultant mode
+    if (sessionData.ask?.conversationMode === 'consultant' && speaker) {
+      consultantAnalysis.notifySpeakerChange?.(speaker);
+    }
+
+    // Delegate to existing handleVoiceMessage
+    handleVoiceMessage(message.role, message.content, {
+      isInterim: message.isInterim,
+      messageId: speechmaticsMessage.messageId,
+      timestamp: message.timestamp,
+    });
+  }, [sessionData.ask?.conversationMode, consultantAnalysis, handleVoiceMessage]);
+
+  // Handle voice error callback for root-level voice interface
+  const handleVoiceErrorFromRootInterface = useCallback((error: Error) => {
+    console.error('[HomePage] Voice mode error:', error);
+  }, []);
+
+  // Handle voice close callback for root-level voice interface
+  const handleVoiceCloseFromRootInterface = useCallback(() => {
+    handleVoiceModeChange(false);
+  }, [handleVoiceModeChange]);
+
+  // Prepare participants for consultant mode voice interface
+  const voiceInterfaceParticipants = useMemo(() => {
+    if (sessionData.ask?.conversationMode !== 'consultant') return undefined;
+    return (sessionData.ask?.participants ?? []).map(p => ({
+      id: p.id,
+      userId: p.userId ?? null,
+      name: p.name,
+      email: p.email,
+      role: p.role,
+    }));
+  }, [sessionData.ask?.conversationMode, sessionData.ask?.participants]);
+
   // Handle conversation plan update (e.g., when step is completed in voice mode)
   // This ensures the client-side timer tracks the correct step after server-side updates
   const handleConversationPlanUpdate = useCallback((plan: ConversationPlan) => {
@@ -2898,6 +2963,35 @@ export default function HomePage() {
 
   return (
     <div className="conversation-layout min-h-[100dvh] overflow-x-hidden w-full max-w-full">
+      {/* iOS FIX: Render voice interface at root level on mobile to avoid overflow:hidden breaking fixed positioning */}
+      {isMobile && isVoiceModeActive && voiceModeConfig?.systemPrompt && (
+        <PremiumVoiceInterface
+          key={`voice-root-${sessionData.askKey}`}
+          askKey={sessionData.askKey}
+          askSessionId={sessionData.ask?.askSessionId}
+          systemPrompt={voiceModeConfig.systemPrompt}
+          userPrompt={voiceModeConfig.userPrompt ?? undefined}
+          modelConfig={memoizedVoiceModeModelConfig}
+          onMessage={handleVoiceMessageFromRootInterface}
+          onError={handleVoiceErrorFromRootInterface}
+          onClose={handleVoiceCloseFromRootInterface}
+          onEditMessage={handleEditMessage}
+          messages={voiceMessages}
+          conversationPlan={sessionData.conversationPlan}
+          elapsedMinutes={sessionTimer.elapsedMinutes}
+          isTimerPaused={sessionTimer.isPaused}
+          isTimerLoading={sessionTimer.isLoading}
+          onTogglePause={handleToggleTimerPause}
+          onResetTimer={sessionTimer.reset}
+          expectedDurationMinutes={sessionData.ask?.expectedDurationMinutes}
+          consultantMode={sessionData.ask?.conversationMode === 'consultant'}
+          participants={voiceInterfaceParticipants}
+          inviteToken={sessionData.inviteToken}
+          currentUserId={currentUserId}
+          onConversationPlanUpdate={handleConversationPlanUpdate}
+        />
+      )}
+
       {/* Session Expired Overlay */}
       <AnimatePresence>
         {isTokenExpired && (
