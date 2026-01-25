@@ -3006,7 +3006,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         </div>
 
         {/* Voice control bar - mic button left, status/partials right */}
-        <div className="flex items-center gap-4 pb-6 px-4">
+        <div
+          className="flex items-center gap-4 px-4"
+          style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           {/* Mic button - left, smaller */}
           <div className="flex-shrink-0 relative">
             {/* Subtle glow when active */}
