@@ -3152,6 +3152,109 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               );
             })}
           </AnimatePresence>
+          {/* Interview completion celebration - inline */}
+          {allStepsCompleted && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
+              className="mx-auto my-6 max-w-md px-4"
+            >
+              <div className="relative overflow-hidden rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl p-6 shadow-2xl">
+                {/* Confetti animation background */}
+                <div className="absolute inset-0 opacity-30">
+                  {[...Array(15)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500"
+                      initial={{
+                        x: Math.random() * 100 + '%',
+                        y: -20,
+                        rotate: 0,
+                        scale: 0
+                      }}
+                      animate={{
+                        y: '120%',
+                        rotate: Math.random() * 360,
+                        scale: [0, 1, 1, 0.8]
+                      }}
+                      transition={{
+                        duration: 2 + Math.random() * 2,
+                        delay: i * 0.1,
+                        repeat: Infinity,
+                        repeatDelay: 3
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <div className="relative z-10 text-center">
+                  <motion.div
+                    animate={{
+                      rotate: [0, 10, -10, 10, 0],
+                      scale: [1, 1.1, 1]
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      repeatDelay: 2
+                    }}
+                    className="mb-4 text-6xl"
+                  >
+                    🎉
+                  </motion.div>
+
+                  <h3 className="mb-2 text-2xl font-bold text-white">
+                    Entretien terminé !
+                  </h3>
+
+                  <p className="mb-4 text-sm text-white/80">
+                    Merci pour votre participation et vos réponses détaillées.
+                    Toutes les étapes ont été complétées avec succès !
+                  </p>
+
+                  <motion.div
+                    animate={{
+                      boxShadow: [
+                        '0 0 0 0 rgba(6, 182, 212, 0.4)',
+                        '0 0 0 10px rgba(6, 182, 212, 0)',
+                      ]
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg mb-4"
+                  >
+                    <svg
+                      className="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2.5}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span>Toutes les étapes complétées</span>
+                  </motion.div>
+
+                  {/* Close tab button */}
+                  <button
+                    onClick={() => window.close()}
+                    className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-white/20 hover:bg-white/30 border border-white/30 text-white text-sm font-medium transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                    <span>Fermer</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Invisible element at the bottom to scroll to */}
           <div ref={messagesEndRef} />
         </div>
@@ -3503,108 +3606,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         </div>
       )}
 
-      {/* Interview Completion Celebration Overlay */}
-      <AnimatePresence>
-        {allStepsCompleted && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
-            className="absolute inset-0 z-50 backdrop-blur-md bg-black/40 flex items-center justify-center"
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 20 }}
-              transition={{ duration: 0.7, type: "spring", bounce: 0.4 }}
-              className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 max-w-md mx-4 shadow-2xl overflow-hidden relative"
-            >
-              {/* Confetti animation background */}
-              <div className="absolute inset-0 opacity-30">
-                {[...Array(15)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500"
-                    initial={{
-                      x: Math.random() * 100 + '%',
-                      y: -20,
-                      rotate: 0,
-                      scale: 0
-                    }}
-                    animate={{
-                      y: '120%',
-                      rotate: Math.random() * 360,
-                      scale: [0, 1, 1, 0.8]
-                    }}
-                    transition={{
-                      duration: 2 + Math.random() * 2,
-                      delay: i * 0.1,
-                      repeat: Infinity,
-                      repeatDelay: 3
-                    }}
-                  />
-                ))}
-              </div>
-
-              <div className="relative z-10 text-center">
-                <motion.div
-                  animate={{
-                    rotate: [0, 10, -10, 10, 0],
-                    scale: [1, 1.1, 1]
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    repeatDelay: 2
-                  }}
-                  className="mb-4 text-6xl"
-                >
-                  🎉
-                </motion.div>
-
-                <h3 className="mb-2 text-2xl font-bold text-white">
-                  Entretien terminé !
-                </h3>
-
-                <p className="mb-6 text-sm text-white/80">
-                  Merci pour votre participation et vos réponses détaillées.
-                  Toutes les étapes ont été complétées avec succès !
-                </p>
-
-                <motion.div
-                  animate={{
-                    boxShadow: [
-                      '0 0 0 0 rgba(6, 182, 212, 0.4)',
-                      '0 0 0 10px rgba(6, 182, 212, 0)',
-                    ]
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                  }}
-                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg"
-                >
-                  <svg
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2.5}
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>Toutes les étapes complétées</span>
-                </motion.div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Voice Mode Tutorial Overlay */}
       <AnimatePresence>

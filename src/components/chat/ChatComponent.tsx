@@ -707,23 +707,32 @@ export function ChatComponent({
                       duration: 1.5,
                       repeat: Infinity,
                     }}
-                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg"
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg mb-4"
                   >
-                    <svg 
-                      className="h-5 w-5" 
-                      fill="none" 
-                      viewBox="0 0 24 24" 
+                    <svg
+                      className="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
                       stroke="currentColor"
                     >
-                      <path 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        strokeWidth={2.5} 
-                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" 
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2.5}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
                     <span>Toutes les étapes complétées</span>
                   </motion.div>
+
+                  {/* Close tab button */}
+                  <button
+                    onClick={() => window.close()}
+                    className="mt-2 flex items-center justify-center gap-2 mx-auto px-6 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-sm font-medium transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                    <span>Fermer</span>
+                  </button>
                 </div>
               </div>
             </motion.div>

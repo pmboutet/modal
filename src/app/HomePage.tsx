@@ -420,7 +420,8 @@ function MobileLayout({
         className="flex items-center justify-center gap-2 bg-white/80 backdrop-blur-lg border-t border-slate-200/60 overflow-hidden"
         style={{
           paddingTop: isHeaderHidden ? 0 : 8,
-          paddingBottom: isHeaderHidden ? 0 : 'max(8px, env(safe-area-inset-bottom))',
+          // Extra padding for Safari iOS toolbar (~44px) + safe area for home indicator
+          paddingBottom: isHeaderHidden ? 0 : 'max(56px, calc(env(safe-area-inset-bottom) + 44px))',
         }}
       >
         <button

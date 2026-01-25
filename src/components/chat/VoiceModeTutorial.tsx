@@ -40,8 +40,8 @@ export interface VoiceModeTutorialProps {
 const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'mute-button',
-    title: 'Controler le microphone',
-    description: 'Appuyez sur le bouton central pour mettre en pause ou reprendre l\'ecoute. Quand le micro est en pause, vous entendez toujours les reponses de l\'assistant.',
+    title: 'Contrôler le microphone',
+    description: 'Appuyez sur le bouton central pour mettre en pause ou reprendre l\'écoute. Quand le micro est en pause, vous entendez toujours les réponses de l\'assistant.',
     icon: Mic,
     illustration: (
       <div className="flex items-center justify-center gap-6 py-4">
@@ -68,8 +68,8 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     id: 'speaker-management',
-    title: 'Gerer les voix detectees',
-    description: 'Quand une nouvelle voix est detectee, vous pouvez choisir de l\'ignorer, de l\'ajouter a la conversation, ou de remplacer votre voix principale.',
+    title: 'Gérer les voix détectées',
+    description: 'Quand une nouvelle voix est détectée, vous pouvez choisir de l\'ignorer, de l\'ajouter à la conversation, ou de remplacer votre voix principale.',
     icon: Users,
     illustration: (
       <div className="py-4 space-y-3">
@@ -106,7 +106,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'edit-transcription',
     title: 'Corriger la transcription',
-    description: 'Survolez votre message et cliquez sur le crayon pour corriger une erreur de transcription. L\'agent repondra automatiquement a votre correction.',
+    description: 'Survolez votre message et cliquez sur le crayon pour corriger une erreur de transcription. L\'agent répondra automatiquement à votre correction.',
     icon: Pencil,
     illustration: (
       <div className="py-4">
@@ -130,7 +130,7 @@ const TUTORIAL_STEPS: TutorialStep[] = [
         </div>
       </div>
     ),
-    warning: 'Attention : les messages suivants seront supprimes et la conversation reprendra depuis ce point.',
+    warning: 'Attention : les messages suivants seront supprimés et la conversation reprendra depuis ce point.',
   },
 ];
 
@@ -175,7 +175,7 @@ export function VoiceModeTutorial({
               <StepIcon className="h-5 w-5 text-blue-300" />
             </div>
             <div>
-              <p className="text-white/50 text-xs">Etape {currentStep + 1} sur {TUTORIAL_STEPS.length}</p>
+              <p className="text-white/50 text-xs">Étape {currentStep + 1} sur {TUTORIAL_STEPS.length}</p>
               <h2 className="text-white text-lg font-semibold">{step.title}</h2>
             </div>
           </div>
@@ -235,7 +235,7 @@ export function VoiceModeTutorial({
             )}
           >
             <ChevronLeft className="h-4 w-4 mr-1" />
-            Precedent
+            Précédent
           </Button>
 
           {isLastStep ? (
