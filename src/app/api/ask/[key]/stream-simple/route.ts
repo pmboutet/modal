@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import { callModelProviderStream } from '@/lib/ai/providers';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '@/lib/ai/constants';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
+
+// Extend timeout for streaming LLM responses
+export const maxDuration = 60;
 import { getAskSessionByKey } from '@/lib/asks';
 import { getAgentConfigForAsk } from '@/lib/ai/agent-config';
 import { buildConversationAgentVariables } from '@/lib/ai/conversation-agent';

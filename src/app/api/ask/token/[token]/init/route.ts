@@ -10,6 +10,11 @@ import {
 import { executeAgent } from "@/lib/ai/service";
 import { buildConversationAgentVariables } from "@/lib/ai/conversation-agent";
 import { fetchElapsedTime } from "@/lib/conversation-context";
+import * as Sentry from "@sentry/nextjs";
+
+// Extend timeout for LLM calls (plan generation + initial message)
+// Default Vercel timeout is 10s (Hobby) / 60s (Pro) which may not be enough
+export const maxDuration = 60;
 
 /**
  * POST /api/ask/token/[token]/init
@@ -184,6 +189,17 @@ export async function POST(
           errorMsg = String(planError);
         }
         console.error('❌ [init route] Plan generation failed:', errorMsg, errorDetails);
+        Sentry.captureException(planError, {
+          tags: {
+            route: 'init',
+            phase: 'plan_generation',
+          },
+          extra: {
+            askSessionId,
+            conversationThreadId,
+            errorDetails,
+          },
+        });
         // IMPORTANT: Plan is REQUIRED - fail if generation fails
         return NextResponse.json<ApiResponse>({
           success: false,
@@ -300,6 +316,18 @@ export async function POST(
       } catch (msgError) {
         const errorMsg = msgError instanceof Error ? msgError.message : String(msgError);
         console.error('❌ [init route] Initial message generation failed:', errorMsg);
+        // Report to Sentry for visibility - this was silently failing before
+        Sentry.captureException(msgError, {
+          tags: {
+            route: 'init',
+            phase: 'initial_message_generation',
+          },
+          extra: {
+            askSessionId,
+            conversationThreadId,
+            conversationMode,
+          },
+        });
       }
     } else if (hasMessages) {
       console.log(`💬 [init route] Messages already exist`);
@@ -332,6 +360,12 @@ export async function POST(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     console.error('❌ [init route] Unexpected error:', errorMsg);
+    Sentry.captureException(error, {
+      tags: {
+        route: 'init',
+        phase: 'unexpected_error',
+      },
+    });
     return NextResponse.json<ApiResponse>({
       success: false,
       error: errorMsg

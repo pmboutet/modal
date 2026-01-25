@@ -2,6 +2,9 @@ import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiResponse, Insight, Message } from '@/types';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
+
+// Extend timeout for LLM calls (chat response + insight detection)
+export const maxDuration = 60;
 import { createServerSupabaseClient, getCurrentUser } from '@/lib/supabaseServer';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
 import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, shouldUseSharedThread, getLastUserMessageThread } from '@/lib/asks';

@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
+
+// Extend timeout for streaming LLM responses
+export const maxDuration = 60;
 import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, getLastUserMessageThread, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { callModelProviderStream } from '@/lib/ai/providers';

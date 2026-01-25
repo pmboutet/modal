@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseServer';
 import { executeAgent } from '@/lib/ai/service';
 import { DEFAULT_CHAT_AGENT_SLUG } from '@/lib/ai/agent-config';
+
+// Extend timeout for LLM calls (plan generation + initial message)
+export const maxDuration = 60;
 import { getAskSessionByKey, getOrCreateConversationThread, getMessagesForThread, resolveThreadUserId } from '@/lib/asks';
 import { getConversationPlanWithSteps, getActiveStep, ensureConversationPlanExists } from '@/lib/ai/conversation-plan';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';

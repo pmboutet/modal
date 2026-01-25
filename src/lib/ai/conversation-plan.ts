@@ -291,14 +291,36 @@ export async function ensureConversationPlanExists(
     planGenerationVariables
   );
 
-  const conversationPlan = await createConversationPlan(
-    supabase,
-    conversationThreadId,
-    planData
-  );
+  // Double-check for plan before creating to prevent race condition
+  // Another request might have created the plan while we were generating
+  const planAfterGeneration = await getConversationPlanWithSteps(supabase, conversationThreadId);
+  if (planAfterGeneration) {
+    console.log('⚠️ [ensureConversationPlanExists] Plan already exists (race condition prevented), returning existing');
+    return planAfterGeneration;
+  }
 
-  console.log('✅ [ensureConversationPlanExists] Plan created with', planData.steps.length, 'steps');
-  return conversationPlan;
+  try {
+    const conversationPlan = await createConversationPlan(
+      supabase,
+      conversationThreadId,
+      planData
+    );
+
+    console.log('✅ [ensureConversationPlanExists] Plan created with', planData.steps.length, 'steps');
+    return conversationPlan;
+  } catch (createError) {
+    // Handle duplicate key error - another request created the plan between our check and insert
+    const errorMessage = createError instanceof Error ? createError.message : String(createError);
+    if (errorMessage.includes('duplicate key') || errorMessage.includes('unique constraint')) {
+      console.log('⚠️ [ensureConversationPlanExists] Duplicate key error, fetching existing plan');
+      const existingPlan = await getConversationPlanWithSteps(supabase, conversationThreadId);
+      if (existingPlan) {
+        return existingPlan;
+      }
+    }
+    // Re-throw if it's not a duplicate key error or if we still can't find the plan
+    throw createError;
+  }
 }
 
 /**

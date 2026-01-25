@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminSupabaseClient } from '@/lib/supabaseAdmin';
 import { createServerSupabaseClient, getCurrentUser } from '@/lib/supabaseServer';
 import { isValidAskKey, parseErrorMessage } from '@/lib/utils';
+
+// Extend timeout for LLM calls (consultant analysis)
+export const maxDuration = 60;
 import { getAskSessionByKey, shouldUseSharedThread } from '@/lib/asks';
 import { normaliseMessageMetadata } from '@/lib/messages';
 import { executeAgent, fetchAgentBySlug } from '@/lib/ai';
