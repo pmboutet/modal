@@ -204,7 +204,8 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
     suggestions: AiChallengeUpdateSuggestion[];
     newChallenges: AiNewChallengeSuggestion[];
     errors: Array<{ challengeId: string | null; message: string }> | null;
-    lastRunAt: string;
+    lastRunAt: string | null;
+    status?: "running" | "completed";
   };
 
   // Load AI builder results from the API
@@ -250,9 +251,12 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
     const pollInterval = setInterval(async () => {
       const data = await loadAiBuilderResults();
       if (data) {
-        // Check if results are from the current run (lastRunAt >= startTime)
-        const lastRunDate = new Date(data.lastRunAt);
-        if (lastRunDate >= aiBuilderStartTime) {
+        // Only stop when status is "completed" AND lastRunAt is from current run
+        const isCompleted = data.status === "completed";
+        const lastRunDate = data.lastRunAt ? new Date(data.lastRunAt) : null;
+        const isCurrentRun = lastRunDate && lastRunDate >= aiBuilderStartTime;
+
+        if (isCompleted && isCurrentRun) {
           setIsAiBuilderRunning(false);
           setAiBuilderStartTime(null);
 
@@ -276,6 +280,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
             });
           }
         }
+        // If status is "running" or not from current run, continue polling
       }
     }, 3000);
 
@@ -410,23 +415,16 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         const payload = await response.json();
 
         if (response.ok && payload.success && payload.data) {
-          const results = payload.data as {
-            suggestions: AiChallengeUpdateSuggestion[];
-            newChallenges: AiNewChallengeSuggestion[];
-            errors: Array<{ challengeId: string | null; message: string }> | null;
-            lastRunAt: string;
-          };
+          const results = payload.data as AiBuilderResultsData;
 
-          // Check if results are new (within last 30 seconds means still running)
-          const lastRunAt = new Date(results.lastRunAt);
-          const now = new Date();
-          const secondsSinceRun = (now.getTime() - lastRunAt.getTime()) / 1000;
+          // Only stop when status is "completed" (not "running")
+          if (results.status === "completed") {
+            const hasContent = results.suggestions.length > 0 || results.newChallenges.length > 0 || (results.errors && results.errors.length > 0);
 
-          // Results are ready when we have suggestions/newChallenges/errors, or it's been > 30 seconds
-          const hasContent = results.suggestions.length > 0 || results.newChallenges.length > 0 || results.errors;
-          if (hasContent || secondsSinceRun >= 30) {
             setIsAiBuilderRunning(false);
-            setAiBuilderLastRunAt(results.lastRunAt);
+            if (results.lastRunAt) {
+              setAiBuilderLastRunAt(results.lastRunAt);
+            }
             setHasAiBuilderResults(results.suggestions.length > 0 || results.newChallenges.length > 0);
 
             if (hasContent) {
@@ -436,6 +434,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
               });
             }
           }
+          // If status is "running", continue polling (do nothing, wait for next interval)
         }
       } catch (error) {
         console.error("Failed to poll challenge builder results:", error);
