@@ -2,6 +2,8 @@
  * Authentication utilities for Speechmatics Voice Agent
  */
 
+import { devError } from '@/lib/utils';
+
 export class SpeechmaticsAuth {
   private speechmaticsJWT: string | null = null;
   private jwtExpiry: number = 0;
@@ -48,7 +50,7 @@ export class SpeechmaticsAuth {
       }
       return this.speechmaticsApiKey;
     } catch (error) {
-      console.error('[Speechmatics] ❌ Authentication error:', error);
+      devError('[Speechmatics] ❌ Authentication error:', error);
       throw error;
     }
   }
@@ -72,7 +74,7 @@ export class SpeechmaticsAuth {
       }
       return apiKey;
     } catch (error) {
-      console.error('[Speechmatics] ❌ Error getting ElevenLabs API key:', error);
+      devError('[Speechmatics] ❌ Error getting ElevenLabs API key:', error);
       throw error;
     }
   }

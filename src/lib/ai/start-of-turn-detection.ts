@@ -8,6 +8,8 @@
  * Similar to end-of-turn detection but validates the START of user interruption
  */
 
+import { devLog, devWarn, devError } from '@/lib/utils';
+
 export interface StartOfTurnMessage {
   role: "user" | "assistant";
   content: string;
@@ -58,7 +60,7 @@ class LLMStartOfTurnDetector implements StartOfTurnDetector {
 
     try {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [StartOfTurn] 📤 Validating start of turn`, {
+      devLog(`[${timestamp}] [StartOfTurn] 📤 Validating start of turn`, {
         userTranscript: userTranscript.substring(0, 50),
         assistantSpeech: currentAssistantSpeech.substring(0, 50),
         provider: this.config.provider,
@@ -69,7 +71,7 @@ class LLMStartOfTurnDetector implements StartOfTurnDetector {
         : await this.validateWithOpenAI(userTranscript, currentAssistantSpeech, conversationHistory, controller.signal);
 
       const ts = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${ts}] [StartOfTurn] 📥 Validation result`, {
+      devLog(`[${ts}] [StartOfTurn] 📥 Validation result`, {
         isValidStart: result.isValidStart,
         isEcho: result.isEcho,
         confidence: result.confidence,
@@ -79,7 +81,7 @@ class LLMStartOfTurnDetector implements StartOfTurnDetector {
       return result;
     } catch (error) {
       if ((error as Error).name === "AbortError") {
-        console.warn("[StartOfTurn] Validation timeout - assuming valid start");
+        devWarn("[StartOfTurn] Validation timeout - assuming valid start");
         return {
           isValidStart: true,
           isEcho: false,
@@ -87,7 +89,7 @@ class LLMStartOfTurnDetector implements StartOfTurnDetector {
           reason: "Timeout - assuming valid",
         };
       }
-      console.error("[StartOfTurn] Validation error - assuming valid start", error);
+      devError("[StartOfTurn] Validation error - assuming valid start", error);
       return {
         isValidStart: true,
         isEcho: false,

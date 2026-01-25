@@ -1,3 +1,4 @@
+import { devLog, devWarn, devError } from '@/lib/utils';
 import type {
   SemanticTurnDetectorConfig,
   SemanticTurnFallbackMode,
@@ -48,7 +49,7 @@ class HttpSemanticTurnDetector implements SemanticTurnDetector {
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs);
 
     try {
-      console.log('[TurnDetection] 📤 Calling semantic model', {
+      devLog('[TurnDetection] 📤 Calling semantic model', {
         provider: this.config.provider,
         model: this.config.model,
         baseUrl: this.config.baseUrl,
@@ -72,7 +73,7 @@ class HttpSemanticTurnDetector implements SemanticTurnDetector {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        console.warn("[TurnDetection] API error", {
+        devWarn("[TurnDetection] API error", {
           status: response.status,
           payload,
         });
@@ -81,7 +82,7 @@ class HttpSemanticTurnDetector implements SemanticTurnDetector {
 
       const logprobMap = extractTopLogprobs(payload);
       const probability = calculateTrackedProbability(logprobMap, this.config.trackedTokens);
-      console.log('[TurnDetection] 📥 Semantic model response', {
+      devLog('[TurnDetection] 📥 Semantic model response', {
         provider: this.config.provider,
         model: this.config.model,
         probability,
@@ -90,12 +91,12 @@ class HttpSemanticTurnDetector implements SemanticTurnDetector {
       return probability;
     } catch (error) {
       if ((error as Error).name === "AbortError") {
-        console.warn("[TurnDetection] Request aborted (timeout)", {
+        devWarn("[TurnDetection] Request aborted (timeout)", {
           timeout: this.config.requestTimeoutMs,
         });
         return null;
       }
-      console.error("[TurnDetection] Failed to compute probability", error);
+      devError("[TurnDetection] Failed to compute probability", error);
       return null;
     } finally {
       clearTimeout(timeout);

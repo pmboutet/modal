@@ -467,3 +467,50 @@ export function getMicrophonePermissionErrorMessage(error: Error): string {
   // Generic fallback
   return "Impossible d'accéder au microphone. Vérifiez les autorisations de votre navigateur.";
 }
+
+/**
+ * Check if running in development mode (localhost or NEXT_PUBLIC_IS_DEV=true)
+ * Cached for performance - computed once per module load
+ */
+let _isDevCached: boolean | null = null;
+export function isDevOrLocalhost(): boolean {
+  if (_isDevCached !== null) return _isDevCached;
+
+  // Server-side check
+  if (typeof window === 'undefined') {
+    _isDevCached = process.env.NODE_ENV === 'development' ||
+                   process.env.NEXT_PUBLIC_IS_DEV === 'true';
+    return _isDevCached;
+  }
+
+  // Client-side check
+  const hostname = window.location.hostname;
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  const isDevEnv = process.env.NEXT_PUBLIC_IS_DEV === 'true';
+
+  _isDevCached = isLocalhost || isDevEnv;
+  return _isDevCached;
+}
+
+/**
+ * Development-only logging functions
+ * These only log when running in development mode (localhost or NEXT_PUBLIC_IS_DEV=true)
+ * Use these instead of console.log/warn/error for debug logs that should not appear in production
+ */
+export function devLog(...args: unknown[]): void {
+  if (isDevOrLocalhost()) {
+    console.log(...args);
+  }
+}
+
+export function devWarn(...args: unknown[]): void {
+  if (isDevOrLocalhost()) {
+    console.warn(...args);
+  }
+}
+
+export function devError(...args: unknown[]): void {
+  if (isDevOrLocalhost()) {
+    console.error(...args);
+  }
+}

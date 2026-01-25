@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { DeepgramVoiceAgent, DeepgramMessageEvent } from '@/lib/ai/deepgram';
 import { HybridVoiceAgent, HybridVoiceAgentMessage } from '@/lib/ai/hybrid-voice-agent';
 import { SpeechmaticsVoiceAgent, SpeechmaticsMessageEvent } from '@/lib/ai/speechmatics';
-import { cn, isInAppBrowser, getMicrophonePermissionErrorMessage } from '@/lib/utils';
+import { cn, isInAppBrowser, getMicrophonePermissionErrorMessage, devLog, devWarn, devError } from '@/lib/utils';
 import { cleanAllSignalMarkers, detectStepComplete } from '@/lib/sanitize';
 import { useAuth } from '@/components/auth/AuthProvider';
 import type { ConversationPlan } from '@/types';
@@ -329,10 +329,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     onInactive: useCallback(() => {
       // Don't show overlay if mic is already muted - user is intentionally not speaking
       if (isMutedRef.current) {
-        console.log('[PremiumVoiceInterface] ⏰ User inactive but mic already muted - skipping overlay');
+        devLog('[PremiumVoiceInterface] ⏰ User inactive but mic already muted - skipping overlay');
         return;
       }
-      console.log('[PremiumVoiceInterface] ⏰ User inactive - showing overlay and muting');
+      devLog('[PremiumVoiceInterface] ⏰ User inactive - showing overlay and muting');
       setShowInactivityOverlay(true);
       // Mute microphone when inactive
       if (agentRef.current) {
@@ -345,7 +345,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       }
     }, []),
     onActive: useCallback(() => {
-      console.log('[PremiumVoiceInterface] ✅ User active again');
+      devLog('[PremiumVoiceInterface] ✅ User active again');
       setShowInactivityOverlay(false);
     }, []),
   });
@@ -385,16 +385,16 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     if ('wakeLock' in navigator && !wakeLockRef.current) {
       try {
         wakeLockRef.current = await navigator.wakeLock.request('screen');
-        console.log('[PremiumVoiceInterface] 🔆 Wake lock acquired');
+        devLog('[PremiumVoiceInterface] 🔆 Wake lock acquired');
 
         // Listener pour détecter la perte du wake lock (batterie faible, etc.)
         wakeLockRef.current.addEventListener('release', () => {
-          console.log('[PremiumVoiceInterface] 🔆 Wake lock released by system');
+          devLog('[PremiumVoiceInterface] 🔆 Wake lock released by system');
           wakeLockRef.current = null;
         });
       } catch (err) {
         // Wake lock peut échouer si la page n'est pas visible ou batterie faible
-        console.warn('[PremiumVoiceInterface] ⚠️ Wake lock failed:', err);
+        devWarn('[PremiumVoiceInterface] ⚠️ Wake lock failed:', err);
       }
     }
   }, []);
@@ -407,9 +407,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       try {
         await wakeLockRef.current.release();
         wakeLockRef.current = null;
-        console.log('[PremiumVoiceInterface] 🔆 Wake lock released');
+        devLog('[PremiumVoiceInterface] 🔆 Wake lock released');
       } catch (err) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Wake lock release failed:', err);
+        devWarn('[PremiumVoiceInterface] ⚠️ Wake lock release failed:', err);
       }
     }
   }, []);
@@ -429,7 +429,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Avertissement si on utilise un provider non-vocal comme fallback (probable erreur de config)
   if (!modelConfig?.voiceAgentProvider && modelConfig?.provider && 
       !validVoiceAgents.includes(modelConfig.provider)) {
-    console.warn('[PremiumVoiceInterface] ⚠️ Using non-voice-agent provider as fallback:', {
+    devWarn('[PremiumVoiceInterface] ⚠️ Using non-voice-agent provider as fallback:', {
       provider: modelConfig.provider,
       voiceAgentProvider: modelConfig.voiceAgentProvider,
       message: 'This is likely a configuration error. voice_agent_provider should be set in the database.',
@@ -477,11 +477,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // ===== EFFETS DE DEBUG ET SYNCHRONISATION =====
   // Log de la sélection de l'agent vocal lors des changements de configuration
   useEffect(() => {
-    console.log('[PremiumVoiceInterface] 🎤 Voice Agent Selection:', voiceAgentLogData.payload);
+    devLog('[PremiumVoiceInterface] 🎤 Voice Agent Selection:', voiceAgentLogData.payload);
     
     // Avertissement si Speechmatics n'est pas sélectionné (pour debug)
     if (!isSpeechmaticsAgent) {
-      console.warn('[PremiumVoiceInterface] ⚠️ Speechmatics not selected!', {
+      devWarn('[PremiumVoiceInterface] ⚠️ Speechmatics not selected!', {
         voiceAgentProvider,
         provider: modelConfig?.provider,
         expected: 'speechmatics-voice-agent',
@@ -497,7 +497,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const browserInfo = isInAppBrowser();
     setInAppBrowserInfo(browserInfo);
     if (browserInfo.isInApp) {
-      console.warn('[PremiumVoiceInterface] ⚠️ In-app browser detected:', browserInfo.appName);
+      devWarn('[PremiumVoiceInterface] ⚠️ In-app browser detected:', browserInfo.appName);
     }
   }, []);
 
@@ -569,7 +569,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const handleVisibilityChange = () => {
       const isHidden = document.visibilityState === 'hidden';
 
-      console.log('[PremiumVoiceInterface] 👁️ Visibility changed:', {
+      devLog('[PremiumVoiceInterface] 👁️ Visibility changed:', {
         isHidden,
         isConnected,
         isMuted: isMutedRef.current
@@ -578,7 +578,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       if (isHidden) {
         // Page devient cachée → mute automatique si connecté et pas déjà muted
         if (isConnected && !isMutedRef.current) {
-          console.log('[PremiumVoiceInterface] 👁️ Page hidden - auto-muting microphone');
+          devLog('[PremiumVoiceInterface] 👁️ Page hidden - auto-muting microphone');
           wasMutedByVisibilityRef.current = true;
 
           // Mute le microphone (même logique que l'inactivity monitor)
@@ -640,13 +640,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     try {
       const response = await fetch(`/api/ask/${askKey}/agent-config`);
       if (!response.ok) {
-        console.error(`[PremiumVoiceInterface] ❌ Failed to fetch agent config (${reason}):`, response.status, response.statusText);
+        devError(`[PremiumVoiceInterface] ❌ Failed to fetch agent config (${reason}):`, response.status, response.statusText);
         return;
       }
 
       const result = await response.json();
       if (!result.success || !result.data) {
-        console.error(`[PremiumVoiceInterface] ❌ Invalid agent config response (${reason}):`, result);
+        devError(`[PremiumVoiceInterface] ❌ Invalid agent config response (${reason}):`, result);
         return;
       }
 
@@ -659,9 +659,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         promptVariables: newPromptVariables,
       });
 
-      console.log('[PremiumVoiceInterface] ✅ Prompts updated:', reason);
+      devLog('[PremiumVoiceInterface] ✅ Prompts updated:', reason);
     } catch (error) {
-      console.error('[PremiumVoiceInterface] ❌ Error updating prompts:', reason, error);
+      devError('[PremiumVoiceInterface] ❌ Error updating prompts:', reason, error);
     }
   }, [askKey]);
 
@@ -684,7 +684,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     const prevStepId = previousStepIdRef.current;
     previousStepIdRef.current = currentConversationStepId;
 
-    console.log('[PremiumVoiceInterface] 📋 Step changed:', {
+    devLog('[PremiumVoiceInterface] 📋 Step changed:', {
       previousStepId: prevStepId,
       newStepId: currentConversationStepId,
     });
@@ -719,7 +719,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       return;
     }
 
-    console.log('[PremiumVoiceInterface] ⏱️ Periodic time update at', elapsedMinutes.toFixed(1), 'min');
+    devLog('[PremiumVoiceInterface] ⏱️ Periodic time update at', elapsedMinutes.toFixed(1), 'min');
     updatePromptsFromApi(`periodic time update at ${elapsedMinutes.toFixed(1)}min`);
   }, [elapsedMinutes, isTimerPaused, updatePromptsFromApi]);
 
@@ -744,7 +744,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
       // Skip if not connected
       if (!isConnected || !agentRef.current) {
-        console.log('[PremiumVoiceInterface] 🔍 Nudge check: skipped (not connected)');
+        devLog('[PremiumVoiceInterface] 🔍 Nudge check: skipped (not connected)');
         return;
       }
 
@@ -752,12 +752,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // This uses timestamp instead of checking interimUser content because
       // partials might stop coming without a final message, leaving stale content
       if (lastUserPartialTimestampRef.current > 0 && timeSinceLastPartial < USER_SPEAKING_WINDOW_MS) {
-        console.log('[PremiumVoiceInterface] 🔍 Nudge check: user still speaking (partial', Math.round(timeSinceLastPartial / 1000), 's ago)');
+        devLog('[PremiumVoiceInterface] 🔍 Nudge check: user still speaking (partial', Math.round(timeSinceLastPartial / 1000), 's ago)');
         return;
       }
 
       // Log the check status
-      console.log('[PremiumVoiceInterface] 🔍 Nudge check:', {
+      devLog('[PremiumVoiceInterface] 🔍 Nudge check:', {
         elapsedSinceUserMessage: Math.round(elapsed / 1000) + 's',
         timeSinceLastPartial: Math.round(timeSinceLastPartial / 1000) + 's',
         threshold: Math.round(AGENT_RESPONSE_TIMEOUT_MS / 1000) + 's',
@@ -766,7 +766,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
       // Check if timeout has passed
       if (elapsed >= AGENT_RESPONSE_TIMEOUT_MS) {
-        console.log('[PremiumVoiceInterface] ⚠️ Agent response timeout - nudging after', Math.round(elapsed / 1000), 'seconds');
+        devLog('[PremiumVoiceInterface] ⚠️ Agent response timeout - nudging after', Math.round(elapsed / 1000), 'seconds');
 
         // Mark as nudged to prevent duplicate attempts
         hasNudgedForCurrentMessageRef.current = true;
@@ -779,7 +779,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               headers['x-invite-token'] = inviteToken;
             }
 
-            console.log('[PremiumVoiceInterface] 🔄 Sending nudge to /respond endpoint with last user message');
+            devLog('[PremiumVoiceInterface] 🔄 Sending nudge to /respond endpoint with last user message');
 
             const response = await fetch(`/api/ask/${askKey}/respond`, {
               method: 'POST',
@@ -797,7 +797,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             if (response.ok) {
               const result = await response.json();
               if (result.success && result.data?.aiResponse) {
-                console.log('[PremiumVoiceInterface] ✅ Nudge successful - got AI response');
+                devLog('[PremiumVoiceInterface] ✅ Nudge successful - got AI response');
 
                 // If Speechmatics agent, speak the response via TTS
                 const agent = agentRef.current;
@@ -808,13 +808,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 // Clear awaiting state
                 awaitingAgentResponseRef.current = false;
               } else {
-                console.warn('[PremiumVoiceInterface] ⚠️ Nudge returned no AI response:', result);
+                devWarn('[PremiumVoiceInterface] ⚠️ Nudge returned no AI response:', result);
               }
             } else {
-              console.error('[PremiumVoiceInterface] ❌ Nudge failed:', response.status, await response.text());
+              devError('[PremiumVoiceInterface] ❌ Nudge failed:', response.status, await response.text());
             }
           } catch (error) {
-            console.error('[PremiumVoiceInterface] ❌ Error nudging agent:', error);
+            devError('[PremiumVoiceInterface] ❌ Error nudging agent:', error);
           }
         };
 
@@ -891,7 +891,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     try {
       // Vérifier si le microphone est muet avant de configurer l'analyse
       if (isMutedRef.current) {
-        console.log('[PremiumVoiceInterface] 🔇 Skipping audio analysis setup because microphone is muted');
+        devLog('[PremiumVoiceInterface] 🔇 Skipping audio analysis setup because microphone is muted');
         // Arrêter tous les tracks du stream pour libérer les ressources
         stream.getTracks().forEach(track => {
           if (track.readyState === 'live') {
@@ -962,7 +962,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Démarrer la boucle d'animation
       updateAudioLevel();
     } catch (err) {
-      console.error('Error setting up audio analysis:', err);
+      devError('Error setting up audio analysis:', err);
     }
   }, []);
 
@@ -994,7 +994,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       })
       .catch(err => {
         // Erreur non bloquante - la visualisation est optionnelle
-        console.warn('[PremiumVoiceInterface] Could not setup audio analysis:', err);
+        devWarn('[PremiumVoiceInterface] Could not setup audio analysis:', err);
       });
   }, [setupAudioAnalysis]);
 
@@ -1051,7 +1051,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         setVoiceIsolationEnabled(savedIsolation === 'true');
       }
     } catch (error) {
-      console.error('[PremiumVoiceInterface] Error loading microphone devices:', error);
+      devError('[PremiumVoiceInterface] Error loading microphone devices:', error);
     }
   }, []);
 
@@ -1093,7 +1093,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const cleanupAudioAnalysis = useCallback((closeAudioContext: boolean = false) => {
     // Éviter les nettoyages multiples simultanés
     if (isCleaningUpAudioRef.current && closeAudioContext) {
-      console.log('[PremiumVoiceInterface] ⚠️ Audio cleanup already in progress, skipping duplicate call');
+      devLog('[PremiumVoiceInterface] ⚠️ Audio cleanup already in progress, skipping duplicate call');
       return;
     }
 
@@ -1101,7 +1101,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       isCleaningUpAudioRef.current = true;
     }
 
-    console.log('[PremiumVoiceInterface] 🧹 Cleaning up audio analysis...', { closeAudioContext });
+    devLog('[PremiumVoiceInterface] 🧹 Cleaning up audio analysis...', { closeAudioContext });
 
     // Étape 1: Arrêter la boucle d'animation pour éviter les mises à jour après cleanup
     if (animationFrameRef.current) {
@@ -1117,9 +1117,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       try {
         microphoneNodeRef.current.disconnect();
         microphoneNodeRef.current = null;
-        console.log('[PremiumVoiceInterface] ✅ Microphone node disconnected');
+        devLog('[PremiumVoiceInterface] ✅ Microphone node disconnected');
       } catch (error) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Error disconnecting microphone node:', error);
+        devWarn('[PremiumVoiceInterface] ⚠️ Error disconnecting microphone node:', error);
       }
     }
     
@@ -1128,9 +1128,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       try {
         analyserRef.current.disconnect();
         analyserRef.current = null;
-        console.log('[PremiumVoiceInterface] ✅ Analyser node disconnected');
+        devLog('[PremiumVoiceInterface] ✅ Analyser node disconnected');
       } catch (error) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Error disconnecting analyser node:', error);
+        devWarn('[PremiumVoiceInterface] ⚠️ Error disconnecting analyser node:', error);
       }
     }
     
@@ -1141,13 +1141,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         streamRef.current.getTracks().forEach(track => {
           if (track.readyState === 'live') {
             track.stop();
-            console.log('[PremiumVoiceInterface] ✅ Stopped track:', track.kind, track.label);
+            devLog('[PremiumVoiceInterface] ✅ Stopped track:', track.kind, track.label);
           }
         });
         streamRef.current = null;
-        console.log('[PremiumVoiceInterface] ✅ Media stream cleaned up');
+        devLog('[PremiumVoiceInterface] ✅ Media stream cleaned up');
       } catch (error) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Error stopping stream tracks:', error);
+        devWarn('[PremiumVoiceInterface] ⚠️ Error stopping stream tracks:', error);
       }
     }
     
@@ -1160,13 +1160,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         if (audioContextRef.current.state !== 'closed') {
           audioContextRef.current.close();
         }
-        console.log('[PremiumVoiceInterface] ✅ Audio context closed');
+        devLog('[PremiumVoiceInterface] ✅ Audio context closed');
       } catch (error) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Error closing audio context:', error);
+        devWarn('[PremiumVoiceInterface] ⚠️ Error closing audio context:', error);
       }
       audioContextRef.current = null;
     } else if (closeAudioContext === false) {
-      console.log('[PremiumVoiceInterface] ℹ️ Audio context kept open for TTS playback');
+      devLog('[PremiumVoiceInterface] ℹ️ Audio context kept open for TTS playback');
     }
     
     // Réinitialiser le niveau audio à 0
@@ -1176,7 +1176,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       isCleaningUpAudioRef.current = false;
     }
 
-    console.log('[PremiumVoiceInterface] ✅ Audio analysis cleanup complete');
+    devLog('[PremiumVoiceInterface] ✅ Audio analysis cleanup complete');
   }, []);
 
   // ===== HANDLERS DES ÉVÉNEMENTS DE L'AGENT =====
@@ -1207,13 +1207,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // BUG-033 FIX: Also detect from interim messages for faster identification
       if (!consultantSpeakerRef.current) {
         consultantSpeakerRef.current = speaker;
-        console.log('[PremiumVoiceInterface] 👤 First speaker (consultant) identified:', speaker, isInterim ? '(interim)' : '(final)');
+        devLog('[PremiumVoiceInterface] 👤 First speaker (consultant) identified:', speaker, isInterim ? '(interim)' : '(final)');
       }
 
       // BUG-033 FIX: Pre-assign speaker order from interim messages for faster tracking
       if (!speakerOrderRef.current.has(speaker)) {
         speakerOrderRef.current.set(speaker, speakerOrderRef.current.size + 1);
-        console.log('[PremiumVoiceInterface] 📋 Speaker order assigned:', speaker, '->', speakerOrderRef.current.get(speaker), isInterim ? '(interim)' : '(final)');
+        devLog('[PremiumVoiceInterface] 📋 Speaker order assigned:', speaker, '->', speakerOrderRef.current.get(speaker), isInterim ? '(interim)' : '(final)');
       }
 
       // Detect new speakers and show assignment overlay
@@ -1221,7 +1221,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // BUG-033 FIX: Only show overlay on non-interim messages to avoid spam,
       // but speaker is already tracked above from interim for faster detection
       if (!isInterim && !knownSpeakersRef.current.has(speaker)) {
-        console.log('[PremiumVoiceInterface] 🆕 New speaker detected, showing overlay:', speaker);
+        devLog('[PremiumVoiceInterface] 🆕 New speaker detected, showing overlay:', speaker);
         // Add to pending queue (allows stacking multiple speakers)
         setPendingSpeakers(prev => {
           if (!prev.includes(speaker)) {
@@ -1301,12 +1301,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
         // DEDUPLICATION: Skip if this step is already being completed or was completed
         if (stepIdToComplete && completingStepsRef.current.has(stepIdToComplete)) {
-          console.log('[PremiumVoiceInterface] ⏭️ STEP_COMPLETE skipped (already completing):', stepIdToComplete);
+          devLog('[PremiumVoiceInterface] ⏭️ STEP_COMPLETE skipped (already completing):', stepIdToComplete);
         } else if (stepIdToComplete && askKey) {
           // Mark step as being completed to prevent duplicate calls
           completingStepsRef.current.add(stepIdToComplete);
 
-          console.log('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
+          devLog('[PremiumVoiceInterface] 🎯 STEP_COMPLETE detected in voice response:', {
             detectedStepId,
             stepIdToComplete,
             currentStepId: conversationPlan?.current_step_id,
@@ -1338,7 +1338,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 const result = await response.json();
 
                 if (result.success) {
-                  console.log('[PremiumVoiceInterface] ✅ Step completed via API:', {
+                  devLog('[PremiumVoiceInterface] ✅ Step completed via API:', {
                     completedStepId: stepIdToComplete,
                     nextStepId: result.data?.nextStepId,
                     attempt,
@@ -1354,11 +1354,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 } else {
                   // API returned success: false - this is a logical error, may be retryable
                   lastError = new Error(result.error || 'Unknown error');
-                  console.warn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} failed:`, result.error);
+                  devWarn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} failed:`, result.error);
                 }
               } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
-                console.warn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} error:`, error);
+                devWarn(`[PremiumVoiceInterface] ⚠️ Step completion attempt ${attempt}/${maxRetries} error:`, error);
               }
 
               // Don't delay after the last attempt
@@ -1370,7 +1370,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             }
 
             // All retries failed
-            console.error('[PremiumVoiceInterface] ❌ Step completion failed after all retries:', {
+            devError('[PremiumVoiceInterface] ❌ Step completion failed after all retries:', {
               stepIdToComplete,
               error: lastError?.message,
             });
@@ -1406,7 +1406,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         lastUserMessageContentRef.current = rawMessage.content.trim();
         awaitingAgentResponseRef.current = true;
         hasNudgedForCurrentMessageRef.current = false;
-        console.log('[PremiumVoiceInterface] 👂 User message awaiting response:', rawMessage.content.substring(0, 50) + '...');
+        devLog('[PremiumVoiceInterface] 👂 User message awaiting response:', rawMessage.content.substring(0, 50) + '...');
       }
 
       // Use the same ID for onMessage to ensure proper deduplication
@@ -1451,7 +1451,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
    * @param connected - État de connexion (true = connecté, false = déconnecté)
    */
   const handleConnectionChange = useCallback((connected: boolean) => {
-    console.log('[PremiumVoiceInterface] 🔌 handleConnectionChange:', {
+    devLog('[PremiumVoiceInterface] 🔌 handleConnectionChange:', {
       connected,
       hasAgent: !!agentRef.current,
       isDisconnecting: isDisconnectingRef.current,
@@ -1461,7 +1461,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // IMPORTANT: Ignorer les callbacks de connexion si l'agent n'existe plus
     // Cela arrive quand l'agent se connecte en arrière-plan après un unmount
     if (connected && !agentRef.current) {
-      console.log('[PremiumVoiceInterface] ⚠️ Received connection callback but agent is null - ignoring (likely from unmounted component)');
+      devLog('[PremiumVoiceInterface] ⚠️ Received connection callback but agent is null - ignoring (likely from unmounted component)');
       return;
     }
 
@@ -1491,7 +1491,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
    * Creates a guest participant if needed, or assigns to an existing one
    */
   const handleSpeakerAssignmentConfirm = useCallback(async (decision: SpeakerAssignmentDecision) => {
-    console.log('[PremiumVoiceInterface] 📋 Speaker assignment decision:', decision);
+    devLog('[PremiumVoiceInterface] 📋 Speaker assignment decision:', decision);
 
     // Add speaker to known speakers
     knownSpeakersRef.current.add(decision.speaker);
@@ -1522,7 +1522,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
         if (!response.ok) {
           const errorData = await response.json();
-          console.error('[PremiumVoiceInterface] ❌ Failed to create guest participant:', errorData);
+          devError('[PremiumVoiceInterface] ❌ Failed to create guest participant:', errorData);
           // Still add the mapping locally even if API fails
         }
 
@@ -1536,9 +1536,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           shouldTranscribe: true,
         }]);
 
-        console.log('[PremiumVoiceInterface] ✅ Guest participant created:', fullName);
+        devLog('[PremiumVoiceInterface] ✅ Guest participant created:', fullName);
       } catch (error) {
-        console.error('[PremiumVoiceInterface] ❌ Error creating guest participant:', error);
+        devError('[PremiumVoiceInterface] ❌ Error creating guest participant:', error);
         // Add mapping with unknown name
         setSpeakerMappings(prev => [...prev, {
           speaker: decision.speaker,
@@ -1641,14 +1641,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const connect = useCallback(async () => {
     // CRITIQUE: Empêcher les connexions multiples simultanées
     if (isConnectingRef.current) {
-      console.warn('[PremiumVoiceInterface] ⚠️ Connection already in progress, ignoring duplicate call');
+      devWarn('[PremiumVoiceInterface] ⚠️ Connection already in progress, ignoring duplicate call');
       return;
     }
 
     // CRITIQUE: Attendre la fin d'une déconnexion en cours avant de connecter
     // Cela évite les conflits de ressources (microphone, WebSocket)
     if (isDisconnectingRef.current) {
-      console.log('[PremiumVoiceInterface] ⏳ Waiting for previous disconnect to complete...');
+      devLog('[PremiumVoiceInterface] ⏳ Waiting for previous disconnect to complete...');
       // Attendre jusqu'à 5 secondes pour que la déconnexion se termine
       let waitCount = 0;
       while (isDisconnectingRef.current && waitCount < 50) {
@@ -1656,7 +1656,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         waitCount++;
       }
       if (isDisconnectingRef.current) {
-        console.warn('[PremiumVoiceInterface] ⚠️ Previous disconnect still in progress after 5s, aborting new connection');
+        devWarn('[PremiumVoiceInterface] ⚠️ Previous disconnect still in progress after 5s, aborting new connection');
         setError('Previous disconnect still in progress. Please wait a moment and try again.');
         return;
       }
@@ -1664,13 +1664,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
     // Vérifier si déjà connecté (évite les connexions inutiles)
     if (agentRef.current && isConnected) {
-      console.log('[PremiumVoiceInterface] ℹ️ Already connected, skipping new connection');
+      devLog('[PremiumVoiceInterface] ℹ️ Already connected, skipping new connection');
       return;
     }
 
     try {
       isConnectingRef.current = true;
-      console.log('[PremiumVoiceInterface] 🔌 Starting connection...');
+      devLog('[PremiumVoiceInterface] 🔌 Starting connection...');
       setError(null);
       setIsConnecting(true);
 
@@ -1679,11 +1679,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // CRITICAL: Disconnect any existing agent before creating a new one
       // This prevents orphaned agents from React StrictMode double-mounting
       if (agentRef.current) {
-        console.log('[PremiumVoiceInterface] 🧹 Disconnecting existing agent before creating new one');
+        devLog('[PremiumVoiceInterface] 🧹 Disconnecting existing agent before creating new one');
         try {
           await agentRef.current.disconnect();
         } catch (err) {
-          console.error('[PremiumVoiceInterface] ❌ Error disconnecting existing agent:', err);
+          devError('[PremiumVoiceInterface] ❌ Error disconnecting existing agent:', err);
         }
         agentRef.current = null;
       }
@@ -1694,7 +1694,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Agent Hybrid : Deepgram STT + LLM (Anthropic/OpenAI) + ElevenLabs TTS
         const agent = new HybridVoiceAgent();
         agentRef.current = agent;
-        console.log('[PremiumVoiceInterface] ✅ HybridVoiceAgent created and stored in agentRef');
+        devLog('[PremiumVoiceInterface] ✅ HybridVoiceAgent created and stored in agentRef');
 
         // Configuration des callbacks pour recevoir les événements
         agent.setCallbacks({
@@ -1722,7 +1722,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
         // BUG FIX: If tutorial is active, immediately mute the microphone after starting it
         if (tutorialActiveRef.current && 'setMicrophoneMuted' in agent) {
-          console.log('[PremiumVoiceInterface] 🔇 Tutorial active - muting Hybrid agent microphone after start');
+          devLog('[PremiumVoiceInterface] 🔇 Tutorial active - muting Hybrid agent microphone after start');
           (agent as any).setMicrophoneMuted(true);
         }
 
@@ -1733,11 +1733,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Agent Speechmatics : Speechmatics STT + LLM (Anthropic/OpenAI) + ElevenLabs TTS
         // NOTE: Le mode consultant nécessite Speechmatics (seul agent supportant diarization + disableLLM)
         if (consultantMode && !isSpeechmaticsAgent) {
-          console.log('[PremiumVoiceInterface] 🎧 Mode consultant - Speechmatics requis pour la diarisation');
+          devLog('[PremiumVoiceInterface] 🎧 Mode consultant - Speechmatics requis pour la diarisation');
         }
         const agent = new SpeechmaticsVoiceAgent();
         agentRef.current = agent;
-        console.log('[PremiumVoiceInterface] ✅ SpeechmaticsVoiceAgent created and stored in agentRef', {
+        devLog('[PremiumVoiceInterface] ✅ SpeechmaticsVoiceAgent created and stored in agentRef', {
           consultantMode,
           disableTTS: consultantMode || modelConfig?.disableElevenLabsTTS,
         });
@@ -1751,7 +1751,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           onAudioPlaybackEnd: () => {
             // Resume inactivity timer after TTS audio finishes playing
             const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-            console.log(`[${timestamp}] [PremiumVoiceInterface] 🔊 TTS audio playback ended - resuming inactivity timer`);
+            devLog(`[${timestamp}] [PremiumVoiceInterface] 🔊 TTS audio playback ended - resuming inactivity timer`);
             inactivityMonitor.resumeTimerAfterDelay(0);
           },
         });
@@ -1790,14 +1790,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           // In individual mode, filter out non-primary speakers (TV, background conversations)
           enableSpeakerFiltering: !consultantMode,
           onSpeakerEstablished: (speaker: string) => {
-            console.log(`[PremiumVoiceInterface] 🎤 Primary speaker established: ${speaker}`);
+            devLog(`[PremiumVoiceInterface] 🎤 Primary speaker established: ${speaker}`);
           },
           onSpeakerFiltered: (speaker: string, transcript: string) => {
-            console.log(`[PremiumVoiceInterface] 🔇 Filtered speaker ${speaker}: "${transcript}"`);
+            devLog(`[PremiumVoiceInterface] 🔇 Filtered speaker ${speaker}: "${transcript}"`);
 
             // Don't show notification for speakers the user chose to ignore
             if (ignoredSpeakersRef.current.has(speaker)) {
-              console.log(`[PremiumVoiceInterface] Speaker ${speaker} was ignored, skipping notification`);
+              devLog(`[PremiumVoiceInterface] Speaker ${speaker} was ignored, skipping notification`);
               return;
             }
 
@@ -1825,7 +1825,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         };
 
         // Log config for debugging consultant mode
-        console.log('[PremiumVoiceInterface] 🔧 Speechmatics config:', {
+        devLog('[PremiumVoiceInterface] 🔧 Speechmatics config:', {
           disableLLM: config.disableLLM,
           disableElevenLabsTTS: config.disableElevenLabsTTS,
           sttDiarization: config.sttDiarization,
@@ -1841,7 +1841,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // The React state (isMuted) is already true from the tutorial useEffect,
         // but we need to actually mute the Speechmatics agent
         if (tutorialActiveRef.current) {
-          console.log('[PremiumVoiceInterface] 🔇 Tutorial active - muting microphone after start');
+          devLog('[PremiumVoiceInterface] 🔇 Tutorial active - muting microphone after start');
           agent.setMicrophoneMuted(true);
         }
 
@@ -1853,7 +1853,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         if (!consultantMode && askKey) {
           if (messages.length === 0) {
             // No messages at all - generate and speak initial message via /respond endpoint
-            console.log('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
+            devLog('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
             try {
               const headers: HeadersInit = { 'Content-Type': 'application/json' };
               if (inviteToken) {
@@ -1875,36 +1875,36 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 if (result.success && result.data?.aiResponse) {
                   // If tutorial is showing, store the message to speak later
                   if (tutorialActiveRef.current) {
-                    console.log('[PremiumVoiceInterface] 📝 Tutorial active - storing initial message for later');
+                    devLog('[PremiumVoiceInterface] 📝 Tutorial active - storing initial message for later');
                     pendingInitialMessageRef.current = result.data.aiResponse;
                   } else {
                     // Speak the initial message via TTS
                     await agent.speakInitialMessage(result.data.aiResponse);
-                    console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+                    devLog('[PremiumVoiceInterface] ✅ Initial message spoken');
                   }
                 }
               } else {
-                console.warn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
+                devWarn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
               }
             } catch (error) {
-              console.error('[PremiumVoiceInterface] Error generating initial message:', error);
+              devError('[PremiumVoiceInterface] Error generating initial message:', error);
               // Don't fail - voice session can still work without initial message
             }
           } else if (messages.length === 1 && messages[0].role === 'assistant') {
             // Initial message already exists (created by GET /api/ask/[key]) but never spoken
             // This happens when user enters voice mode after page load in individual_parallel mode
-            console.log('[PremiumVoiceInterface] 🎤 Initial message exists - speaking via TTS');
+            devLog('[PremiumVoiceInterface] 🎤 Initial message exists - speaking via TTS');
             try {
               // If tutorial is showing, store the message to speak later
               if (tutorialActiveRef.current) {
-                console.log('[PremiumVoiceInterface] 📝 Tutorial active - storing existing message for later');
+                devLog('[PremiumVoiceInterface] 📝 Tutorial active - storing existing message for later');
                 pendingInitialMessageRef.current = messages[0].content;
               } else {
                 await agent.speakInitialMessage(messages[0].content);
-                console.log('[PremiumVoiceInterface] ✅ Existing initial message spoken');
+                devLog('[PremiumVoiceInterface] ✅ Existing initial message spoken');
               }
             } catch (error) {
-              console.error('[PremiumVoiceInterface] Error speaking existing initial message:', error);
+              devError('[PremiumVoiceInterface] Error speaking existing initial message:', error);
               // Don't fail - voice session can still work without initial message
             }
           }
@@ -1913,7 +1913,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Agent Deepgram par défaut : Deepgram STT + LLM + Deepgram TTS (tout-en-un)
         const agent = new DeepgramVoiceAgent();
         agentRef.current = agent;
-        console.log('[PremiumVoiceInterface] ✅ DeepgramVoiceAgent created and stored in agentRef');
+        devLog('[PremiumVoiceInterface] ✅ DeepgramVoiceAgent created and stored in agentRef');
 
         // Configuration des callbacks
         agent.setCallbacks({
@@ -1946,7 +1946,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Acquérir le wake lock pour empêcher l'écran de se mettre en veille
       acquireWakeLock();
     } catch (err) {
-      console.error('[PremiumVoiceInterface] ❌ Connection error:', err);
+      devError('[PremiumVoiceInterface] ❌ Connection error:', err);
       setIsConnecting(false);
       isConnectingRef.current = false;
       cleanupAudioAnalysis(true); // Close audio context on connection error
@@ -1973,7 +1973,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       return;
     }
     reloadRequestedRef.current = true;
-    console.log('[PremiumVoiceInterface] 🔁 Reloading page after full disconnect');
+    devLog('[PremiumVoiceInterface] 🔁 Reloading page after full disconnect');
     window.location.reload();
   }, []);
 
@@ -1994,12 +1994,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const disconnect = useCallback(async () => {
     // CRITIQUE: Empêcher les déconnexions multiples simultanées
     if (isDisconnectingRef.current) {
-      console.warn('[PremiumVoiceInterface] ⚠️ Disconnect already in progress, ignoring duplicate call');
+      devWarn('[PremiumVoiceInterface] ⚠️ Disconnect already in progress, ignoring duplicate call');
       return;
     }
 
     isDisconnectingRef.current = true;
-    console.log('[PremiumVoiceInterface] 🔌 Disconnecting completely...');
+    devLog('[PremiumVoiceInterface] 🔌 Disconnecting completely...');
     
     try {
       // Étape 1: Arrêter le timeout de détection de parole
@@ -2027,12 +2027,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           // - Arrêter la lecture audio
           // - Appeler enumerateDevices() pour forcer le nettoyage du navigateur
           await agentRef.current.disconnect();
-          console.log('[PremiumVoiceInterface] ✅ Agent disconnected (microphone + websocket)');
+          devLog('[PremiumVoiceInterface] ✅ Agent disconnected (microphone + websocket)');
         } catch (error) {
-          console.warn('[PremiumVoiceInterface] Error disconnecting agent:', error);
+          devWarn('[PremiumVoiceInterface] Error disconnecting agent:', error);
         }
         agentRef.current = null;
-        console.log('[PremiumVoiceInterface] 🗑️ agentRef.current set to null');
+        devLog('[PremiumVoiceInterface] 🗑️ agentRef.current set to null');
       }
 
       // Étape 4: Délai supplémentaire pour que le navigateur libère toutes les ressources microphone
@@ -2051,7 +2051,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setInterimAssistant(null);
       setPendingFinalUser(null);
 
-      console.log('[PremiumVoiceInterface] ✅ Complete disconnection finished - websocket and microphone are OFF');
+      devLog('[PremiumVoiceInterface] ✅ Complete disconnection finished - websocket and microphone are OFF');
     } finally {
       // Toujours réinitialiser le flag de déconnexion, même en cas d'erreur
       isDisconnectingRef.current = false;
@@ -2060,7 +2060,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
   // ===== HANDLERS D'ÉDITION DE MESSAGE =====
   const handleStartEdit = useCallback((messageId: string, currentContent: string) => {
-    console.log('[PremiumVoiceInterface] ✏️ Starting edit for message:', messageId);
+    devLog('[PremiumVoiceInterface] ✏️ Starting edit for message:', messageId);
     // Save current mute state and mute the mic
     wasMutedBeforeEditRef.current = isMuted;
     if (!isMuted) {
@@ -2079,7 +2079,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, [isMuted, isConnected]);
 
   const handleCancelEdit = useCallback(() => {
-    console.log('[PremiumVoiceInterface] ❌ Cancelling edit');
+    devLog('[PremiumVoiceInterface] ❌ Cancelling edit');
     setEditingMessageId(null);
     setEditContent("");
     // Restore mic state if it wasn't muted before
@@ -2098,7 +2098,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const handleSubmitEdit = useCallback(async () => {
     if (!editingMessageId || !editContent.trim() || !onEditMessage) return;
 
-    console.log('[PremiumVoiceInterface] 💾 Submitting edit for message:', editingMessageId);
+    devLog('[PremiumVoiceInterface] 💾 Submitting edit for message:', editingMessageId);
     setIsSubmittingEdit(true);
 
     const trimmedContent = editContent.trim();
@@ -2112,18 +2112,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // The agent will generate a response and speak it via TTS
       const agent = agentRef.current;
       if (agent && 'injectUserMessageAndRespond' in agent) {
-        console.log('[PremiumVoiceInterface] 🎯 Triggering agent response for edited message');
+        devLog('[PremiumVoiceInterface] 🎯 Triggering agent response for edited message');
         try {
           await (agent as SpeechmaticsVoiceAgent | HybridVoiceAgent).injectUserMessageAndRespond(trimmedContent);
         } catch (agentError) {
-          console.error('[PremiumVoiceInterface] ❌ Error triggering agent response:', agentError);
+          devError('[PremiumVoiceInterface] ❌ Error triggering agent response:', agentError);
         }
       }
 
       // Keep mic muted - the AI will respond and we want to let the user hear it
       // The mic will stay muted, user can unmute when ready
     } catch (error) {
-      console.error('[PremiumVoiceInterface] ❌ Error submitting edit:', error);
+      devError('[PremiumVoiceInterface] ❌ Error submitting edit:', error);
     } finally {
       setIsSubmittingEdit(false);
     }
@@ -2141,12 +2141,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Speak the pending initial message FIRST (before unmuting)
     const pendingMessage = pendingInitialMessageRef.current;
     if (pendingMessage && agent instanceof SpeechmaticsVoiceAgent && agent.isConnected()) {
-      console.log('[PremiumVoiceInterface] 🎤 Tutorial complete - speaking pending initial message');
+      devLog('[PremiumVoiceInterface] 🎤 Tutorial complete - speaking pending initial message');
       try {
         await agent.speakInitialMessage(pendingMessage);
-        console.log('[PremiumVoiceInterface] ✅ Pending initial message spoken');
+        devLog('[PremiumVoiceInterface] ✅ Pending initial message spoken');
       } catch (error) {
-        console.error('[PremiumVoiceInterface] Error speaking pending message:', error);
+        devError('[PremiumVoiceInterface] Error speaking pending message:', error);
       }
       pendingInitialMessageRef.current = null;
     }
@@ -2168,18 +2168,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, []);
 
   const handleCloseClick = useCallback(async () => {
-    console.log('[PremiumVoiceInterface] ❌ Close button clicked - disconnecting everything');
+    devLog('[PremiumVoiceInterface] ❌ Close button clicked - disconnecting everything');
     try {
       await disconnect();
     } catch (error) {
-      console.warn('[PremiumVoiceInterface] ⚠️ Close disconnect failed, forcing close anyway:', error);
+      devWarn('[PremiumVoiceInterface] ⚠️ Close disconnect failed, forcing close anyway:', error);
     }
     onClose();
     reloadPage();
   }, [disconnect, onClose, reloadPage]);
 
   const toggleMute = useCallback(async () => {
-    console.log('[PremiumVoiceInterface] 🎤 toggleMute called', {
+    devLog('[PremiumVoiceInterface] 🎤 toggleMute called', {
       isMuted,
       isConnected,
       isMicrophoneActive,
@@ -2188,13 +2188,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
     const agent = agentRef.current;
     if (!agent) {
-      console.log('[PremiumVoiceInterface] ⚠️ No agent available, cannot toggle mute');
+      devLog('[PremiumVoiceInterface] ⚠️ No agent available, cannot toggle mute');
       return;
     }
 
     if (isMuted) {
       // User wants to unmute - need to reconnect WebSocket and restart microphone
-      console.log('[PremiumVoiceInterface] 🔊 Unmuting - reconnecting WebSocket and restarting microphone...');
+      devLog('[PremiumVoiceInterface] 🔊 Unmuting - reconnecting WebSocket and restarting microphone...');
       isMutedRef.current = false;
       setIsMuted(false);
       setIsConnecting(true);
@@ -2206,7 +2206,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           setIsMicrophoneActive(true);
           setIsConnecting(false);
           startAudioVisualization();
-          console.log('[PremiumVoiceInterface] ✅ Speechmatics unmuted - stream resumed');
+          devLog('[PremiumVoiceInterface] ✅ Speechmatics unmuted - stream resumed');
           return;
         } else if (isHybridAgent && agent instanceof HybridVoiceAgent) {
           const config: any = {
@@ -2242,9 +2242,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         setIsMicrophoneActive(true);
         setIsConnecting(false);
         startAudioVisualization();
-        console.log('[PremiumVoiceInterface] ✅ Unmuted successfully - WebSocket reconnected and microphone active');
+        devLog('[PremiumVoiceInterface] ✅ Unmuted successfully - WebSocket reconnected and microphone active');
       } catch (err) {
-        console.error('[PremiumVoiceInterface] ❌ Error reconnecting on unmute:', err);
+        devError('[PremiumVoiceInterface] ❌ Error reconnecting on unmute:', err);
         isMutedRef.current = true;
         setIsMuted(true);
         setIsMicrophoneActive(false);
@@ -2253,7 +2253,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       }
     } else {
       // User wants to mute - stop sending audio chunks but keep WebSocket open for TTS
-      console.log('[PremiumVoiceInterface] 🔇 Muting - stopping microphone input but keeping WebSocket open for responses...');
+      devLog('[PremiumVoiceInterface] 🔇 Muting - stopping microphone input but keeping WebSocket open for responses...');
       isMutedRef.current = true;
       setIsMuted(true);
       setIsMicrophoneActive(false);
@@ -2282,9 +2282,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             })()
           ]);
         }
-        console.log('[PremiumVoiceInterface] ✅ Microphone muted - WebSocket remains open for agent responses');
+        devLog('[PremiumVoiceInterface] ✅ Microphone muted - WebSocket remains open for agent responses');
       } catch (error) {
-        console.error('[PremiumVoiceInterface] ❌ Error muting microphone:', error);
+        devError('[PremiumVoiceInterface] ❌ Error muting microphone:', error);
       }
     }
   }, [isMuted, isConnected, isMicrophoneActive, isHybridAgent, isSpeechmaticsAgent, systemPrompt, modelConfig, selectedMicrophoneId, voiceIsolationEnabled, cleanupAudioAnalysis, startAudioVisualization, handleError, inactivityMonitor]);
@@ -2333,17 +2333,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
     const doConnect = async () => {
       if (!isMounted) {
-        console.log('[PremiumVoiceInterface] ⚠️ Component unmounted before connect started, aborting');
+        devLog('[PremiumVoiceInterface] ⚠️ Component unmounted before connect started, aborting');
         return;
       }
 
       // Si une connexion/déconnexion est en cours, attendre qu'elle se termine puis réessayer
       if (isConnectingRef.current || isDisconnectingRef.current) {
-        console.log('[PremiumVoiceInterface] ⏱️ Connection or disconnect in progress, waiting 1s then retrying...');
+        devLog('[PremiumVoiceInterface] ⏱️ Connection or disconnect in progress, waiting 1s then retrying...');
         await new Promise(resolve => setTimeout(resolve, 1000));
 
         if (!isMounted) {
-          console.log('[PremiumVoiceInterface] ⚠️ Component unmounted while waiting, aborting');
+          devLog('[PremiumVoiceInterface] ⚠️ Component unmounted while waiting, aborting');
           return;
         }
 
@@ -2351,18 +2351,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         return doConnect();
       }
 
-      console.log('[PremiumVoiceInterface] ⏱️ Starting connection immediately...');
+      devLog('[PremiumVoiceInterface] ⏱️ Starting connection immediately...');
       await connectRef.current?.();
 
       if (!isMounted) {
-        console.log('[PremiumVoiceInterface] ⚠️ Component unmounted during connect, cleaning up orphaned agent');
+        devLog('[PremiumVoiceInterface] ⚠️ Component unmounted during connect, cleaning up orphaned agent');
         // Si le composant s'est démonté pendant connect, nettoyer l'agent orphelin
         if (agentRef.current) {
           try {
             await agentRef.current.disconnect();
             agentRef.current = null;
           } catch (err) {
-            console.error('[PremiumVoiceInterface] Error cleaning up orphaned agent:', err);
+            devError('[PremiumVoiceInterface] Error cleaning up orphaned agent:', err);
           }
         }
       }
@@ -2373,14 +2373,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // We only want to connect on the second mount to avoid orphaned agents
     // In production (no StrictMode), connect immediately on first mount
     if (strictModeFirstMountRef.current) {
-      console.log('[PremiumVoiceInterface] 🔄 First mount detected, setting timeout to detect StrictMode...');
+      devLog('[PremiumVoiceInterface] 🔄 First mount detected, setting timeout to detect StrictMode...');
       strictModeFirstMountRef.current = false;
 
       // Use a small timeout to detect if we're in StrictMode
       // If StrictMode is active, the component will unmount/remount immediately
       // If not (production), the timeout will fire and we'll connect
       const timeoutId = setTimeout(() => {
-        console.log('[PremiumVoiceInterface] 🚀 No second mount detected (production mode), auto-connecting now...', {
+        devLog('[PremiumVoiceInterface] 🚀 No second mount detected (production mode), auto-connecting now...', {
           hasAgent: !!agentRef.current,
           isConnected,
           isConnecting: isConnectingRef.current,
@@ -2395,7 +2395,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       };
     }
 
-    console.log('[PremiumVoiceInterface] 🚀 Component mounted (second mount from StrictMode), auto-connecting...', {
+    devLog('[PremiumVoiceInterface] 🚀 Component mounted (second mount from StrictMode), auto-connecting...', {
       hasAgent: !!agentRef.current,
       isConnected,
       isConnecting: isConnectingRef.current,
@@ -2406,7 +2406,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
     return () => {
       isMounted = false;
-      console.log('[PremiumVoiceInterface] 🧹 Component unmounting, cleaning up all streams...', {
+      devLog('[PremiumVoiceInterface] 🧹 Component unmounting, cleaning up all streams...', {
         hadAgent: !!agentRef.current,
         wasConnected: isConnected
       });
@@ -2414,6 +2414,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       cleanupAudioAnalysisRef.current?.(true); // Close audio context on unmount
       if (speakingTimeoutRef.current) {
         clearTimeout(speakingTimeoutRef.current);
+      }
+      if (filteredSpeakerTimeoutRef.current) {
+        clearTimeout(filteredSpeakerTimeoutRef.current);
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2541,9 +2544,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     if ((hasNewMessages || lastMessageChanged) && messagesContainerRef.current) {
       // Use scrollTop directly instead of scrollIntoView to avoid layout recalculations
       // that can cause visual artifacts during message transitions
+      const previousScrollTop = messagesContainerRef.current.scrollTop;
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      const newScrollTop = messagesContainerRef.current.scrollTop;
+
+      // Programmatic scroll doesn't trigger DOM scroll events, so manually notify
+      // the hide/show hook that we scrolled down (positive delta = hide header)
+      if (newScrollTop > previousScrollTop) {
+        handleScrollHideShow(newScrollTop, newScrollTop - previousScrollTop);
+        // Update lastScrollTopRef so manual scrolls calculate correct delta
+        lastScrollTopRef.current = newScrollTop;
+      }
     }
-  }, [displayMessages]);
+  }, [displayMessages, handleScrollHideShow]);
 
   /**
    * NEW PURE REACT TEXT COMPONENT
@@ -3262,7 +3275,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         {/* Voice control bar - mic button left, status/partials right */}
         <div
           className="flex items-center gap-4 px-4"
-          style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+          style={{ paddingBottom: 'max(56px, calc(env(safe-area-inset-bottom, 0px) + 44px))' }}
         >
           {/* Mic button - left, smaller */}
           <div className="flex-shrink-0 relative">
@@ -3457,7 +3470,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               </p>
               <Button
                 onClick={() => {
-                  console.log('[PremiumVoiceInterface] 🔊 User resumed - unmuting microphone');
+                  devLog('[PremiumVoiceInterface] 🔊 User resumed - unmuting microphone');
                   setShowInactivityOverlay(false);
 
                   // Unmute microphone
@@ -3513,7 +3526,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                       clearTimeout(filteredSpeakerTimeoutRef.current);
                     }
                     ignoredSpeakersRef.current.add(filteredSpeakerNotification.speaker);
-                    console.log(`[PremiumVoiceInterface] Speaker ${filteredSpeakerNotification.speaker} added to ignore list`);
+                    devLog(`[PremiumVoiceInterface] Speaker ${filteredSpeakerNotification.speaker} added to ignore list`);
                     setFilteredSpeakerNotification(null);
                   }}
                   className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-left"

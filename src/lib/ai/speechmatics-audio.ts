@@ -3,6 +3,7 @@
  * Handles microphone input, audio playback, VAD, and barge-in
  */
 
+import { devLog, devWarn, devError } from '@/lib/utils';
 import { AudioChunkDedupe } from './speechmatics-audio-dedupe';
 import {
   createStartOfTurnDetector,
@@ -176,7 +177,7 @@ export class SpeechmaticsAudio {
     try {
       await audioContext.audioWorklet.addModule('/speechmatics-audio-processor.js');
     } catch (error) {
-      console.error('[Speechmatics] ❌ Failed to load AudioWorklet module:', error);
+      devError('[Speechmatics] ❌ Failed to load AudioWorklet module:', error);
       throw new Error(`Failed to load AudioWorklet: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
@@ -292,7 +293,7 @@ export class SpeechmaticsAudio {
             this.ws.send(pcmData.buffer);
           }
         } catch (error) {
-          console.error('[Speechmatics] ❌ Error sending audio:', error);
+          devError('[Speechmatics] ❌ Error sending audio:', error);
         }
       }
     };
@@ -332,7 +333,7 @@ export class SpeechmaticsAudio {
         this.processorNode.disconnect();
         this.processorNode = null;
       } catch (error) {
-        console.warn('[Speechmatics] Error stopping processor:', error);
+        devWarn('[Speechmatics] Error stopping processor:', error);
       }
     }
 
@@ -349,7 +350,7 @@ export class SpeechmaticsAudio {
         });
         this.mediaStream = null;
       } catch (error) {
-        console.warn('[Speechmatics] Error stopping media stream:', error);
+        devWarn('[Speechmatics] Error stopping media stream:', error);
       }
     }
 
@@ -491,7 +492,7 @@ export class SpeechmaticsAudio {
 
   async playAudio(audioData: Uint8Array): Promise<void> {
     if (!this.audioContext) {
-      console.warn('[Speechmatics] ⚠️ No audio context for playback');
+      devWarn('[Speechmatics] ⚠️ No audio context for playback');
       return;
     }
 
@@ -502,7 +503,7 @@ export class SpeechmaticsAudio {
         this.playAudioBuffer();
       }
     } catch (error) {
-      console.error('[Speechmatics] ❌ Error playing audio:', error);
+      devError('[Speechmatics] ❌ Error playing audio:', error);
       this.isPlayingAudio = false;
     }
   }
@@ -610,7 +611,7 @@ export class SpeechmaticsAudio {
         source.stop();
       }
     } catch (error) {
-      console.warn('[Speechmatics] Error stopping agent speech:', error);
+      devWarn('[Speechmatics] Error stopping agent speech:', error);
       try {
         source.stop();
       } catch {
@@ -973,7 +974,7 @@ export class SpeechmaticsAudio {
         this.confirmBargeIn();
         return true;
       } catch (error) {
-        console.error('[Speechmatics Audio] AI validation error', error);
+        devError('[Speechmatics Audio] AI validation error', error);
         // Fall through to simple validation
       }
     }
@@ -1122,7 +1123,7 @@ export class SpeechmaticsAudio {
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
       return audioBuffer;
     } catch (error) {
-      console.error('[Speechmatics] ❌ Error decoding audio:', error);
+      devError('[Speechmatics] ❌ Error decoding audio:', error);
       throw error;
     }
   }
@@ -1183,7 +1184,7 @@ export class SpeechmaticsAudio {
     this.hasRecentVoiceActivity = false;
     // Also cancel any pending barge-in validation since it was from a filtered speaker
     this.cancelBargeInValidation();
-    console.log('[Speechmatics Audio] ✅ VAD state reset due to filtered speaker');
+    devLog('[Speechmatics Audio] ✅ VAD state reset due to filtered speaker');
   }
 
   /**

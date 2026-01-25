@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { devLog } from '@/lib/utils';
 
 export type Speaker = 'user' | 'assistant' | null;
 
@@ -145,12 +146,12 @@ export function useInactivityMonitor(
     // Don't start timer if paused
     if (isPausedRef.current) {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [InactivityMonitor] ⏸️ Timer paused, not starting`);
+      devLog(`[${timestamp}] [InactivityMonitor] ⏸️ Timer paused, not starting`);
       return;
     }
     inactivityTimerRef.current = setTimeout(() => {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [InactivityMonitor] ⏰ Inactivity timeout - triggering inactive state`);
+      devLog(`[${timestamp}] [InactivityMonitor] ⏰ Inactivity timeout - triggering inactive state`);
       setIsInactive(true);
       onInactiveRef.current();
     }, timeout);
@@ -164,7 +165,7 @@ export function useInactivityMonitor(
 
     if (wasInactive) {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [InactivityMonitor] ✅ Activity resumed after inactivity`);
+      devLog(`[${timestamp}] [InactivityMonitor] ✅ Activity resumed after inactivity`);
       setIsInactive(false);
       onActiveRef.current?.();
     }
@@ -178,7 +179,7 @@ export function useInactivityMonitor(
    */
   const pauseTimer = useCallback(() => {
     const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-    console.log(`[${timestamp}] [InactivityMonitor] ⏸️ Pausing timer (assistant speaking)`);
+    devLog(`[${timestamp}] [InactivityMonitor] ⏸️ Pausing timer (assistant speaking)`);
     setIsPaused(true);
     isPausedRef.current = true;
     clearTimer();
@@ -193,16 +194,16 @@ export function useInactivityMonitor(
 
     if (delayMs === 0) {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [InactivityMonitor] ▶️ Resuming timer immediately`);
+      devLog(`[${timestamp}] [InactivityMonitor] ▶️ Resuming timer immediately`);
       setIsPaused(false);
       isPausedRef.current = false;
       startTimer();
     } else {
       const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-      console.log(`[${timestamp}] [InactivityMonitor] ⏳ Will resume timer in ${delayMs}ms`);
+      devLog(`[${timestamp}] [InactivityMonitor] ⏳ Will resume timer in ${delayMs}ms`);
       resumeDelayTimerRef.current = setTimeout(() => {
         const ts = new Date().toISOString().split('T')[1].replace('Z', '');
-        console.log(`[${ts}] [InactivityMonitor] ▶️ Resuming timer after delay`);
+        devLog(`[${ts}] [InactivityMonitor] ▶️ Resuming timer after delay`);
         setIsPaused(false);
         isPausedRef.current = false;
         startTimer();
@@ -215,7 +216,7 @@ export function useInactivityMonitor(
    */
   const recordUserActivity = useCallback(() => {
     const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-    console.log(`[${timestamp}] [InactivityMonitor] 👤 User activity detected`);
+    devLog(`[${timestamp}] [InactivityMonitor] 👤 User activity detected`);
     setLastSpeaker('user');
     // User activity cancels any pending resume and resets immediately
     clearResumeDelayTimer();
@@ -233,7 +234,7 @@ export function useInactivityMonitor(
    */
   const recordAssistantActivity = useCallback((isFinal: boolean = false) => {
     const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
-    console.log(`[${timestamp}] [InactivityMonitor] 🤖 Assistant activity detected (isFinal: ${isFinal})`);
+    devLog(`[${timestamp}] [InactivityMonitor] 🤖 Assistant activity detected (isFinal: ${isFinal})`);
     setLastSpeaker('assistant');
     setLastActivityTimestamp(Date.now());
 

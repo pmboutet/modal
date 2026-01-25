@@ -20,14 +20,7 @@
  * afin d'améliorer la maintenabilité et la testabilité.
  */
 
-/**
- * Helper function to get timestamp for logging
- */
-function getTimestamp(): string {
-  const now = new Date();
-  return now.toISOString().split('T')[1].replace('Z', '');
-}
-
+import { devLog, devWarn, devError } from '@/lib/utils';
 import { ElevenLabsTTS, type ElevenLabsConfig } from './elevenlabs';
 import { SpeechmaticsAuth } from './speechmatics-auth';
 import { AudioChunkDedupe } from './speechmatics-audio-dedupe';
@@ -202,7 +195,7 @@ export class SpeechmaticsVoiceAgent {
     // Initialize conversation history from existing messages if provided
     if (config.initialConversationHistory && config.initialConversationHistory.length > 0) {
       this.conversationHistory = [...config.initialConversationHistory];
-      console.log('[Speechmatics] Initialized conversation history with', this.conversationHistory.length, 'messages');
+      devLog('[Speechmatics] Initialized conversation history with', this.conversationHistory.length, 'messages');
     } else {
       this.conversationHistory = [];
     }
@@ -483,7 +476,7 @@ export class SpeechmaticsVoiceAgent {
       // This prevents the LLM response from being dropped when the user has already stopped talking
       // We only reset if VAD also confirms user is not speaking (belt and suspenders)
       if (this.receivedPartialDuringGeneration && !this.audio?.isUserSpeaking()) {
-        console.log('[Speechmatics] ✅ EndOfUtterance received - resetting receivedPartialDuringGeneration flag');
+        devLog('[Speechmatics] ✅ EndOfUtterance received - resetting receivedPartialDuringGeneration flag');
         this.receivedPartialDuringGeneration = false;
       }
       return;
@@ -507,8 +500,8 @@ export class SpeechmaticsVoiceAgent {
         SpeechmaticsWebSocket.lastQuotaErrorTimestamp = Date.now();
         
         const friendlyError = new Error('Speechmatics quota exceeded. Please wait 10 seconds before trying again, or check your account limits. If you have multiple tabs open, close them to free up concurrent sessions.');
-        console.error('[Speechmatics] ❌ Quota error:', errorMessage);
-        console.error('[Speechmatics] ⏳ Will prevent reconnection for 10 seconds to allow quota to reset');
+        devError('[Speechmatics] ❌ Quota error:', errorMessage);
+        devError('[Speechmatics] ⏳ Will prevent reconnection for 10 seconds to allow quota to reset');
         this.onErrorCallback?.(friendlyError);
         // Disconnect on quota error to prevent further attempts
         // Use a longer delay to ensure quota is released
@@ -516,7 +509,7 @@ export class SpeechmaticsVoiceAgent {
         return;
       }
       
-      console.error('[Speechmatics] ❌ Error message:', errorMessage);
+      devError('[Speechmatics] ❌ Error message:', errorMessage);
       const error = new Error(`Speechmatics error: ${errorMessage}`);
       this.onErrorCallback?.(error);
       return;
@@ -545,7 +538,7 @@ export class SpeechmaticsVoiceAgent {
       // This prevents the agent from becoming unresponsive if something goes wrong
       if (this.generationStartedAt > 0 &&
           processStartedAt - this.generationStartedAt > this.GENERATION_TIMEOUT_MS) {
-        console.warn('[Speechmatics] ⚠️ Generation stuck for', Math.round((processStartedAt - this.generationStartedAt) / 1000), 'seconds - auto-resetting flag');
+        devWarn('[Speechmatics] ⚠️ Generation stuck for', Math.round((processStartedAt - this.generationStartedAt) / 1000), 'seconds - auto-resetting flag');
         this.isGeneratingResponse = false;
         this.generationStartedAt = 0;
         this.lastSentUserMessage = '';
@@ -599,7 +592,7 @@ export class SpeechmaticsVoiceAgent {
         try {
           await this.processUserMessage(next.content);
         } catch (error) {
-          console.error('[Speechmatics] Error processing queued message in consultant mode:', error);
+          devError('[Speechmatics] Error processing queued message in consultant mode:', error);
         }
       }
       return;
@@ -671,7 +664,7 @@ export class SpeechmaticsVoiceAgent {
       const partialFlagIsFresh = this.receivedPartialDuringGeneration &&
         (now - this.lastPartialDuringGenerationTimestamp < this.PARTIAL_FLAG_STALENESS_MS);
       if (partialFlagIsFresh) {
-        console.log('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial age ms:', now - this.lastPartialDuringGenerationTimestamp, ')');
+        devLog('[Speechmatics] 🚫 LLM response dropped - user spoke during generation (partial age ms:', now - this.lastPartialDuringGenerationTimestamp, ')');
         // Remove the incomplete user message from conversation history
         // (it will be replaced by the complete one when user finishes)
         if (this.conversationHistory.length > 0 &&
@@ -689,7 +682,7 @@ export class SpeechmaticsVoiceAgent {
 
       // Log that response was NOT dropped (helps debugging)
       if (this.receivedPartialDuringGeneration) {
-        console.log('[Speechmatics] ✅ LLM response NOT dropped - partial was stale (age ms:', now - this.lastPartialDuringGenerationTimestamp, ', threshold:', this.PARTIAL_FLAG_STALENESS_MS, ')');
+        devLog('[Speechmatics] ✅ LLM response NOT dropped - partial was stale (age ms:', now - this.lastPartialDuringGenerationTimestamp, ', threshold:', this.PARTIAL_FLAG_STALENESS_MS, ')');
       }
 
       // Add to conversation history
@@ -728,11 +721,11 @@ export class SpeechmaticsVoiceAgent {
           if (audioData) {
             this.onAudioCallback?.(audioData);
             await this.audio.playAudio(audioData).catch(err => {
-              console.error('[Speechmatics] Error playing audio:', err);
+              devError('[Speechmatics] Error playing audio:', err);
             });
           }
         } catch (error) {
-          console.error('[Speechmatics] Error generating TTS audio:', error);
+          devError('[Speechmatics] Error generating TTS audio:', error);
           // Don't fail the whole message processing if TTS fails
         }
       }
@@ -780,7 +773,7 @@ export class SpeechmaticsVoiceAgent {
         return;
       }
 
-      console.error('[Speechmatics] Error processing user message:', error);
+      devError('[Speechmatics] Error processing user message:', error);
       this.lastSentUserMessage = '';
       this.onErrorCallback?.(error instanceof Error ? error : new Error(String(error)));
 
@@ -798,7 +791,7 @@ export class SpeechmaticsVoiceAgent {
               await this.processUserMessage(nextMessage.content);
             } catch (err) {
               // BUG-019 FIX: Catch handles both sync and async errors
-              console.error('[Speechmatics] Error processing queued message:', err);
+              devError('[Speechmatics] Error processing queued message:', err);
             }
           }, 100);
         } else {
@@ -870,7 +863,7 @@ export class SpeechmaticsVoiceAgent {
         try {
           await this.audio.stopMicrophone();
         } catch (error) {
-          console.error('[Speechmatics] Error stopping microphone:', error);
+          devError('[Speechmatics] Error stopping microphone:', error);
         }
 
         // CRITICAL: Wait to ensure NO audio chunks are in flight
@@ -1082,7 +1075,7 @@ export class SpeechmaticsVoiceAgent {
     // BUG-008 FIX: Notify UI about echo detection so it can provide feedback
     // Send a special interim message to clear any displayed user input
     if (details) {
-      console.log('[Speechmatics] 🔇 Echo detected:', {
+      devLog('[Speechmatics] 🔇 Echo detected:', {
         matchType: details.matchType,
         similarity: details.similarity.toFixed(2),
         transcriptPreview: details.transcript.substring(0, 50) + (details.transcript.length > 50 ? '...' : ''),
@@ -1186,13 +1179,13 @@ export class SpeechmaticsVoiceAgent {
    */
   async speakInitialMessage(text: string): Promise<void> {
     if (!text?.trim()) {
-      console.warn('[Speechmatics] speakInitialMessage: empty text, skipping');
+      devWarn('[Speechmatics] speakInitialMessage: empty text, skipping');
       return;
     }
 
     // Skip if TTS is disabled
     if (this.config?.disableElevenLabsTTS || !this.elevenLabsTTS || !this.audio) {
-      console.log('[Speechmatics] speakInitialMessage: TTS disabled, skipping audio playback');
+      devLog('[Speechmatics] speakInitialMessage: TTS disabled, skipping audio playback');
       // Still emit the message for display
       this.onMessageCallback?.({
         role: 'agent',
@@ -1204,7 +1197,7 @@ export class SpeechmaticsVoiceAgent {
       return;
     }
 
-    console.log('[Speechmatics] 🎤 Speaking initial message:', text.substring(0, 50) + '...');
+    devLog('[Speechmatics] 🎤 Speaking initial message:', text.substring(0, 50) + '...');
 
     try {
       // Add to conversation history
@@ -1231,13 +1224,13 @@ export class SpeechmaticsVoiceAgent {
       if (audioData) {
         this.onAudioCallback?.(audioData);
         await this.audio.playAudio(audioData).catch(err => {
-          console.error('[Speechmatics] Error playing initial message audio:', err);
+          devError('[Speechmatics] Error playing initial message audio:', err);
         });
       }
 
-      console.log('[Speechmatics] ✅ Initial message spoken successfully');
+      devLog('[Speechmatics] ✅ Initial message spoken successfully');
     } catch (error) {
-      console.error('[Speechmatics] Error speaking initial message:', error);
+      devError('[Speechmatics] Error speaking initial message:', error);
       // Don't throw - initial message failure shouldn't break the session
     }
   }
@@ -1250,16 +1243,16 @@ export class SpeechmaticsVoiceAgent {
    */
   async injectUserMessageAndRespond(text: string): Promise<void> {
     if (!text?.trim()) {
-      console.warn('[Speechmatics] injectUserMessageAndRespond: empty text, skipping');
+      devWarn('[Speechmatics] injectUserMessageAndRespond: empty text, skipping');
       return;
     }
 
-    console.log('[Speechmatics] 📝 Injecting edited message and triggering response:', text.substring(0, 50) + '...');
+    devLog('[Speechmatics] 📝 Injecting edited message and triggering response:', text.substring(0, 50) + '...');
 
     try {
       await this.processUserMessage(text);
     } catch (error) {
-      console.error('[Speechmatics] Error processing injected message:', error);
+      devError('[Speechmatics] Error processing injected message:', error);
       this.onErrorCallback?.(error instanceof Error ? error : new Error(String(error)));
     }
   }

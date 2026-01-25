@@ -14,6 +14,7 @@
  * de logique temporelle déterministe.
  */
 
+import { devLog, devError } from '@/lib/utils';
 import type { SpeechmaticsMessageCallback } from './speechmatics-types';
 import { SegmentStore } from './speechmatics-segment-store';
 import type {
@@ -162,7 +163,7 @@ export class TranscriptionManager {
         // SAFETY NET: In noisy environments, filtered speakers may keep sending partials
         // while the allowed speaker has stopped. Force process if silence timeout exceeded.
         if (this.shouldTriggerFilteredSpeakerSafetyNet()) {
-          console.log('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
+          devLog('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
           void this.processPendingTranscript(true, true);
         }
 
@@ -260,7 +261,7 @@ export class TranscriptionManager {
         // SAFETY NET: In noisy environments, filtered speakers may keep sending partials
         // while the allowed speaker has stopped. Force process if silence timeout exceeded.
         if (this.shouldTriggerFilteredSpeakerSafetyNet()) {
-          console.log('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
+          devLog('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
           void this.processPendingTranscript(true, true);
         }
 
@@ -417,7 +418,7 @@ export class TranscriptionManager {
         // Clear the "being processed" flag so it can be retried
         this.contentBeingProcessed = null;
 
-        console.error('[Transcription] Error processing user message, transcript preserved for retry:', error);
+        devError('[Transcription] Error processing user message, transcript preserved for retry:', error);
         // Re-throw so the caller knows it failed
         throw error;
       }
@@ -775,7 +776,7 @@ export class TranscriptionManager {
       this.clearSemanticHold();
       this.resetSilenceTimeout();
     } catch (error) {
-      console.error('[Transcription] Semantic detector error', error);
+      devError('[Transcription] Semantic detector error', error);
       this.emitSemanticTelemetry('fallback', trigger, null, 'detector-error');
       this.clearSemanticHold();
       this.resetSilenceTimeout();

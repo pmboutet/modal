@@ -16,10 +16,8 @@ class DeepgramAudioProcessor extends AudioWorkletProcessor {
         // CRITICAL: Clear the buffer immediately instead of flushing it
         // We don't want to send any more audio data when muted
         this.bufferAccumulator = new Float32Array(0);
-        console.log('[AudioWorklet] Stopped and cleared buffer');
       } else if (event.data.type === 'start') {
         this.isActive = true;
-        console.log('[AudioWorklet] Started');
       }
     };
   }
