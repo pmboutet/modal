@@ -19,7 +19,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MicOff, Volume2, Pencil, Check, Settings, ChevronDown, UserX, ExternalLink, Copy } from 'lucide-react';
+import { X, MicOff, Volume2, Pencil, Check, Settings, ChevronDown, UserX, ExternalLink, Copy, Users, Mic } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DeepgramVoiceAgent, DeepgramMessageEvent } from '@/lib/ai/deepgram';
@@ -262,6 +262,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Show voice mode tutorial on first usage
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
+  // Ref to track if tutorial is/was showing (to avoid race conditions with state)
+  const tutorialActiveRef = useRef(false);
+  // Ref to store pending initial message to speak after tutorial completes
+  const pendingInitialMessageRef = useRef<string | null>(null);
   // Track speakers the user chose to ignore (don't ask again)
   const ignoredSpeakersRef = useRef<Set<string>>(new Set());
 
@@ -499,10 +503,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
   // ===== TUTORIAL CHECK =====
   // Check if user has seen the voice mode tutorial on first usage
+  // If not seen, show tutorial and mute the mic during tutorial
   useEffect(() => {
     const hasSeenTutorial = localStorage.getItem('voiceTutorial_hasSeenOnboarding');
     if (!hasSeenTutorial) {
       setShowTutorial(true);
+      tutorialActiveRef.current = true;
+      // Mute the mic during tutorial - will unmute when tutorial completes
+      setIsMuted(true);
+      isMutedRef.current = true;
     }
   }, []);
 
@@ -1850,9 +1859,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               if (response.ok) {
                 const result = await response.json();
                 if (result.success && result.data?.aiResponse) {
-                  // Speak the initial message via TTS
-                  await agent.speakInitialMessage(result.data.aiResponse);
-                  console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+                  // If tutorial is showing, store the message to speak later
+                  if (tutorialActiveRef.current) {
+                    console.log('[PremiumVoiceInterface] 📝 Tutorial active - storing initial message for later');
+                    pendingInitialMessageRef.current = result.data.aiResponse;
+                  } else {
+                    // Speak the initial message via TTS
+                    await agent.speakInitialMessage(result.data.aiResponse);
+                    console.log('[PremiumVoiceInterface] ✅ Initial message spoken');
+                  }
                 }
               } else {
                 console.warn('[PremiumVoiceInterface] Failed to generate initial message:', await response.text());
@@ -1866,8 +1881,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             // This happens when user enters voice mode after page load in individual_parallel mode
             console.log('[PremiumVoiceInterface] 🎤 Initial message exists - speaking via TTS');
             try {
-              await agent.speakInitialMessage(messages[0].content);
-              console.log('[PremiumVoiceInterface] ✅ Existing initial message spoken');
+              // If tutorial is showing, store the message to speak later
+              if (tutorialActiveRef.current) {
+                console.log('[PremiumVoiceInterface] 📝 Tutorial active - storing existing message for later');
+                pendingInitialMessageRef.current = messages[0].content;
+              } else {
+                await agent.speakInitialMessage(messages[0].content);
+                console.log('[PremiumVoiceInterface] ✅ Existing initial message spoken');
+              }
             } catch (error) {
               console.error('[PremiumVoiceInterface] Error speaking existing initial message:', error);
               // Don't fail - voice session can still work without initial message
@@ -2095,10 +2116,33 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, [editingMessageId, editContent, onEditMessage]);
 
   // ===== TUTORIAL HANDLERS =====
-  const handleTutorialComplete = useCallback(() => {
+  const handleTutorialComplete = useCallback(async () => {
     localStorage.setItem('voiceTutorial_hasSeenOnboarding', 'true');
+    tutorialActiveRef.current = false;
     setShowTutorial(false);
     setTutorialStep(0);
+
+    const agent = agentRef.current;
+
+    // Speak the pending initial message FIRST (before unmuting)
+    const pendingMessage = pendingInitialMessageRef.current;
+    if (pendingMessage && agent instanceof SpeechmaticsVoiceAgent && agent.isConnected()) {
+      console.log('[PremiumVoiceInterface] 🎤 Tutorial complete - speaking pending initial message');
+      try {
+        await agent.speakInitialMessage(pendingMessage);
+        console.log('[PremiumVoiceInterface] ✅ Pending initial message spoken');
+      } catch (error) {
+        console.error('[PremiumVoiceInterface] Error speaking pending message:', error);
+      }
+      pendingInitialMessageRef.current = null;
+    }
+
+    // Unmute the mic AFTER the initial message is spoken
+    setIsMuted(false);
+    isMutedRef.current = false;
+    if (agent instanceof SpeechmaticsVoiceAgent) {
+      agent.setMicrophoneMuted(false);
+    }
   }, []);
 
   const handleTutorialNext = useCallback(() => {
@@ -3317,7 +3361,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         )}
       </AnimatePresence>
 
-      {/* Filtered Speaker Notification (Individual Mode) - Same style as "Still there?" overlay */}
+      {/* Filtered Speaker Notification (Individual Mode) - Tutorial-style horizontal layout */}
       <AnimatePresence>
         {filteredSpeakerNotification && !consultantMode && (
           <motion.div
@@ -3335,32 +3379,39 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 max-w-md mx-4 shadow-2xl"
             >
               <h2 className="text-white text-xl font-semibold mb-3 text-center">
-                Autre voix détectée
+                Autre voix detectee
               </h2>
-              <div className="text-white/80 text-sm mb-4 space-y-2">
+              <div className="text-white/80 text-sm mb-5 space-y-2">
                 {filteredSpeakerNotification.transcripts.map((transcript, index) => (
                   <p key={index} className="bg-white/5 rounded-lg px-3 py-2 italic">
-                    "{transcript}"
+                    &quot;{transcript}&quot;
                   </p>
                 ))}
               </div>
-              <div className="flex flex-col gap-2 w-full">
-                <Button
+              <div className="space-y-3">
+                {/* Ignorer button - horizontal layout with icon */}
+                <button
                   onClick={() => {
                     if (filteredSpeakerTimeoutRef.current) {
                       clearTimeout(filteredSpeakerTimeoutRef.current);
                     }
-                    // Add speaker to ignored list so we don't ask again
                     ignoredSpeakersRef.current.add(filteredSpeakerNotification.speaker);
                     console.log(`[PremiumVoiceInterface] Speaker ${filteredSpeakerNotification.speaker} added to ignore list`);
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="w-full bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-left"
                 >
-                  <span className="font-medium">Ignorer</span>
-                  <span className="text-white/60 text-xs">Ne pas transcrire cette voix</span>
-                </Button>
-                <Button
+                  <div className="w-10 h-10 rounded-full bg-red-500/30 flex items-center justify-center flex-shrink-0">
+                    <X className="h-5 w-5 text-red-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-white/90 text-sm font-medium block">Ignorer</span>
+                    <span className="text-white/50 text-xs">Ne pas transcrire cette voix</span>
+                  </div>
+                </button>
+
+                {/* Ajouter button - horizontal layout with icon */}
+                <button
                   onClick={() => {
                     if (filteredSpeakerTimeoutRef.current) {
                       clearTimeout(filteredSpeakerTimeoutRef.current);
@@ -3370,12 +3421,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     }
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="w-full bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/30 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-left"
                 >
-                  <span className="font-medium">Ajouter</span>
-                  <span className="text-blue-300/60 text-xs">Cette personne participe avec moi</span>
-                </Button>
-                <Button
+                  <div className="w-10 h-10 rounded-full bg-green-500/30 flex items-center justify-center flex-shrink-0">
+                    <Users className="h-5 w-5 text-green-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-white/90 text-sm font-medium block">Ajouter</span>
+                    <span className="text-white/50 text-xs">Cette personne participe avec moi</span>
+                  </div>
+                </button>
+
+                {/* Remplacer button - horizontal layout with icon */}
+                <button
                   onClick={() => {
                     if (filteredSpeakerTimeoutRef.current) {
                       clearTimeout(filteredSpeakerTimeoutRef.current);
@@ -3385,11 +3443,16 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     }
                     setFilteredSpeakerNotification(null);
                   }}
-                  className="w-full bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-400/30 rounded-xl py-3 text-sm transition-colors flex flex-col items-center"
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-left"
                 >
-                  <span className="font-medium">Remplacer</span>
-                  <span className="text-green-300/60 text-xs">Utiliser uniquement cette voix</span>
-                </Button>
+                  <div className="w-10 h-10 rounded-full bg-blue-500/30 flex items-center justify-center flex-shrink-0">
+                    <Mic className="h-5 w-5 text-blue-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-white/90 text-sm font-medium block">Remplacer</span>
+                    <span className="text-white/50 text-xs">Utiliser uniquement cette voix</span>
+                  </div>
+                </button>
               </div>
             </motion.div>
           </motion.div>
