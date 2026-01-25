@@ -901,6 +901,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         return;
       }
 
+      // MEMORY LEAK FIX: Clean up existing audio context before creating a new one
+      if (audioContextRef.current) {
+        devWarn('[PremiumVoiceInterface] ⚠️ AudioContext already exists, cleaning up before creating new one');
+        await cleanupAudioAnalysis(true);
+      }
+
       // Créer le contexte audio Web Audio API
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       // Créer un analyseur pour extraire les données de fréquence

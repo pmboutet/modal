@@ -120,6 +120,13 @@ export class SpeechmaticsAudio {
       throw new Error('Not connected to Speechmatics');
     }
 
+    // MEMORY LEAK FIX: Check if microphone is already active
+    // If so, stop it first to prevent AudioContext accumulation
+    if (this.isMicrophoneActive && this.audioContext) {
+      devWarn('[Speechmatics Audio] ⚠️ Microphone already active, stopping before restart');
+      await this.stopMicrophone();
+    }
+
     // Configure audio constraints
     let audioConstraints: MediaTrackConstraints;
     
