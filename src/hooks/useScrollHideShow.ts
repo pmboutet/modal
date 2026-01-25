@@ -62,6 +62,9 @@ const DEFAULT_MIN_SCROLL_DELTA = 2;
 const DEFAULT_TOP_THRESHOLD = 10;
 const DEFAULT_TRANSITION_DURATION = 200;
 
+// Only log in development
+const DEBUG = process.env.NODE_ENV === 'development' && typeof window !== 'undefined' && window.location.hostname === 'localhost';
+
 export function useScrollHideShow(
   config: ScrollHideShowConfig = {}
 ): ScrollHideShowState {
@@ -99,48 +102,48 @@ export function useScrollHideShow(
    * Handle scroll events
    */
   const handleScroll = useCallback((scrollTop: number, scrollDelta: number) => {
-    // Debug logging
-    console.log('[useScrollHideShow] scroll event:', { scrollTop, scrollDelta, isTransitioning: isTransitioning.current });
+    // Debug logging (localhost only to avoid memory issues in production)
+    if (DEBUG) console.log('[useScrollHideShow] scroll event:', { scrollTop, scrollDelta, isTransitioning: isTransitioning.current });
 
     // Ignore scroll events during transition to prevent feedback loop
     if (isTransitioning.current) {
-      console.log('[useScrollHideShow] ignoring - transitioning');
+      if (DEBUG) console.log('[useScrollHideShow] ignoring - transitioning');
       return;
     }
 
     // Ignore tiny scroll changes (less than threshold) to avoid jitter
     if (Math.abs(scrollDelta) < minScrollDelta && scrollDelta !== 0) {
-      console.log('[useScrollHideShow] ignoring - tiny delta');
+      if (DEBUG) console.log('[useScrollHideShow] ignoring - tiny delta');
       return;
     }
 
     // Initial load: hide if already scrolled down
     if (scrollDelta === 0 && scrollTop > topThreshold * 5) {
-      console.log('[useScrollHideShow] initial load - hiding');
+      if (DEBUG) console.log('[useScrollHideShow] initial load - hiding');
       setHiddenWithTransition(true);
       return;
     }
 
     if (scrollDelta > 0) {
       // Scrolling down - hide immediately
-      console.log('[useScrollHideShow] scrolling DOWN - hiding');
+      if (DEBUG) console.log('[useScrollHideShow] scrolling DOWN - hiding');
       setHiddenWithTransition(true);
       scrollUpAccumulator.current = 0;
     } else if (scrollDelta < 0) {
       // Scrolling up - accumulate scroll distance
       scrollUpAccumulator.current += Math.abs(scrollDelta);
-      console.log('[useScrollHideShow] scrolling UP - accumulator:', scrollUpAccumulator.current);
+      if (DEBUG) console.log('[useScrollHideShow] scrolling UP - accumulator:', scrollUpAccumulator.current);
 
       // Show after scrolling up past threshold
       if (scrollUpAccumulator.current >= showThreshold) {
-        console.log('[useScrollHideShow] threshold reached - showing');
+        if (DEBUG) console.log('[useScrollHideShow] threshold reached - showing');
         setHiddenWithTransition(false);
       }
     }
 
     // If at the very top, always show
     if (scrollTop <= topThreshold) {
-      console.log('[useScrollHideShow] at top - showing');
+      if (DEBUG) console.log('[useScrollHideShow] at top - showing');
       setHiddenWithTransition(false);
       scrollUpAccumulator.current = 0;
     }
