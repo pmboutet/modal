@@ -1908,9 +1908,41 @@ export default function HomePage() {
       if (pendingModeSelection === 'voice') {
         setIsVoiceModeActive(true);
       }
+      // Save to localStorage for returning users
+      if (sessionData.askKey) {
+        localStorage.setItem(`ask_inputMode_${sessionData.askKey}`, pendingModeSelection);
+      }
       setPendingModeSelection(null);
     }
-  }, [pendingModeSelection, sessionData.isInitializing]);
+  }, [pendingModeSelection, sessionData.isInitializing, sessionData.askKey]);
+
+  // Restore saved input mode for returning users (skip mode selection screen)
+  useEffect(() => {
+    // Only run when:
+    // - Session is loaded (has askKey)
+    // - Voice config finished loading
+    // - No mode selected yet
+    // - Voice mode IS available
+    // - Conversation has already started (has messages)
+    if (
+      sessionData.askKey &&
+      sessionData.ask &&
+      !isVoiceConfigLoading &&
+      selectedInputMode === null &&
+      voiceModeConfig?.systemPrompt && // Voice mode is available
+      sessionData.messages.length > 0 // Conversation has started
+    ) {
+      // Check localStorage for saved mode
+      const savedMode = localStorage.getItem(`ask_inputMode_${sessionData.askKey}`);
+      if (savedMode === 'voice' || savedMode === 'text') {
+        console.log('[HomePage] Restoring saved input mode:', savedMode);
+        setSelectedInputMode(savedMode);
+        if (savedMode === 'voice') {
+          setIsVoiceModeActive(true);
+        }
+      }
+    }
+  }, [sessionData.askKey, sessionData.ask, sessionData.messages.length, isVoiceConfigLoading, selectedInputMode, voiceModeConfig?.systemPrompt]);
 
   // Handle streaming AI response
   const handleStreamingResponse = useCallback(async (latestUserMessageContent?: string): Promise<boolean> => {
@@ -2782,6 +2814,10 @@ export default function HomePage() {
                 } else {
                   setSelectedInputMode('voice');
                   setIsVoiceModeActive(true);
+                  // Save to localStorage for returning users
+                  if (sessionData.askKey) {
+                    localStorage.setItem(`ask_inputMode_${sessionData.askKey}`, 'voice');
+                  }
                 }
               }}
               disabled={!!pendingModeSelection}
@@ -2823,6 +2859,10 @@ export default function HomePage() {
                   setPendingModeSelection('text');
                 } else {
                   setSelectedInputMode('text');
+                  // Save to localStorage for returning users
+                  if (sessionData.askKey) {
+                    localStorage.setItem(`ask_inputMode_${sessionData.askKey}`, 'text');
+                  }
                 }
               }}
               disabled={!!pendingModeSelection}
