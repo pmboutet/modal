@@ -55,12 +55,17 @@ export class TranscriptionManager {
 
   // ===== SPEAKER FILTERING (individual mode) =====
   private speakerFilteringEnabled: boolean = false;
+  private requireSpeakerConfirmation: boolean = false; // If true, require user confirmation before establishing speaker
   private candidateSpeaker: string | undefined = undefined; // Speaker awaiting confirmation
+  private candidateConfirmationCount: number = 0; // Track how many transcripts from candidate speaker
+  private awaitingSpeakerConfirmation: boolean = false; // True when waiting for user to confirm speaker
+  private rejectedSpeakers: Set<string> = new Set(); // Speakers the user said "not me"
   private primarySpeaker: string | undefined = undefined; // Confirmed primary speaker (2 consecutive)
   private allowedSpeakers: Set<string> = new Set(); // Whitelist of allowed speakers
   private lastAllowedSpeakerPartialAt: number = 0; // Timestamp of last partial from allowed speaker (for safety net)
   private onSpeakerEstablished?: (speaker: string) => void;
   private onSpeakerFiltered?: (speaker: string, transcript: string) => void;
+  private onSpeakerPendingConfirmation?: (speaker: string, recentTranscript: string) => void;
 
   // Gestion de la détection sémantique des fins de tour
   private semanticHoldTimeout: NodeJS.Timeout | null = null;
@@ -92,14 +97,18 @@ export class TranscriptionManager {
     private semanticOptions?: SemanticSupportOptions,
     filteringConfig?: {
       enabled: boolean;
+      requireConfirmation?: boolean; // If true, show confirmation overlay before establishing speaker
       onSpeakerEstablished?: (speaker: string) => void;
       onSpeakerFiltered?: (speaker: string, transcript: string) => void;
+      onSpeakerPendingConfirmation?: (speaker: string, recentTranscript: string) => void;
     }
   ) {
     if (filteringConfig) {
       this.speakerFilteringEnabled = filteringConfig.enabled;
+      this.requireSpeakerConfirmation = filteringConfig.requireConfirmation || false;
       this.onSpeakerEstablished = filteringConfig.onSpeakerEstablished;
       this.onSpeakerFiltered = filteringConfig.onSpeakerFiltered;
+      this.onSpeakerPendingConfirmation = filteringConfig.onSpeakerPendingConfirmation;
     }
   }
 
@@ -143,19 +152,55 @@ export class TranscriptionManager {
         return;
       }
 
-      // Establishment phase: need 2 consecutive transcripts from same speaker
-      if (!this.primarySpeaker) {
+      // Filter previously rejected speakers (user said "not me")
+      if (this.rejectedSpeakers.has(speaker)) {
+        console.log(`[Transcription] Filtering rejected speaker ${speaker}`);
+        this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+        return;
+      }
+
+      // If waiting for speaker confirmation, buffer transcripts but don't process yet
+      if (this.awaitingSpeakerConfirmation) {
+        // Only buffer if it's from the candidate speaker
         if (speaker === this.candidateSpeaker) {
-          // Same speaker twice in a row → confirmed!
-          this.primarySpeaker = speaker;
-          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
-          this.onSpeakerEstablished?.(this.primarySpeaker);
+          // Continue to buffer - segments will be processed when confirmed
+          devLog(`[Transcription] Buffering transcript while awaiting confirmation: ${trimmedTranscript}`);
+        } else {
+          // Different speaker while waiting - ignore
+          devLog(`[Transcription] Ignoring speaker ${speaker} while awaiting confirmation for ${this.candidateSpeaker}`);
+          return;
+        }
+      }
+
+      // Establishment phase: need 2 consecutive transcripts from same speaker
+      if (!this.primarySpeaker && !this.awaitingSpeakerConfirmation) {
+        if (speaker === this.candidateSpeaker) {
+          // Same speaker twice in a row
+          this.candidateConfirmationCount++;
+
+          if (this.requireSpeakerConfirmation) {
+            // Require user confirmation before establishing
+            if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
+              this.awaitingSpeakerConfirmation = true;
+              console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
+              this.onSpeakerPendingConfirmation?.(speaker, trimmedTranscript);
+              // Continue processing - transcripts will be buffered
+            }
+          } else {
+            // Auto-establish after 2 consecutive (original behavior)
+            if (this.candidateConfirmationCount >= 2) {
+              this.primarySpeaker = speaker;
+              console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+              this.onSpeakerEstablished?.(this.primarySpeaker);
+            }
+          }
         } else {
           // Different speaker → reset candidate
           this.candidateSpeaker = speaker;
+          this.candidateConfirmationCount = 1;
         }
         // Don't filter during establishment - process normally
-      } else if (speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
+      } else if (this.primarySpeaker && speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
         // Filter non-primary speakers (unless in whitelist) after establishment
         console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
         this.onSpeakerFiltered?.(speaker, trimmedTranscript);
@@ -241,19 +286,55 @@ export class TranscriptionManager {
         return;
       }
 
-      // Establishment phase: need 2 consecutive transcripts from same speaker
-      if (!this.primarySpeaker) {
+      // Filter previously rejected speakers (user said "not me")
+      if (this.rejectedSpeakers.has(speaker)) {
+        console.log(`[Transcription] Filtering rejected speaker ${speaker}`);
+        this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+        return;
+      }
+
+      // If waiting for speaker confirmation, buffer transcripts but don't process yet
+      if (this.awaitingSpeakerConfirmation) {
+        // Only buffer if it's from the candidate speaker
         if (speaker === this.candidateSpeaker) {
-          // Same speaker twice in a row → confirmed!
-          this.primarySpeaker = speaker;
-          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
-          this.onSpeakerEstablished?.(this.primarySpeaker);
+          // Continue to buffer - segments will be processed when confirmed
+          devLog(`[Transcription] Buffering final transcript while awaiting confirmation: ${trimmedTranscript}`);
+        } else {
+          // Different speaker while waiting - ignore
+          devLog(`[Transcription] Ignoring speaker ${speaker} while awaiting confirmation for ${this.candidateSpeaker}`);
+          return;
+        }
+      }
+
+      // Establishment phase: need 2 consecutive transcripts from same speaker
+      if (!this.primarySpeaker && !this.awaitingSpeakerConfirmation) {
+        if (speaker === this.candidateSpeaker) {
+          // Same speaker twice in a row
+          this.candidateConfirmationCount++;
+
+          if (this.requireSpeakerConfirmation) {
+            // Require user confirmation before establishing
+            if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
+              this.awaitingSpeakerConfirmation = true;
+              console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
+              this.onSpeakerPendingConfirmation?.(speaker, trimmedTranscript);
+              // Continue processing - transcripts will be buffered
+            }
+          } else {
+            // Auto-establish after 2 consecutive (original behavior)
+            if (this.candidateConfirmationCount >= 2) {
+              this.primarySpeaker = speaker;
+              console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+              this.onSpeakerEstablished?.(this.primarySpeaker);
+            }
+          }
         } else {
           // Different speaker → reset candidate
           this.candidateSpeaker = speaker;
+          this.candidateConfirmationCount = 1;
         }
         // Don't filter during establishment - process normally
-      } else if (speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
+      } else if (this.primarySpeaker && speaker !== this.primarySpeaker && !this.allowedSpeakers.has(speaker)) {
         // Filter non-primary speakers (unless in whitelist) after establishment
         console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
         this.onSpeakerFiltered?.(speaker, trimmedTranscript);
@@ -482,6 +563,9 @@ export class TranscriptionManager {
    */
   resetSpeakerFiltering(): void {
     this.candidateSpeaker = undefined;
+    this.candidateConfirmationCount = 0;
+    this.awaitingSpeakerConfirmation = false;
+    this.rejectedSpeakers.clear();
     this.primarySpeaker = undefined;
     this.allowedSpeakers.clear();
     this.lastAllowedSpeakerPartialAt = 0;
@@ -492,6 +576,60 @@ export class TranscriptionManager {
    */
   getPrimarySpeaker(): string | undefined {
     return this.primarySpeaker;
+  }
+
+  /**
+   * Check if we're waiting for speaker confirmation
+   */
+  isAwaitingSpeakerConfirmation(): boolean {
+    return this.awaitingSpeakerConfirmation;
+  }
+
+  /**
+   * Get the candidate speaker awaiting confirmation
+   */
+  getCandidateSpeaker(): string | undefined {
+    return this.candidateSpeaker;
+  }
+
+  /**
+   * Confirm the candidate speaker as the primary speaker
+   * Called when user clicks "C'est moi" / "Yes, it's me" in the overlay
+   */
+  confirmCandidateSpeaker(): void {
+    if (!this.candidateSpeaker) {
+      console.warn('[Transcription] confirmCandidateSpeaker called but no candidate speaker');
+      return;
+    }
+
+    this.primarySpeaker = this.candidateSpeaker;
+    this.awaitingSpeakerConfirmation = false;
+    console.log(`[Transcription] User confirmed primary speaker: ${this.primarySpeaker}`);
+    this.onSpeakerEstablished?.(this.primarySpeaker);
+  }
+
+  /**
+   * Reject the candidate speaker (user said "not me")
+   * Called when user clicks "Ce n'est pas moi" / "Not me" in the overlay
+   * The candidate is added to rejected list and we wait for the next speaker
+   */
+  rejectCandidateSpeaker(): void {
+    if (!this.candidateSpeaker) {
+      console.warn('[Transcription] rejectCandidateSpeaker called but no candidate speaker');
+      return;
+    }
+
+    const rejectedSpeaker = this.candidateSpeaker;
+    this.rejectedSpeakers.add(rejectedSpeaker);
+    console.log(`[Transcription] User rejected speaker: ${rejectedSpeaker}`);
+
+    // Clear buffered segments from the rejected speaker
+    this.clearState();
+
+    // Reset candidate tracking to wait for next speaker
+    this.candidateSpeaker = undefined;
+    this.candidateConfirmationCount = 0;
+    this.awaitingSpeakerConfirmation = false;
   }
 
   /**

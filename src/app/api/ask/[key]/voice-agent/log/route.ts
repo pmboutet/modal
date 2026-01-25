@@ -125,11 +125,12 @@ export async function POST(
         requestPayload: {
           agentSlug: 'ask-conversation-response',
           modelConfigId: agentConfig.modelConfig.id,
-          systemPrompt: agentConfig.systemPrompt, // Include resolved system prompt
+          systemPrompt: agentConfig.systemPrompt,
           userPrompt: agentConfig.userPrompt,
           userMessage: content,
           role: 'user',
-          variables: promptVariables,
+          // Variables are already compiled into systemPrompt and userPrompt
+          // No need to store them separately (reduces payload size)
         },
       });
 

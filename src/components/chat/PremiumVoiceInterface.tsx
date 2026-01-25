@@ -35,6 +35,7 @@ import type { SemanticTurnTelemetryEvent } from '@/lib/ai/turn-detection';
 import { useInactivityMonitor } from '@/hooks/useInactivityMonitor';
 import { useScrollHideShow } from '@/hooks/useScrollHideShow';
 import { SpeakerAssignmentOverlay, type ParticipantOption, type SpeakerAssignmentDecision, type SpeakerMessage } from './SpeakerAssignmentOverlay';
+import { SpeakerConfirmationOverlay } from './SpeakerConfirmationOverlay';
 import { VoiceModeTutorial } from './VoiceModeTutorial';
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -141,6 +142,58 @@ type VoiceMessage = {
 };
 
 /**
+ * Deduplicate a new partial transcript against the history.
+ * Returns null if the new content is already contained in the history (duplicate).
+ * Otherwise, returns the new portion that should be added.
+ */
+function deduplicatePartial(history: string[], newContent: string): string | null {
+  if (!newContent.trim()) return null;
+
+  const newWords = newContent.trim().toLowerCase().split(/\s+/);
+  if (newWords.length === 0) return null;
+
+  // Check if this content is already in history (exact or substantial overlap)
+  for (const prev of history) {
+    const prevWords = prev.trim().toLowerCase().split(/\s+/);
+
+    // If new content is shorter or same as previous entry, check for containment
+    if (newWords.length <= prevWords.length) {
+      const newText = newWords.join(' ');
+      const prevText = prevWords.join(' ');
+      if (prevText.includes(newText)) {
+        return null; // Already contained in previous entry
+      }
+    }
+  }
+
+  // Find what's new compared to the last entry
+  if (history.length > 0) {
+    const lastEntry = history[history.length - 1];
+    const lastWords = lastEntry.trim().toLowerCase().split(/\s+/);
+
+    // Find how many words from the start of newContent overlap with the end of lastEntry
+    let overlapCount = 0;
+    for (let i = Math.min(lastWords.length, newWords.length); i >= 2; i--) {
+      const lastSuffix = lastWords.slice(-i).join(' ');
+      const newPrefix = newWords.slice(0, i).join(' ');
+      if (lastSuffix === newPrefix) {
+        overlapCount = i;
+        break;
+      }
+    }
+
+    // Return only the new portion
+    if (overlapCount > 0) {
+      const originalWords = newContent.trim().split(/\s+/);
+      const newPortion = originalWords.slice(overlapCount).join(' ');
+      return newPortion.trim() || null;
+    }
+  }
+
+  return newContent.trim();
+}
+
+/**
  * Composant principal PremiumVoiceInterface
  * 
  * Gère toute la logique de l'interface vocale :
@@ -193,6 +246,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const knownSpeakersRef = useRef<Set<string>>(new Set());
   // Queue of pending speakers for assignment (allows stacking multiple overlays)
   const [pendingSpeakers, setPendingSpeakers] = useState<string[]>([]);
+  // Speaker confirmation state for individual mode (not consultant mode)
+  const [speakerPendingConfirmation, setSpeakerPendingConfirmation] = useState<{
+    speaker: string;
+    transcript: string;
+  } | null>(null);
   // Counter for speaker detection order (1st user, 2nd user, etc.)
   const speakerOrderRef = useRef<Map<string, number>>(new Map());
   // État d'activation du microphone (permission accordée et stream actif)
@@ -209,6 +267,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const [audioLevel, setAudioLevel] = useState(0);
   // Buffers locaux pour le streaming en cours (pattern OpenAI)
   const [interimUser, setInterimUser] = useState<VoiceMessage | null>(null);
+  // History of partial transcripts for stacking display (max 5, deduplicated)
+  const [interimUserHistory, setInterimUserHistory] = useState<string[]>([]);
   const [interimAssistant, setInterimAssistant] = useState<VoiceMessage | null>(null);
   // Pending final user message - shown until confirmed in props.messages to avoid "blanc" gap
   const [pendingFinalUser, setPendingFinalUser] = useState<VoiceMessage | null>(null);
@@ -514,6 +574,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       isMutedRef.current = true;
     }
   }, []);
+
+  // Pause inactivity timer while tutorial is showing
+  // Timer will be reset when tutorial completes
+  useEffect(() => {
+    if (showTutorial) {
+      inactivityMonitor.pauseTimer();
+    }
+  }, [showTutorial, inactivityMonitor]);
 
   // Fonction pour ouvrir le lien dans Safari/Chrome
   const openInExternalBrowser = useCallback(() => {
@@ -1283,6 +1351,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           content: baseMessage.content,
           isInterim: true,
         }));
+        // Stack partial in history with deduplication
+        setInterimUserHistory(prev => {
+          const newPortion = deduplicatePartial(prev, baseMessage.content);
+          if (newPortion) {
+            // Add new portion and keep max 5 entries
+            return [...prev, newPortion].slice(-5);
+          }
+          return prev;
+        });
         // Track when we received this partial (for nudge mechanism)
         lastUserPartialTimestampRef.current = Date.now();
       }
@@ -1393,6 +1470,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Clear interim and store as pending final to avoid "blanc" gap
       // The message will stay visible until it appears in props.messages
       setInterimUser(null);
+      setInterimUserHistory([]); // Clear history on final message
       // Generate ID once and reuse for both pendingFinalUser and onMessage
       // to ensure proper deduplication (fixes visual jump bug)
       const userFinalMessageId = messageId || `msg-${Date.now()}`;
@@ -1597,6 +1675,32 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, []);
 
   /**
+   * Handle speaker confirmation (user said "Yes, it's me")
+   * Confirms the candidate speaker as the primary speaker
+   */
+  const handleSpeakerConfirm = useCallback(() => {
+    devLog('[PremiumVoiceInterface] 🎤 User confirmed speaker');
+    const agent = agentRef.current;
+    if (agent && 'confirmCandidateSpeaker' in agent) {
+      (agent as SpeechmaticsVoiceAgent).confirmCandidateSpeaker();
+    }
+    setSpeakerPendingConfirmation(null);
+  }, []);
+
+  /**
+   * Handle speaker rejection (user said "Not me")
+   * Rejects the candidate speaker and waits for the next one
+   */
+  const handleSpeakerReject = useCallback(() => {
+    devLog('[PremiumVoiceInterface] 🔇 User rejected speaker');
+    const agent = agentRef.current;
+    if (agent && 'rejectCandidateSpeaker' in agent) {
+      (agent as SpeechmaticsVoiceAgent).rejectCandidateSpeaker();
+    }
+    setSpeakerPendingConfirmation(null);
+  }, []);
+
+  /**
    * Handle speaker reassignment from the inline edit dropdown
    * Updates the mapping for the specified speaker to a new participant
    * If no mapping exists for this speaker, creates a new one
@@ -1795,8 +1899,16 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           sttDiarization: "speaker",
           // In individual mode, filter out non-primary speakers (TV, background conversations)
           enableSpeakerFiltering: !consultantMode,
+          // Require user confirmation before establishing primary speaker (prevents locking onto TV/background voices)
+          requireSpeakerConfirmation: !consultantMode,
           onSpeakerEstablished: (speaker: string) => {
             devLog(`[PremiumVoiceInterface] 🎤 Primary speaker established: ${speaker}`);
+            // Clear confirmation overlay when speaker is established
+            setSpeakerPendingConfirmation(null);
+          },
+          onSpeakerPendingConfirmation: (speaker: string, transcript: string) => {
+            devLog(`[PremiumVoiceInterface] 🎤 Speaker ${speaker} pending confirmation: "${transcript}"`);
+            setSpeakerPendingConfirmation({ speaker, transcript });
           },
           onSpeakerFiltered: (speaker: string, transcript: string) => {
             devLog(`[PremiumVoiceInterface] 🔇 Filtered speaker ${speaker}: "${transcript}"`);
@@ -2054,6 +2166,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
       // Étape 6: Réinitialiser les buffers de streaming
       setInterimUser(null);
+      setInterimUserHistory([]); // Clear history on disconnect
       setInterimAssistant(null);
       setPendingFinalUser(null);
 
@@ -2163,10 +2276,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     if (agent instanceof SpeechmaticsVoiceAgent) {
       agent.setMicrophoneMuted(false);
     }
-  }, []);
+
+    // Start the inactivity timer now that the tutorial is complete
+    // This ensures the timer only starts counting after the user has finished the tutorial
+    inactivityMonitor.resetTimer();
+  }, [inactivityMonitor]);
 
   const handleTutorialNext = useCallback(() => {
-    setTutorialStep(prev => Math.min(prev + 1, 2));
+    setTutorialStep(prev => Math.min(prev + 1, 3));
   }, []);
 
   const handleTutorialPrev = useCallback(() => {
@@ -3411,7 +3528,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               </p>
 
               {/* Partial transcript or placeholder */}
-              <div className="min-h-[1rem]">
+              <div className="min-h-[1rem] max-h-[4.5rem] overflow-hidden">
                 {error ? (
                   <div className="space-y-1">
                     <p className="text-red-300 text-xs">{error}</p>
@@ -3424,16 +3541,26 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                       </button>
                     ) : null}
                   </div>
-                ) : interimUser ? (
-                  // RTL direction + LTR content = ellipsis at START, showing the END of text
-                  <p
-                    className="text-white/70 text-xs italic truncate"
-                    style={{ direction: 'rtl', textAlign: 'left' }}
-                  >
-                    <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>
-                      {interimUser.content}
-                    </span>
-                  </p>
+                ) : interimUserHistory.length > 0 ? (
+                  // Display stacked partial transcripts (deduplicated)
+                  <div className="space-y-0.5">
+                    {interimUserHistory.map((text, index) => (
+                      <p
+                        key={index}
+                        className={cn(
+                          "text-xs italic truncate",
+                          index === interimUserHistory.length - 1
+                            ? "text-white/70"
+                            : "text-white/40"
+                        )}
+                        style={{ direction: 'rtl', textAlign: 'left' }}
+                      >
+                        <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>
+                          {text}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
                 ) : (
                   <p className="text-white/40 text-xs italic">
                     {isMuted ? "Cliquez sur le micro pour reprendre" : "Parlez naturellement..."}
@@ -3631,6 +3758,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         </div>
       )}
 
+      {/* Speaker Confirmation Overlay (Individual Mode) - Appears when first speaker is detected */}
+      {!consultantMode && speakerPendingConfirmation && (
+        <div className="absolute inset-0 z-50 backdrop-blur-md bg-black/40 flex items-center justify-center p-4">
+          <SpeakerConfirmationOverlay
+            isOpen={true}
+            speaker={speakerPendingConfirmation.speaker}
+            recentTranscript={speakerPendingConfirmation.transcript}
+            onConfirm={handleSpeakerConfirm}
+            onReject={handleSpeakerReject}
+          />
+        </div>
+      )}
 
       {/* Voice Mode Tutorial Overlay */}
       <AnimatePresence>

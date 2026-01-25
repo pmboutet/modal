@@ -977,6 +977,29 @@ export class SpeechmaticsVoiceAgent {
   }
 
   /**
+   * Check if we're waiting for speaker confirmation
+   */
+  isAwaitingSpeakerConfirmation(): boolean {
+    return this.transcriptionManager?.isAwaitingSpeakerConfirmation() || false;
+  }
+
+  /**
+   * Confirm the candidate speaker as the primary speaker
+   * Called when user clicks "Yes, it's me" in the confirmation overlay
+   */
+  confirmCandidateSpeaker(): void {
+    this.transcriptionManager?.confirmCandidateSpeaker();
+  }
+
+  /**
+   * Reject the candidate speaker (user said "not me")
+   * Called when user clicks "Not me" in the confirmation overlay
+   */
+  rejectCandidateSpeaker(): void {
+    this.transcriptionManager?.rejectCandidateSpeaker();
+  }
+
+  /**
    * Extract the dominant speaker from Speechmatics results array
    * According to Speechmatics API docs, speaker is in alternatives[0].speaker (S1, S2, S3, UU for unknown)
    * Returns the most frequently occurring speaker in the transcript
