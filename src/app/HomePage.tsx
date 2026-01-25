@@ -120,6 +120,8 @@ interface MobileLayoutProps {
   onChatScroll: (scrollTop: number, scrollDelta: number) => void;
   /** Callback when speaker changes (consultant mode diarization) */
   onSpeakerChange?: (speaker: string) => void;
+  /** Callback when conversation plan updates (e.g., step completed in voice mode) */
+  onConversationPlanUpdate?: (plan: ConversationPlan) => void;
 }
 
 /**
@@ -163,6 +165,7 @@ function MobileLayout({
   isHeaderHidden,
   onChatScroll,
   onSpeakerChange,
+  onConversationPlanUpdate,
 }: MobileLayoutProps) {
   const [panelWidth, setPanelWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -342,6 +345,7 @@ function MobileLayout({
                   ask={sessionData.ask}
                   messages={sessionData.messages}
                   conversationPlan={sessionData.conversationPlan}
+                  onConversationPlanUpdate={onConversationPlanUpdate}
                   onSendMessage={onSendMessage}
                   isLoading={sessionData.isLoading}
                   isInitializing={sessionData.isInitializing}
@@ -2449,6 +2453,18 @@ export default function HomePage() {
     }
   }, [isVoiceModeActive, reloadMessagesAfterVoiceMode]);
 
+  // Handle conversation plan update (e.g., when step is completed in voice mode)
+  // This ensures the client-side timer tracks the correct step after server-side updates
+  const handleConversationPlanUpdate = useCallback((plan: ConversationPlan) => {
+    console.log('[HomePage] 📋 Conversation plan updated from voice mode:', {
+      currentStepId: plan.current_step_id,
+    });
+    setSessionData(prev => ({
+      ...prev,
+      conversationPlan: plan,
+    }));
+  }, []);
+
   // Handle insight content update
   const handleInsightUpdate = useCallback((insightId: string, newContent: string) => {
     setSessionData(prev => ({
@@ -3044,6 +3060,7 @@ export default function HomePage() {
           isHeaderHidden={isMobileHeaderHidden}
           onChatScroll={handleMobileChatScroll}
           onSpeakerChange={consultantAnalysis.notifySpeakerChange}
+          onConversationPlanUpdate={handleConversationPlanUpdate}
         />
       ) : (
         <main className={`flex overflow-hidden gap-6 p-6 min-w-0 transition-all duration-200 ${isHeaderCompact ? 'h-[calc(100dvh-48px)]' : 'h-[calc(100dvh-88px)]'}`}>
@@ -3074,6 +3091,7 @@ export default function HomePage() {
                   ask={sessionData.ask}
                   messages={sessionData.messages}
                   conversationPlan={sessionData.conversationPlan}
+                  onConversationPlanUpdate={handleConversationPlanUpdate}
                   onSendMessage={handleSendMessage}
                   isLoading={sessionData.isLoading}
                   isInitializing={sessionData.isInitializing}

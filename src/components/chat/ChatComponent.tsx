@@ -39,6 +39,7 @@ export function ChatComponent({
   ask,
   messages,
   conversationPlan,
+  onConversationPlanUpdate,
   onSendMessage,
   isLoading,
   isInitializing = false,
@@ -565,6 +566,7 @@ export function ChatComponent({
         consultantMode={consultantMode}
         participants={consultantMode ? participantOptions : undefined}
         currentUserId={currentUserId}
+        onConversationPlanUpdate={onConversationPlanUpdate}
       />
     );
   }

@@ -57,6 +57,7 @@ export class TranscriptionManager {
   private candidateSpeaker: string | undefined = undefined; // Speaker awaiting confirmation
   private primarySpeaker: string | undefined = undefined; // Confirmed primary speaker (2 consecutive)
   private allowedSpeakers: Set<string> = new Set(); // Whitelist of allowed speakers
+  private lastAllowedSpeakerPartialAt: number = 0; // Timestamp of last partial from allowed speaker (for safety net)
   private onSpeakerEstablished?: (speaker: string) => void;
   private onSpeakerFiltered?: (speaker: string, transcript: string) => void;
 
@@ -157,9 +158,20 @@ export class TranscriptionManager {
         // Filter non-primary speakers (unless in whitelist) after establishment
         console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
         this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+
+        // SAFETY NET: In noisy environments, filtered speakers may keep sending partials
+        // while the allowed speaker has stopped. Force process if silence timeout exceeded.
+        if (this.shouldTriggerFilteredSpeakerSafetyNet()) {
+          console.log('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
+          void this.processPendingTranscript(true, true);
+        }
+
         return;
       }
     }
+
+    // Track timestamp for allowed speaker (used by filtered speaker safety net)
+    this.lastAllowedSpeakerPartialAt = Date.now();
 
     // Store segment in the segment store (handles deduplication by timestamp)
     this.segmentStore.upsert({
@@ -244,9 +256,20 @@ export class TranscriptionManager {
         // Filter non-primary speakers (unless in whitelist) after establishment
         console.log(`[Transcription] Filtering speaker ${speaker} (primary: ${this.primarySpeaker})`);
         this.onSpeakerFiltered?.(speaker, trimmedTranscript);
+
+        // SAFETY NET: In noisy environments, filtered speakers may keep sending partials
+        // while the allowed speaker has stopped. Force process if silence timeout exceeded.
+        if (this.shouldTriggerFilteredSpeakerSafetyNet()) {
+          console.log('[Transcription] Filtered speaker safety net triggered - forcing pending transcript');
+          void this.processPendingTranscript(true, true);
+        }
+
         return;
       }
     }
+
+    // Track timestamp for allowed speaker (used by filtered speaker safety net)
+    this.lastAllowedSpeakerPartialAt = Date.now();
 
     // Store as final (automatically removes overlapping partials)
     this.segmentStore.upsert({
@@ -460,6 +483,7 @@ export class TranscriptionManager {
     this.candidateSpeaker = undefined;
     this.primarySpeaker = undefined;
     this.allowedSpeakers.clear();
+    this.lastAllowedSpeakerPartialAt = 0;
   }
 
   /**
@@ -506,6 +530,19 @@ export class TranscriptionManager {
 
     // Non-primary speaker not in whitelist → should be filtered
     return true;
+  }
+
+  /**
+   * Check if filtered speaker safety net should trigger.
+   * In noisy environments, filtered speakers (background noise) may keep sending partials
+   * while the allowed speaker has stopped talking. This safety net forces processing
+   * if the allowed speaker hasn't sent a partial for SILENCE_DETECTION_TIMEOUT.
+   * @returns true if we should force-process pending transcript
+   */
+  private shouldTriggerFilteredSpeakerSafetyNet(): boolean {
+    if (!this.pendingFinalTranscript?.trim()) return false;
+    if (this.lastAllowedSpeakerPartialAt <= 0) return false;
+    return Date.now() - this.lastAllowedSpeakerPartialAt >= this.SILENCE_DETECTION_TIMEOUT;
   }
 
   /**

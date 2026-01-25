@@ -261,4 +261,237 @@ describe('TranscriptionManager speaker filtering', () => {
 
     manager.cleanup();
   });
+
+  describe('filtered speaker safety net', () => {
+    test('triggers safety net when filtered speaker partial arrives after silence timeout', async () => {
+      const onMessage = jest.fn();
+      const processUserMessage = jest.fn().mockResolvedValue(undefined);
+      const onSpeakerEstablished = jest.fn();
+      const onSpeakerFiltered = jest.fn();
+
+      // Mock Date.now to control time
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const manager = new TranscriptionManager(
+          onMessage,
+          processUserMessage,
+          [],
+          true,
+          undefined,
+          {
+            enabled: true,
+            onSpeakerEstablished,
+            onSpeakerFiltered,
+          }
+        );
+
+        // Establish S1 as primary
+        manager.handlePartialTranscript('Bonjour', 0, 0.5, 'S1');
+        mockTime += 150;
+        manager.handlePartialTranscript('comment ça va', 0.5, 1.5, 'S1');
+        expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
+
+        // Add pending content from S1
+        mockTime += 150;
+        manager.handlePartialTranscript('Une question importante pour toi', 1.5, 3, 'S1');
+
+        // Advance time past SILENCE_DETECTION_TIMEOUT (2000ms)
+        mockTime += 2500;
+
+        // Filtered speaker arrives - should trigger safety net
+        manager.handlePartialTranscript('Bruit de TV', 3, 4, 'S2');
+
+        // Should have been filtered
+        expect(onSpeakerFiltered).toHaveBeenCalledWith('S2', 'Bruit de TV');
+
+        // Safety net should have triggered processPendingTranscript
+        // Run any pending promises
+        await Promise.resolve();
+
+        // processUserMessage should have been called due to safety net
+        expect(processUserMessage).toHaveBeenCalled();
+
+        manager.cleanup();
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
+    test('does NOT trigger safety net when filtered speaker arrives before timeout', async () => {
+      const onMessage = jest.fn();
+      const processUserMessage = jest.fn().mockResolvedValue(undefined);
+      const onSpeakerEstablished = jest.fn();
+      const onSpeakerFiltered = jest.fn();
+
+      // Mock Date.now to control time
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const manager = new TranscriptionManager(
+          onMessage,
+          processUserMessage,
+          [],
+          true,
+          undefined,
+          {
+            enabled: true,
+            onSpeakerEstablished,
+            onSpeakerFiltered,
+          }
+        );
+
+        // Establish S1 as primary
+        manager.handlePartialTranscript('Bonjour', 0, 0.5, 'S1');
+        mockTime += 150;
+        manager.handlePartialTranscript('comment ça va', 0.5, 1.5, 'S1');
+        expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
+
+        // Add short pending content from S1 (too short to be complete)
+        mockTime += 150;
+        manager.handlePartialTranscript('Hi', 1.5, 1.8, 'S1');
+
+        // First filtered speaker partial - triggers speaker change (S1→S2)
+        // but pending is too short to process, so it remains pending
+        mockTime += 150;
+        manager.handlePartialTranscript('Bruit de TV', 2, 2.5, 'S2');
+        expect(onSpeakerFiltered).toHaveBeenCalledWith('S2', 'Bruit de TV');
+
+        // Clear mock to check only subsequent calls
+        processUserMessage.mockClear();
+        onSpeakerFiltered.mockClear();
+
+        // Only advance 500ms (less than SILENCE_DETECTION_TIMEOUT of 2000ms)
+        mockTime += 500;
+
+        // Second filtered speaker partial - same speaker, no speaker change
+        // Safety net should NOT trigger (not enough time elapsed)
+        manager.handlePartialTranscript('Plus de bruit', 2.5, 3, 'S2');
+
+        // Should have been filtered
+        expect(onSpeakerFiltered).toHaveBeenCalledWith('S2', 'Plus de bruit');
+
+        // But processUserMessage should NOT have been called (safety net not triggered - too soon)
+        expect(processUserMessage).not.toHaveBeenCalled();
+
+        manager.cleanup();
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
+    test('does NOT trigger safety net when no pending content', async () => {
+      const onMessage = jest.fn();
+      const processUserMessage = jest.fn().mockResolvedValue(undefined);
+      const onSpeakerEstablished = jest.fn();
+      const onSpeakerFiltered = jest.fn();
+
+      // Mock Date.now to control time
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const manager = new TranscriptionManager(
+          onMessage,
+          processUserMessage,
+          [],
+          true,
+          undefined,
+          {
+            enabled: true,
+            onSpeakerEstablished,
+            onSpeakerFiltered,
+          }
+        );
+
+        // Establish S1 as primary
+        manager.handlePartialTranscript('Bonjour', 0, 0.5, 'S1');
+        mockTime += 150;
+        manager.handlePartialTranscript('comment ça va', 0.5, 1.5, 'S1');
+        expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
+
+        // Process pending content to clear it
+        mockTime += 150;
+        await manager.processPendingTranscript(true, true);
+        processUserMessage.mockClear();
+
+        // Advance time past timeout
+        mockTime += 2500;
+
+        // Filtered speaker arrives with no pending content
+        manager.handlePartialTranscript('Bruit de TV', 2, 3, 'S2');
+
+        // Should have been filtered
+        expect(onSpeakerFiltered).toHaveBeenCalledWith('S2', 'Bruit de TV');
+
+        // But processUserMessage should NOT have been called (no pending content)
+        expect(processUserMessage).not.toHaveBeenCalled();
+
+        manager.cleanup();
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+
+    test('safety net also works with handleFinalTranscript', async () => {
+      const onMessage = jest.fn();
+      const processUserMessage = jest.fn().mockResolvedValue(undefined);
+      const onSpeakerEstablished = jest.fn();
+      const onSpeakerFiltered = jest.fn();
+
+      // Mock Date.now to control time
+      let mockTime = 1000;
+      const originalDateNow = Date.now;
+      Date.now = jest.fn(() => mockTime);
+
+      try {
+        const manager = new TranscriptionManager(
+          onMessage,
+          processUserMessage,
+          [],
+          true,
+          undefined,
+          {
+            enabled: true,
+            onSpeakerEstablished,
+            onSpeakerFiltered,
+          }
+        );
+
+        // Establish S1 as primary
+        manager.handleFinalTranscript('Bonjour', 0, 0.5, 'S1');
+        mockTime += 150;
+        manager.handleFinalTranscript('comment ça va', 0.5, 1.5, 'S1');
+        expect(onSpeakerEstablished).toHaveBeenCalledWith('S1');
+
+        // Add pending content from S1
+        mockTime += 150;
+        manager.handleFinalTranscript('Une question importante pour toi', 1.5, 3, 'S1');
+
+        // Advance time past timeout
+        mockTime += 2500;
+
+        // Filtered speaker final transcript arrives - should trigger safety net
+        manager.handleFinalTranscript('Bruit de TV', 3, 4, 'S2');
+
+        // Should have been filtered
+        expect(onSpeakerFiltered).toHaveBeenCalledWith('S2', 'Bruit de TV');
+
+        // Run any pending promises
+        await Promise.resolve();
+
+        // processUserMessage should have been called due to safety net
+        expect(processUserMessage).toHaveBeenCalled();
+
+        manager.cleanup();
+      } finally {
+        Date.now = originalDateNow;
+      }
+    });
+  });
 });

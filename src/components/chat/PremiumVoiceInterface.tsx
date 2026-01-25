@@ -115,6 +115,8 @@ interface PremiumVoiceInterfaceProps {
   inviteToken?: string | null;
   // Current user ID for message alignment (messages from this user align right)
   currentUserId?: string | null;
+  // Callback when conversation plan updates (e.g., step completed in voice mode)
+  onConversationPlanUpdate?: (plan: ConversationPlan) => void;
 }
 
 /**
@@ -169,6 +171,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   onSpeakerMappingChange,
   inviteToken,
   currentUserId,
+  onConversationPlanUpdate,
 }: PremiumVoiceInterfaceProps) {
   // Récupération de l'utilisateur connecté pour l'affichage du profil
   const { user } = useAuth();
@@ -285,6 +288,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Track steps being completed to prevent duplicate API calls
   const completingStepsRef = useRef<Set<string>>(new Set());
 
+  // ===== WAKE LOCK & VISIBILITY =====
+  // Wake Lock to prevent screen from sleeping during voice sessions
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // Track if mute was triggered by visibility change (vs manual)
+  const wasMutedByVisibilityRef = useRef(false);
+
   // ===== AGENT RESPONSE NUDGE MECHANISM =====
   // Tracks when the last user message was sent (for detecting stuck agent)
   const lastUserMessageTimestampRef = useRef<number>(0);
@@ -327,6 +336,47 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setShowInactivityOverlay(false);
     }, []),
   });
+
+  // ===== WAKE LOCK FUNCTIONS =====
+  /**
+   * Acquiert un Wake Lock pour empêcher l'écran de se mettre en veille
+   * pendant une session vocale active.
+   *
+   * Support: Chrome Android, Safari iOS 16.4+, Chrome Desktop
+   * Non supporté: Firefox
+   */
+  const acquireWakeLock = useCallback(async () => {
+    if ('wakeLock' in navigator && !wakeLockRef.current) {
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        console.log('[PremiumVoiceInterface] 🔆 Wake lock acquired');
+
+        // Listener pour détecter la perte du wake lock (batterie faible, etc.)
+        wakeLockRef.current.addEventListener('release', () => {
+          console.log('[PremiumVoiceInterface] 🔆 Wake lock released by system');
+          wakeLockRef.current = null;
+        });
+      } catch (err) {
+        // Wake lock peut échouer si la page n'est pas visible ou batterie faible
+        console.warn('[PremiumVoiceInterface] ⚠️ Wake lock failed:', err);
+      }
+    }
+  }, []);
+
+  /**
+   * Libère le Wake Lock manuellement lors de la déconnexion
+   */
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('[PremiumVoiceInterface] 🔆 Wake lock released');
+      } catch (err) {
+        console.warn('[PremiumVoiceInterface] ⚠️ Wake lock release failed:', err);
+      }
+    }
+  }, []);
 
   // ===== DÉTECTION DU TYPE D'AGENT =====
   // Détection si l'agent est de type Hybrid (Deepgram STT + LLM + ElevenLabs TTS)
@@ -409,6 +459,51 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  // ===== PAGE VISIBILITY HANDLING =====
+  // Auto-mute le microphone quand la page devient cachée (switch onglet/app)
+  // Ré-acquiert le Wake Lock quand la page redevient visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const isHidden = document.visibilityState === 'hidden';
+
+      console.log('[PremiumVoiceInterface] 👁️ Visibility changed:', {
+        isHidden,
+        isConnected,
+        isMuted: isMutedRef.current
+      });
+
+      if (isHidden) {
+        // Page devient cachée → mute automatique si connecté et pas déjà muted
+        if (isConnected && !isMutedRef.current) {
+          console.log('[PremiumVoiceInterface] 👁️ Page hidden - auto-muting microphone');
+          wasMutedByVisibilityRef.current = true;
+
+          // Mute le microphone (même logique que l'inactivity monitor)
+          setIsMuted(true);
+          isMutedRef.current = true;
+
+          // Pour Speechmatics, appeler setMicrophoneMuted directement
+          if (agentRef.current && agentRef.current instanceof SpeechmaticsVoiceAgent) {
+            agentRef.current.setMicrophoneMuted(true);
+          }
+        }
+      } else {
+        // Page redevient visible
+        // 1. Ré-acquérir le wake lock si connecté
+        if (isConnected) {
+          acquireWakeLock();
+        }
+        // 2. NE PAS auto-unmute - l'utilisateur doit cliquer manuellement
+        // (sécurité/vie privée - on ne veut pas que le micro se réactive sans action consciente)
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isConnected, acquireWakeLock]);
 
   // BUG-032 FIX: Sync speakerMappings ref with state to avoid stale closures in callbacks
   useEffect(() => {
@@ -1146,6 +1241,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                     nextStepId: result.data?.nextStepId,
                     attempt,
                   });
+                  // Update parent's conversationPlan to sync with server
+                  // This ensures the timer tracks the correct step
+                  if (result.data?.conversationPlan && onConversationPlanUpdate) {
+                    onConversationPlanUpdate(result.data.conversationPlan);
+                  }
                   // Immediately refresh prompts with new step context
                   updatePromptsFromApi(`step completed: ${stepIdToComplete}`);
                   return true; // Success - exit retry loop
@@ -1223,7 +1323,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       messageId: finalMessageId,
       isInterim: false,
     });
-  }, [mergeStreamingContent, onMessage, conversationPlan, askKey, inviteToken, updatePromptsFromApi, consultantMode]);
+  }, [mergeStreamingContent, onMessage, conversationPlan, askKey, inviteToken, updatePromptsFromApi, consultantMode, onConversationPlanUpdate]);
 
   /**
    * Handler appelé en cas d'erreur de l'agent vocal
@@ -1714,6 +1814,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setIsMicrophoneActive(true);
       setIsConnecting(false);
       isConnectingRef.current = false;
+
+      // Acquérir le wake lock pour empêcher l'écran de se mettre en veille
+      acquireWakeLock();
     } catch (err) {
       console.error('[PremiumVoiceInterface] ❌ Connection error:', err);
       setIsConnecting(false);
@@ -1723,7 +1826,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setError(errorMessage);
       handleError(err instanceof Error ? err : new Error(errorMessage));
     }
-  }, [systemPrompt, modelConfig, isHybridAgent, isSpeechmaticsAgent, isConnected, handleMessage, handleError, handleConnectionChange, setupAudioAnalysis, cleanupAudioAnalysis, startAudioVisualization]);
+  }, [systemPrompt, modelConfig, isHybridAgent, isSpeechmaticsAgent, isConnected, handleMessage, handleError, handleConnectionChange, setupAudioAnalysis, cleanupAudioAnalysis, startAudioVisualization, acquireWakeLock]);
 
   /**
    * Recharge la page après une déconnexion complète
@@ -1776,7 +1879,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Étape 2: Nettoyer l'analyse audio EN PREMIER (arrête le stream séparé de visualisation)
       // Cela garantit que le stream de visualisation est arrêté avant le stream de l'agent
       cleanupAudioAnalysis(true); // Fermer l'AudioContext lors de la déconnexion
-      
+
+      // Étape 2b: Libérer le wake lock
+      releaseWakeLock();
+      wasMutedByVisibilityRef.current = false;
+
       // Étape 3: Déconnecter l'agent (arrête le stream microphone de l'agent ET le WebSocket)
       // CRITIQUE: Attendre que la déconnexion de l'agent soit terminée pour garantir la libération des ressources
       if (agentRef.current) {
@@ -1817,7 +1924,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // Toujours réinitialiser le flag de déconnexion, même en cas d'erreur
       isDisconnectingRef.current = false;
     }
-  }, [cleanupAudioAnalysis]);
+  }, [cleanupAudioAnalysis, releaseWakeLock]);
 
   // ===== HANDLERS D'ÉDITION DE MESSAGE =====
   const handleStartEdit = useCallback((messageId: string, currentContent: string) => {
@@ -1967,6 +2074,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setIsMicrophoneActive(false);
       setIsSpeaking(false);
 
+      // FIX: Resume inactivity timer when user manually mutes
+      // This prevents the timer from staying paused indefinitely if user mutes while assistant is speaking
+      inactivityMonitor.resumeTimerAfterDelay(0);
+
       try {
         if (agent instanceof SpeechmaticsVoiceAgent) {
           // Just mute the microphone - WebSocket stays open for receiving agent responses
@@ -1991,7 +2102,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         console.error('[PremiumVoiceInterface] ❌ Error muting microphone:', error);
       }
     }
-  }, [isMuted, isConnected, isMicrophoneActive, isHybridAgent, isSpeechmaticsAgent, systemPrompt, modelConfig, selectedMicrophoneId, voiceIsolationEnabled, cleanupAudioAnalysis, startAudioVisualization, handleError]);
+  }, [isMuted, isConnected, isMicrophoneActive, isHybridAgent, isSpeechmaticsAgent, systemPrompt, modelConfig, selectedMicrophoneId, voiceIsolationEnabled, cleanupAudioAnalysis, startAudioVisualization, handleError, inactivityMonitor]);
 
   const connectRef = useRef(connect);
   useEffect(() => {
@@ -2229,13 +2340,20 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
   }, [semanticTelemetry]);
 
-  // Auto-scroll when new messages arrive
+  // Auto-scroll when new messages arrive OR when last message content changes (interim updates)
   const previousLengthRef = useRef(0);
+  const previousLastContentRef = useRef<string>('');
   useEffect(() => {
-    const hasNewMessages = displayMessages.length > previousLengthRef.current;
-    previousLengthRef.current = displayMessages.length;
+    const lastMessage = displayMessages[displayMessages.length - 1];
+    const lastContent = lastMessage?.content || '';
 
-    if (hasNewMessages && messagesContainerRef.current) {
+    const hasNewMessages = displayMessages.length > previousLengthRef.current;
+    const lastMessageChanged = lastContent !== previousLastContentRef.current;
+
+    previousLengthRef.current = displayMessages.length;
+    previousLastContentRef.current = lastContent;
+
+    if ((hasNewMessages || lastMessageChanged) && messagesContainerRef.current) {
       // Use scrollTop directly instead of scrollIntoView to avoid layout recalculations
       // that can cause visual artifacts during message transitions
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;

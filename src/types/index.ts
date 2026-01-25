@@ -343,6 +343,7 @@ export interface ChatComponentProps {
   ask: Ask | null;
   messages: Message[];
   conversationPlan?: ConversationPlan | null;
+  onConversationPlanUpdate?: (plan: ConversationPlan) => void; // Called when plan updates (e.g., step completed in voice mode)
   onSendMessage: (content: string, type?: Message['type'], metadata?: Message['metadata']) => void;
   isLoading: boolean;
   isInitializing?: boolean; // True when async plan/message generation is in progress
