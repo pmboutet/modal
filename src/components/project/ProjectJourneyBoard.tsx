@@ -180,6 +180,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
   const [applyingNewChallengeIndices, setApplyingNewChallengeIndices] = useState<Set<number>>(() => new Set());
   const [isAskAiPanelOpen, setIsAskAiPanelOpen] = useState(false);
   const [isAskAiRunning, setIsAskAiRunning] = useState(false);
+  const [askAiStartTime, setAskAiStartTime] = useState<Date | null>(null);
   const [askAiSuggestions, setAskAiSuggestions] = useState<AiAskSuggestion[]>([]);
   const [askAiFeedback, setAskAiFeedback] = useState<FeedbackState | null>(null);
   const [askAiErrors, setAskAiErrors] = useState<string[] | null>(null);
@@ -695,6 +696,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
     setAskAiErrors(null);
     setAskAiSuggestions([]);
     setIsAskAiRunning(true);
+    setAskAiStartTime(new Date());
 
     try {
       const response = await fetch(`/api/admin/challenges/${activeChallengeId}/ai/ask-generator`, {
@@ -730,6 +732,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
       setAskAiErrors([message]);
     } finally {
       setIsAskAiRunning(false);
+      setAskAiStartTime(null);
     }
   }, [activeChallengeId, isAskAiRunning]);
 
@@ -1554,6 +1557,53 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
     setAskAiFeedback(null);
     setAskAiErrors(null);
   }, [activeChallenge]);
+
+  // Poll for ASK AI generation completion - recovers from stuck state
+  useEffect(() => {
+    if (!isAskAiRunning || !askAiStartTime || !activeChallengeId) return;
+
+    const pollForCompletion = async () => {
+      try {
+        const response = await fetch(`/api/admin/challenges/${activeChallengeId}/ai-suggestions`);
+        if (!response.ok) return;
+
+        const payload = await response.json();
+        if (!payload.success || !payload.data) return;
+
+        const { status, suggestions, lastRunAt, error } = payload.data;
+
+        // Only process if the result is from current run or later
+        const lastRunDate = lastRunAt ? new Date(lastRunAt) : null;
+        const isCurrentRun = lastRunDate && lastRunDate >= askAiStartTime;
+
+        if (status === "completed" && isCurrentRun) {
+          setIsAskAiRunning(false);
+          setAskAiStartTime(null);
+          setAskAiSuggestions(suggestions ?? []);
+          setAskAiFeedback({
+            type: "success",
+            message: suggestions?.length
+              ? "ASKs générées. Passez en revue les propositions."
+              : "L'agent n'a proposé aucune nouvelle ASK.",
+          });
+        } else if (status === "error" && isCurrentRun) {
+          setIsAskAiRunning(false);
+          setAskAiStartTime(null);
+          setAskAiSuggestions([]);
+          setAskAiFeedback({
+            type: "error",
+            message: error ?? "Erreur lors de la génération des ASKs.",
+          });
+        }
+        // If still "generating", continue polling
+      } catch (err) {
+        console.error("Failed to poll ASK AI generation status:", err);
+      }
+    };
+
+    const interval = setInterval(pollForCompletion, 3000);
+    return () => clearInterval(interval);
+  }, [isAskAiRunning, askAiStartTime, activeChallengeId]);
 
   const handleApplyAiAskSuggestion = useCallback(
     (suggestion: AiAskSuggestion) => {
