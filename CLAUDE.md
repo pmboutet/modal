@@ -47,6 +47,8 @@ This helps identify:
 - How many times the error occurred
 - Which endpoint/function caused the issue
 
+**Si besoin de logs production en temps réel**, utiliser Vercel CLI (voir section "Vercel Production Monitoring").
+
 ### Feature Development Guidelines
 
 When developing new features or modifying existing code:
@@ -368,3 +370,46 @@ const profile = await safeQuery<Profile>(
 
 - Les warnings de dépréciation Node.js (comme `url.parse`) sont automatiquement filtrés car ils viennent des dépendances
 - Pour tester Sentry manuellement, utiliser `Sentry.captureException(new Error("test"))` dans une route
+
+## Vercel Production Monitoring
+
+### Prérequis
+
+Vercel CLI est installé et configuré. Pour vérifier la connexion:
+
+```bash
+vercel whoami
+```
+
+Si le token a expiré, se reconnecter avec `vercel login`.
+
+### Commandes utiles
+
+```bash
+# Lister les déploiements récents
+vercel list
+
+# Inspecter un déploiement (status, URLs, builds)
+vercel inspect https://modal-xxx-pmboutets-projects.vercel.app
+
+# Logs en temps réel (streaming - attend les nouvelles requêtes)
+vercel logs https://modal-xxx-pmboutets-projects.vercel.app
+
+# Logs en JSON (pour filtrage avec jq)
+vercel logs https://modal-xxx-pmboutets-projects.vercel.app --json
+
+# Filtrer les logs par niveau (nécessite jq)
+vercel logs DEPLOYMENT_URL --json | jq 'select(.level == "error")'
+```
+
+### Informations du projet
+
+- **Projet Vercel**: `modal` (pmboutets-projects)
+- **URL de production**: https://app-modal.com
+- **Dashboard logs**: https://vercel.com/pmboutets-projects/modal/logs
+
+### Notes importantes
+
+- `vercel logs` affiche les logs en **temps réel** (streaming), pas l'historique
+- Pour les logs historiques, utiliser le dashboard Vercel
+- Les logs sont disponibles uniquement pour les déploiements en état "Ready"
