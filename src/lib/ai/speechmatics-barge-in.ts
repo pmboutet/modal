@@ -12,6 +12,7 @@ import {
   type StartOfTurnMessage,
 } from './start-of-turn-detection';
 import { detectLocalEcho } from './speechmatics-echo-detection';
+import { devLog, devWarn } from '@/lib/utils';
 
 /**
  * Echo detection details for callback
@@ -112,6 +113,17 @@ export class SpeechmaticsBargeIn {
     const cleanedTranscript = transcript.trim();
     const words = cleanedTranscript.split(/\s+/).filter(Boolean);
     const requiredWords = isInGracePeriod ? 3 : 2;
+
+    // DEBUG: Log echo detection context
+    devLog('[BargeIn] 🎤 Validating transcript:', cleanedTranscript.substring(0, 50) + (cleanedTranscript.length > 50 ? '...' : ''));
+    devLog('[BargeIn] 🔊 Current assistant speech:', currentAssistantSpeech ? currentAssistantSpeech.substring(0, 50) + '...' : '(none)');
+    devLog('[BargeIn] 👤 Speaker:', speaker || 'unknown', '| Primary:', this.primaryUserSpeaker || 'not set');
+
+    // WARNING: No assistant speech to compare - echo detection will fail!
+    if (!currentAssistantSpeech?.trim()) {
+      devWarn('[BargeIn] ⚠️ NO ASSISTANT SPEECH SET - Echo detection cannot work!');
+      devWarn('[BargeIn] ⚠️ If TTS is playing, microphone audio may be processed as user speech');
+    }
 
     // Local echo detection
     if (currentAssistantSpeech?.trim()) {

@@ -242,3 +242,22 @@ export const SIGNIFICANT_NEW_WORDS_THRESHOLD = 3;
 
 /** Minimum content length to process (characters) */
 export const MIN_CONTENT_LENGTH = 2;
+
+// =============================================================================
+// Loop Detection (Anti-Echo Protection)
+// =============================================================================
+
+/** Minimum time between AI responses to prevent echo loops (2 seconds) */
+export const MIN_RESPONSE_INTERVAL_MS = 2000;
+
+/** Maximum rapid responses before triggering circuit breaker */
+export const MAX_RAPID_RESPONSES = 3;
+
+/** Time window for counting rapid responses (10 seconds) */
+export const RAPID_RESPONSE_WINDOW_MS = 10000;
+
+/** Similarity threshold for detecting user message that looks like AI speech (60% word overlap) */
+export const ECHO_LOOP_SIMILARITY_THRESHOLD = 0.6;
+
+/** Circuit breaker cooldown after detecting potential loop (5 seconds) */
+export const CIRCUIT_BREAKER_COOLDOWN_MS = 5000;

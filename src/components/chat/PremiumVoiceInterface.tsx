@@ -365,6 +365,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const pendingInterimAssistantRef = useRef<VoiceMessage | null>(null);
   const interimUserThrottleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const interimAssistantThrottleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // FLASH FIX: Stable IDs for interim messages to prevent re-mounts when useMemo recalculates
+  // Using counter instead of Date.now() ensures same ID across multiple useMemo calls
+  const stableIdCounterRef = useRef<number>(0);
+  const stableInterimAssistantIdRef = useRef<string | null>(null);
+  const stablePendingUserIdRef = useRef<string | null>(null);
 
   // ===== WAKE LOCK & VISIBILITY =====
   // Wake Lock to prevent screen from sleeping during voice sessions
@@ -2305,6 +2310,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setInterimUser(null);
       setInterimAssistant(null);
       setPendingFinalUser(null);
+      // FLASH FIX: Clear stable ID refs to prevent stale IDs on reconnect
+      stableInterimAssistantIdRef.current = null;
+      stablePendingUserIdRef.current = null;
 
       // Étape 7: MEMORY LEAK FIX - Clear unbounded refs to prevent memory accumulation
       // These refs grow during the session and must be cleared on disconnect
@@ -2763,7 +2771,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Add pendingFinalUser to avoid "blanc" gap between partial disappearing and final appearing
     // This shows the final user message immediately while waiting for DB confirmation
     if (pendingFinalUser) {
-      const pendingId = pendingFinalUser.messageId || `pending-user-${Date.now()}`;
+      // FLASH FIX: Use stable ID from ref instead of Date.now() to prevent re-mounts
+      // Date.now() inside useMemo creates new ID on each recalculation = flash
+      if (!pendingFinalUser.messageId && !stablePendingUserIdRef.current) {
+        stablePendingUserIdRef.current = `pending-user-${++stableIdCounterRef.current}`;
+      }
+      const pendingId = pendingFinalUser.messageId || stablePendingUserIdRef.current!;
       // Only add if not already in base messages (from props)
       if (!seenIds.has(pendingId)) {
         base.push({
@@ -2774,10 +2787,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         });
         seenIds.add(pendingId);
       }
+    } else {
+      // Clear stable ID when pendingFinalUser is null (message confirmed)
+      stablePendingUserIdRef.current = null;
     }
 
     if (interimAssistant) {
-      const interimAssistantId = interimAssistant.messageId || `interim-assistant-${Date.now()}`;
+      // FLASH FIX: Use stable ID from ref instead of Date.now() to prevent re-mounts
+      if (!interimAssistant.messageId && !stableInterimAssistantIdRef.current) {
+        stableInterimAssistantIdRef.current = `interim-assistant-${++stableIdCounterRef.current}`;
+      }
+      const interimAssistantId = interimAssistant.messageId || stableInterimAssistantIdRef.current!;
       // Only add if not already finalized in base messages
       if (!seenIds.has(interimAssistantId)) {
         base.push({
@@ -2787,6 +2807,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
           isInterim: true,
         });
       }
+    } else {
+      // Clear stable ID when interimAssistant is null (message finalized)
+      stableInterimAssistantIdRef.current = null;
     }
 
     // Tri par timestamp pour garantir l'ordre chronologique

@@ -25,7 +25,123 @@ import type {
 import {
   QUEUED_MESSAGE_RETRY_DELAY_MS,
   RECENT_HISTORY_COUNT,
+  MIN_RESPONSE_INTERVAL_MS,
+  MAX_RAPID_RESPONSES,
+  RAPID_RESPONSE_WINDOW_MS,
+  ECHO_LOOP_SIMILARITY_THRESHOLD,
+  CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './speechmatics-constants';
+import { normalizeForEchoDetection } from './speechmatics-echo-detection';
+
+// =============================================================================
+// Loop Detection State (Anti-Echo Protection)
+// =============================================================================
+
+/** Timestamps of recent AI responses for loop detection */
+const recentResponseTimestamps: number[] = [];
+
+/** Last time the circuit breaker was triggered */
+let circuitBreakerTriggeredAt: number = 0;
+
+/** Last AI response content for echo comparison */
+let lastAIResponseContent: string = '';
+
+/**
+ * Check if a user message looks like an echo of the AI's last response
+ * Uses word overlap to detect when microphone picked up TTS playback
+ */
+function detectPotentialEchoLoop(userMessage: string, recentAgentMessages: string[]): {
+  isLikelyEcho: boolean;
+  similarity: number;
+  matchedWith: string;
+} {
+  const normalizedUser = normalizeForEchoDetection(userMessage);
+  const userWords = normalizedUser.split(/\s+/).filter(w => w.length > 2);
+
+  if (userWords.length < 3) {
+    return { isLikelyEcho: false, similarity: 0, matchedWith: '' };
+  }
+
+  for (const agentMessage of recentAgentMessages) {
+    const normalizedAgent = normalizeForEchoDetection(agentMessage);
+    const agentWords = new Set(normalizedAgent.split(/\s+/).filter(w => w.length > 2));
+
+    if (agentWords.size === 0) continue;
+
+    let matchedWords = 0;
+    for (const word of userWords) {
+      if (agentWords.has(word)) {
+        matchedWords++;
+      }
+    }
+
+    const similarity = matchedWords / userWords.length;
+
+    if (similarity >= ECHO_LOOP_SIMILARITY_THRESHOLD) {
+      return {
+        isLikelyEcho: true,
+        similarity,
+        matchedWith: agentMessage.substring(0, 100) + (agentMessage.length > 100 ? '...' : ''),
+      };
+    }
+  }
+
+  return { isLikelyEcho: false, similarity: 0, matchedWith: '' };
+}
+
+/**
+ * Check if responses are happening too rapidly (potential loop)
+ * Returns true if circuit breaker should activate
+ */
+function checkRapidResponseRate(): boolean {
+  const now = Date.now();
+
+  // Clean old timestamps
+  while (recentResponseTimestamps.length > 0 &&
+         now - recentResponseTimestamps[0] > RAPID_RESPONSE_WINDOW_MS) {
+    recentResponseTimestamps.shift();
+  }
+
+  // Check if we're in cooldown
+  if (circuitBreakerTriggeredAt > 0 && now - circuitBreakerTriggeredAt < CIRCUIT_BREAKER_COOLDOWN_MS) {
+    devWarn('[Speechmatics] 🔴 Circuit breaker active - blocking response');
+    return true;
+  }
+
+  // Check if we had a response too recently
+  if (recentResponseTimestamps.length > 0) {
+    const lastResponse = recentResponseTimestamps[recentResponseTimestamps.length - 1];
+    if (now - lastResponse < MIN_RESPONSE_INTERVAL_MS) {
+      devWarn('[Speechmatics] ⚠️ Response too soon after previous one:', now - lastResponse, 'ms');
+    }
+  }
+
+  // Check for rapid response pattern
+  if (recentResponseTimestamps.length >= MAX_RAPID_RESPONSES) {
+    devError('[Speechmatics] 🔴 LOOP DETECTED - Too many rapid responses:', recentResponseTimestamps.length, 'in', RAPID_RESPONSE_WINDOW_MS / 1000, 's');
+    circuitBreakerTriggeredAt = now;
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Record that a response was generated
+ */
+function recordResponseTimestamp(): void {
+  recentResponseTimestamps.push(Date.now());
+}
+
+/**
+ * Reset loop detection state (call on disconnect/reconnect)
+ */
+export function resetLoopDetectionState(): void {
+  recentResponseTimestamps.length = 0;
+  circuitBreakerTriggeredAt = 0;
+  lastAIResponseContent = '';
+  devLog('[Speechmatics] Loop detection state reset');
+}
 
 /**
  * Dependencies required by SpeechmaticsMessageProcessor
@@ -88,6 +204,46 @@ export async function processUserMessage(
   // If we were aborted due to user continuation, clear the flag and proceed
   if (deps.stateMachine.wasAbortedDueToUserContinuation()) {
     deps.stateMachine.clearAbortedDueToUserContinuation();
+  }
+
+  // ==========================================================================
+  // LOOP DETECTION: Check if this looks like an echo of AI speech
+  // ==========================================================================
+
+  // Check circuit breaker first (too many rapid responses)
+  if (checkRapidResponseRate()) {
+    devError('[Speechmatics] 🛑 BLOCKING MESSAGE - Circuit breaker active to prevent loop');
+    deps.onErrorCallback?.(new Error('Voice loop detected - please wait a moment before speaking'));
+    return;
+  }
+
+  // Check if user message looks like recent AI speech (echo detection)
+  const recentAgentMessages = deps.stateMachine.getRecentHistory(3)
+    .filter(msg => msg.role === 'agent')
+    .map(msg => msg.content);
+
+  if (recentAgentMessages.length > 0) {
+    const echoCheck = detectPotentialEchoLoop(transcript, recentAgentMessages);
+    if (echoCheck.isLikelyEcho) {
+      devError('[Speechmatics] 🔄 ECHO LOOP DETECTED - User message matches AI speech');
+      devError('[Speechmatics] Similarity:', (echoCheck.similarity * 100).toFixed(1) + '%');
+      devError('[Speechmatics] User said:', transcript.substring(0, 80) + '...');
+      devError('[Speechmatics] Matched AI:', echoCheck.matchedWith);
+
+      // Don't process this message - it's likely the microphone picking up TTS
+      Sentry.addBreadcrumb({
+        category: 'speechmatics',
+        message: 'Echo loop detected - message blocked',
+        level: 'warning',
+        data: {
+          userMessage: transcript.substring(0, 100),
+          similarity: echoCheck.similarity,
+          matchedWith: echoCheck.matchedWith,
+        },
+      });
+
+      return;
+    }
   }
 
   if (deps.stateMachine.isGenerating()) {
@@ -231,6 +387,11 @@ export async function processUserMessage(
 
     // Add to conversation history
     deps.stateMachine.addAgentMessage(llmResponse);
+
+    // LOOP DETECTION: Record this response for rate limiting
+    recordResponseTimestamp();
+    lastAIResponseContent = llmResponse;
+    devLog('[Speechmatics] ✅ Response generated, timestamp recorded for loop detection');
 
     // Update audio manager with conversation history
     if (audio) {

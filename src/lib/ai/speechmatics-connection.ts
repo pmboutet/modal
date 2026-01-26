@@ -29,6 +29,7 @@ import {
   MICROPHONE_STOP_WAIT_MS,
   DISCONNECT_CLEANUP_DELAY_MS,
 } from './speechmatics-constants';
+import { resetLoopDetectionState } from './speechmatics-message-processor';
 import type {
   SpeechmaticsConfig,
   SpeechmaticsMessageCallback,
@@ -236,6 +237,15 @@ export async function establishConnection(
     enableWorkletAGC: config.enableWorkletAGC !== false,
   });
 
+  // LOOP PROTECTION: Initialize echo detection with last agent message from history
+  // This ensures echo detection works even if we reconnect while TTS might still be playing
+  const conversationHistory = deps.stateMachine.getContext().conversationHistory;
+  const lastAgentMessage = [...conversationHistory].reverse().find(msg => msg.role === 'agent');
+  if (lastAgentMessage) {
+    audio.setCurrentAssistantSpeech(lastAgentMessage.content);
+    devLog('[Speechmatics] 🔊 Initialized echo detection with last agent message:', lastAgentMessage.content.substring(0, 50) + '...');
+  }
+
   return {
     websocket,
     audio,
@@ -277,6 +287,9 @@ export async function performDisconnect(deps: {
 }): Promise<void> {
   // CRITICAL: Increment global token to invalidate any in-flight connect() attempts
   incrementGlobalConnectionToken();
+
+  // Reset loop detection state to prevent false positives on reconnect
+  resetLoopDetectionState();
 
   // Emit DISCONNECT event to state machine
   deps.stateMachine.transition({ type: 'DISCONNECT' });
