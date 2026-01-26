@@ -2789,6 +2789,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
   }, [displayMessages, handleScrollHideShow]);
 
+  // Auto-scroll when agent thinking indicator or step summary generation appears
+  useEffect(() => {
+    if ((isAgentThinking || isGeneratingStepSummary) && messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [isAgentThinking, isGeneratingStepSummary]);
+
   /**
    * NEW PURE REACT TEXT COMPONENT
    * Uses Framer Motion for smooth animations without DOM manipulation

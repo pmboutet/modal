@@ -140,6 +140,13 @@ export function ChatComponent({
     }
   }, [messages, isVoiceMode]);
 
+  // Auto-scroll when agent typing indicator or initialization indicator appears
+  useEffect(() => {
+    if (!isVoiceMode && (showAgentTyping || isInitializing)) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [showAgentTyping, isInitializing, isVoiceMode]);
+
   // Scroll to bottom instantly when entering voice mode (no animation)
   useEffect(() => {
     if (isVoiceMode && !previousVoiceModeRef.current) {
@@ -640,6 +647,44 @@ export function ChatComponent({
             
           </AnimatePresence>
           
+          {/* Agent typing indicators - inside scroll container so they're visible when scrolling */}
+          <AnimatePresence>
+            {isInitializing && (
+              <motion.div
+                key="initializing-indicator"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-2 pl-1 text-xs text-muted-foreground/80"
+                aria-live="polite"
+              >
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500/30" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500/40" />
+                </span>
+                <span className="italic">Préparation de la conversation...</span>
+              </motion.div>
+            )}
+            {showAgentTyping && !isInitializing && (
+              <motion.div
+                key="agent-typing-indicator"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-2 pl-1 text-xs text-muted-foreground/80"
+                aria-live="polite"
+              >
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/30" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary/40" />
+                </span>
+                <span className="italic">Génération de la réponse en cours...</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Interview completion celebration */}
           {allStepsCompleted && (
             <motion.div
@@ -655,13 +700,13 @@ export function ChatComponent({
                     <motion.div
                       key={i}
                       className="absolute h-2 w-2 rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500"
-                      initial={{ 
+                      initial={{
                         x: Math.random() * 100 + '%',
                         y: -20,
                         rotate: 0,
                         scale: 0
                       }}
-                      animate={{ 
+                      animate={{
                         y: '120%',
                         rotate: Math.random() * 360,
                         scale: [0, 1, 1, 0.8]
@@ -675,10 +720,10 @@ export function ChatComponent({
                     />
                   ))}
                 </div>
-                
+
                 <div className="relative z-10 text-center">
                   <motion.div
-                    animate={{ 
+                    animate={{
                       rotate: [0, 10, -10, 10, 0],
                       scale: [1, 1.1, 1]
                     }}
@@ -691,7 +736,7 @@ export function ChatComponent({
                   >
                     🎉
                   </motion.div>
-                  
+
                   <h3 className="mb-2 text-2xl font-bold text-cyan-800">
                     Entretien terminé !
                   </h3>
@@ -752,46 +797,9 @@ export function ChatComponent({
               </div>
             </motion.div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
-
-        <AnimatePresence>
-          {isInitializing && (
-            <motion.div
-              key="initializing-indicator"
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.2 }}
-              className="mb-3 flex items-center gap-2 pl-1 text-xs text-muted-foreground/80"
-              aria-live="polite"
-            >
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-500/30" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500/40" />
-              </span>
-              <span className="italic">Préparation de la conversation...</span>
-            </motion.div>
-          )}
-          {showAgentTyping && !isInitializing && (
-            <motion.div
-              key="agent-typing-indicator"
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.2 }}
-              className="mb-3 flex items-center gap-2 pl-1 text-xs text-muted-foreground/80"
-              aria-live="polite"
-            >
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/30" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary/40" />
-              </span>
-              <span className="italic">Génération de la réponse en cours...</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* File preview area */}
         {selectedFiles.length > 0 && !isVoiceMode && (
