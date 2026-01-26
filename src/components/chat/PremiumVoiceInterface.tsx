@@ -120,6 +120,9 @@ interface PremiumVoiceInterfaceProps {
   currentUserId?: string | null;
   // Callback when conversation plan updates (e.g., step completed in voice mode)
   onConversationPlanUpdate?: (plan: ConversationPlan) => void;
+  // If true, session initialization is in progress - skip initial message generation
+  // (the init endpoint will handle it)
+  isInitializing?: boolean;
 }
 
 /**
@@ -176,6 +179,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   inviteToken,
   currentUserId,
   onConversationPlanUpdate,
+  isInitializing = false,
 }: PremiumVoiceInterfaceProps) {
   // Récupération de l'utilisateur connecté pour l'affichage du profil
   const { user } = useAuth();
@@ -1944,7 +1948,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
         // If no messages exist, generate and speak initial welcome message (DRY with text mode)
         // Also speak existing initial message if it's the only one (created by text mode but never spoken)
-        if (!consultantMode && askKey) {
+        // Skip if isInitializing=true because the /init endpoint will handle initial message generation
+        if (!consultantMode && askKey && !isInitializing) {
           if (messages.length === 0) {
             // No messages at all - generate and speak initial message via /respond endpoint
             devLog('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');

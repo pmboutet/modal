@@ -1248,9 +1248,26 @@ export default function HomePage() {
         const ONE_MINUTE = 60 * 1000;
 
         // Keep messages not in API response if they're recent (within 1 minute)
+        // Also filter out optimistic messages that have been persisted (content-based dedup)
         const pendingMessages = prev.messages.filter(m => {
           if (apiMessageIds.has(m.id)) return false;
-          if (m.id?.startsWith('temp-') || m.clientId?.startsWith('ai-stream-')) return true;
+
+          // Content-based deduplication for optimistic messages
+          // If an optimistic message (temp-xxx) has a matching persisted message, filter it out
+          if (m.id?.startsWith('temp-')) {
+            const hasDuplicateInApi = messagesFromApi.some(apiMsg =>
+              apiMsg.content === m.content &&
+              apiMsg.senderType === m.senderType &&
+              Math.abs(new Date(apiMsg.timestamp).getTime() - new Date(m.timestamp).getTime()) < 5000
+            );
+            if (hasDuplicateInApi) {
+              console.log(`[loadSessionDataByToken] Filtering optimistic duplicate: ${m.id}`);
+              return false;
+            }
+            return true; // Keep non-duplicate optimistic messages
+          }
+
+          if (m.clientId?.startsWith('ai-stream-')) return true;
           const msgTime = m.timestamp ? new Date(m.timestamp).getTime() : 0;
           return (now - msgTime) < ONE_MINUTE;
         });
@@ -1418,9 +1435,26 @@ export default function HomePage() {
         const ONE_MINUTE = 60 * 1000;
 
         // Keep messages not in API response if they're recent (within 1 minute)
+        // Also filter out optimistic messages that have been persisted (content-based dedup)
         const pendingMessages = prev.messages.filter(m => {
           if (apiMessageIds.has(m.id)) return false;
-          if (m.id?.startsWith('temp-') || m.clientId?.startsWith('ai-stream-')) return true;
+
+          // Content-based deduplication for optimistic messages
+          // If an optimistic message (temp-xxx) has a matching persisted message, filter it out
+          if (m.id?.startsWith('temp-')) {
+            const hasDuplicateInApi = messagesFromApi.some(apiMsg =>
+              apiMsg.content === m.content &&
+              apiMsg.senderType === m.senderType &&
+              Math.abs(new Date(apiMsg.timestamp).getTime() - new Date(m.timestamp).getTime()) < 5000
+            );
+            if (hasDuplicateInApi) {
+              console.log(`[loadSessionData] Filtering optimistic duplicate: ${m.id}`);
+              return false;
+            }
+            return true; // Keep non-duplicate optimistic messages
+          }
+
+          if (m.clientId?.startsWith('ai-stream-')) return true;
           const msgTime = m.timestamp ? new Date(m.timestamp).getTime() : 0;
           return (now - msgTime) < ONE_MINUTE;
         });
@@ -2997,6 +3031,7 @@ export default function HomePage() {
           inviteToken={sessionData.inviteToken}
           currentUserId={currentUserId}
           onConversationPlanUpdate={handleConversationPlanUpdate}
+          isInitializing={sessionData.isInitializing}
         />
       )}
 

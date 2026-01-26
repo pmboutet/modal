@@ -571,6 +571,7 @@ export function ChatComponent({
         participants={consultantMode ? participantOptions : undefined}
         currentUserId={currentUserId}
         onConversationPlanUpdate={onConversationPlanUpdate}
+        isInitializing={isInitializing}
       />
     );
   }

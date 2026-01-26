@@ -46,6 +46,7 @@ export class TranscriptionManager {
   private currentStreamingMessageId: string | null = null;
   private lastProcessedContent: string | null = null;
   private contentBeingProcessed: string | null = null; // BUG FIX: Track content currently being processed to prevent duplicates
+  private processingLock: boolean = false; // Mutex to prevent concurrent processPendingTranscript calls
   private silenceTimeout: NodeJS.Timeout | null = null;
   private receivedEndOfUtterance: boolean = false;
   private utteranceDebounceTimeout: NodeJS.Timeout | null = null;
@@ -411,106 +412,120 @@ export class TranscriptionManager {
    * Process pending transcript when silence is detected
    */
   async processPendingTranscript(force: boolean = false, absoluteFailsafe: boolean = false): Promise<void> {
-    // BUG-039 FIX: Skip processing if awaiting speaker confirmation
-    // This prevents the AI from responding to its own echo while the user
-    // is confirming their identity in individual voice mode
-    if (this.awaitingSpeakerConfirmation) {
-      devLog('[Transcription] Skipping processPendingTranscript - awaiting speaker confirmation');
+    // Mutex lock to prevent concurrent processing
+    // This prevents duplicate LLM calls when processPendingTranscript is triggered by
+    // multiple events in quick succession (e.g., speaker change + EndOfUtterance)
+    if (this.processingLock) {
+      devLog('[Transcription] Skipping processPendingTranscript - already processing');
       return;
     }
+    this.processingLock = true;
 
-    // Clear timeouts
-    if (this.silenceTimeout) {
-      clearTimeout(this.silenceTimeout);
-      this.silenceTimeout = null;
-    }
-    if (this.utteranceDebounceTimeout) {
-      clearTimeout(this.utteranceDebounceTimeout);
-      this.utteranceDebounceTimeout = null;
-    }
-    this.clearSemanticHold();
-    this.receivedEndOfUtterance = false;
+    try {
+      // BUG-039 FIX: Skip processing if awaiting speaker confirmation
+      // This prevents the AI from responding to its own echo while the user
+      // is confirming their identity in individual voice mode
+      if (this.awaitingSpeakerConfirmation) {
+        devLog('[Transcription] Skipping processPendingTranscript - awaiting speaker confirmation');
+        return;
+      }
 
-    // Process pending transcript
-    if (this.pendingFinalTranscript && this.pendingFinalTranscript.trim()) {
-      let finalMessage = this.cleanTranscript(this.pendingFinalTranscript.trim());
+      // Clear timeouts
+      if (this.silenceTimeout) {
+        clearTimeout(this.silenceTimeout);
+        this.silenceTimeout = null;
+      }
+      if (this.utteranceDebounceTimeout) {
+        clearTimeout(this.utteranceDebounceTimeout);
+        this.utteranceDebounceTimeout = null;
+      }
+      this.clearSemanticHold();
+      this.receivedEndOfUtterance = false;
 
-      if (!this.isUtteranceComplete(finalMessage, force, absoluteFailsafe)) {
-        // Not enough content yet
-        this.pendingFinalTranscript = finalMessage;
-        if (!force && !absoluteFailsafe) {
-          this.resetSilenceTimeout();
-          return;
-        } else if (!absoluteFailsafe) {
-          this.resetSilenceTimeout();
+      // Process pending transcript
+      if (this.pendingFinalTranscript && this.pendingFinalTranscript.trim()) {
+        const finalMessage = this.cleanTranscript(this.pendingFinalTranscript.trim());
+
+        if (!this.isUtteranceComplete(finalMessage, force, absoluteFailsafe)) {
+          // Not enough content yet
+          this.pendingFinalTranscript = finalMessage;
+          if (!force && !absoluteFailsafe) {
+            this.resetSilenceTimeout();
+            return;
+          } else if (!absoluteFailsafe) {
+            this.resetSilenceTimeout();
+            return;
+          }
+          // absoluteFailsafe = true: send anyway
+        }
+
+        // Skip if same as last processed message
+        if (finalMessage === this.lastProcessedContent) {
+          this.clearState();
           return;
         }
-        // absoluteFailsafe = true: send anyway
-      }
 
-      // Skip if same as last processed message
-      if (finalMessage === this.lastProcessedContent) {
-        this.clearState();
-        return;
-      }
-
-      // BUG FIX: Skip if this content is currently being processed (race condition prevention)
-      // This prevents duplicate messages when processPendingTranscript is called multiple times
-      // in quick succession (e.g., speaker change + EndOfUtterance arriving close together)
-      if (finalMessage === this.contentBeingProcessed) {
-        this.clearState();
-        return;
-      }
-
-      // Skip if too short
-      if (finalMessage.length < 2) {
-        this.clearState();
-        return;
-      }
-
-      // Store values before processing (keep state until processing completes)
-      const messageId = this.currentStreamingMessageId;
-      const fullContent = finalMessage;
-      const speakerSnapshot = this.currentSpeaker;
-
-      // BUG FIX: Mark content as being processed to prevent duplicate processing
-      this.contentBeingProcessed = fullContent;
-
-      // Add to conversation history
-      this.conversationHistory.push({ role: 'user', content: fullContent });
-
-      // Notify callback with final message
-      this.onMessageCallback?.({
-        role: 'user',
-        content: fullContent,
-        timestamp: new Date().toISOString(),
-        isInterim: false,
-        messageId: messageId || undefined,
-        speaker: speakerSnapshot,
-      });
-
-      try {
-        // Process user message (triggers LLM + TTS)
-        await this.processUserMessage(fullContent);
-
-        // BUG-007 FIX: Only clear state AFTER successful processing
-        this.clearState();
-        this.lastProcessedContent = fullContent;
-        this.contentBeingProcessed = null;
-      } catch (error) {
-        // BUG-007 FIX: On error, remove from conversation history and keep state for retry
-        // Simplified: directly check and remove the last element if it matches
-        const lastMsg = this.conversationHistory[this.conversationHistory.length - 1];
-        if (lastMsg && lastMsg.role === 'user' && lastMsg.content === fullContent) {
-          this.conversationHistory.pop();
+        // BUG FIX: Skip if this content is currently being processed (race condition prevention)
+        // This prevents duplicate messages when processPendingTranscript is called multiple times
+        // in quick succession (e.g., speaker change + EndOfUtterance arriving close together)
+        if (finalMessage === this.contentBeingProcessed) {
+          this.clearState();
+          return;
         }
-        // Clear the "being processed" flag so it can be retried
-        this.contentBeingProcessed = null;
 
-        devError('[Transcription] Error processing user message, transcript preserved for retry:', error);
-        // Re-throw so the caller knows it failed
-        throw error;
+        // Skip if too short
+        if (finalMessage.length < 2) {
+          this.clearState();
+          return;
+        }
+
+        // Store values before processing (keep state until processing completes)
+        const messageId = this.currentStreamingMessageId;
+        const fullContent = finalMessage;
+        const speakerSnapshot = this.currentSpeaker;
+
+        // BUG FIX: Mark content as being processed to prevent duplicate processing
+        this.contentBeingProcessed = fullContent;
+
+        // Add to conversation history
+        this.conversationHistory.push({ role: 'user', content: fullContent });
+
+        // Notify callback with final message
+        this.onMessageCallback?.({
+          role: 'user',
+          content: fullContent,
+          timestamp: new Date().toISOString(),
+          isInterim: false,
+          messageId: messageId || undefined,
+          speaker: speakerSnapshot,
+        });
+
+        try {
+          // Process user message (triggers LLM + TTS)
+          await this.processUserMessage(fullContent);
+
+          // BUG-007 FIX: Only clear state AFTER successful processing
+          this.clearState();
+          this.lastProcessedContent = fullContent;
+          this.contentBeingProcessed = null;
+        } catch (error) {
+          // BUG-007 FIX: On error, remove from conversation history and keep state for retry
+          // Simplified: directly check and remove the last element if it matches
+          const lastMsg = this.conversationHistory[this.conversationHistory.length - 1];
+          if (lastMsg && lastMsg.role === 'user' && lastMsg.content === fullContent) {
+            this.conversationHistory.pop();
+          }
+          // Clear the "being processed" flag so it can be retried
+          this.contentBeingProcessed = null;
+
+          devError('[Transcription] Error processing user message, transcript preserved for retry:', error);
+          // Re-throw so the caller knows it failed
+          throw error;
+        }
       }
+    } finally {
+      // Always release the processing lock
+      this.processingLock = false;
     }
   }
 
