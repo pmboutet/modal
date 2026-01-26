@@ -274,6 +274,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const reconnectAttemptsRef = useRef<number>(0);
   // Timestamp of last disconnect to prevent rapid reconnect loops
   const lastUnexpectedDisconnectRef = useRef<number>(0);
+  // Save partials before clearing them on disconnect, to restore after reconnect
+  const savedPartialsRef = useRef<{
+    interimUser: VoiceMessage | null;
+    interimAssistant: VoiceMessage | null;
+  } | null>(null);
   // Maximum consecutive reconnect attempts before giving up
   const MAX_RECONNECT_ATTEMPTS = 3;
   // Minimum delay between reconnect attempts (doubles each attempt)
@@ -1732,8 +1737,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setSemanticTelemetry(null);
       cleanupAudioAnalysis(true); // Fermer l'AudioContext lors de la déconnexion
 
-      // RECONNECT FIX: Clear unpersisted partials - they're lost and will never be finalized
-      // This prevents stale/orphaned interim messages from showing after reconnect
+      // RECONNECT FIX: Save partials before clearing them, so we can restore after reconnect
+      // This preserves user's speech that was in progress when connection dropped
+      savedPartialsRef.current = {
+        interimUser: pendingInterimUserRef.current,
+        interimAssistant: pendingInterimAssistantRef.current,
+      };
+
+      // Clear unpersisted partials from UI - will be restored after successful reconnect
       setInterimUser(null);
       setInterimAssistant(null);
       setPendingFinalUser(null);
@@ -2426,6 +2437,23 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Call connect - it will rebuild conversation history from messages prop
         await connect();
         devLog('[PremiumVoiceInterface] ✅ Auto-reconnect succeeded');
+
+        // Restore saved partials after successful reconnect
+        if (savedPartialsRef.current) {
+          const { interimUser: savedUser, interimAssistant: savedAssistant } = savedPartialsRef.current;
+          if (savedUser) {
+            devLog('[PremiumVoiceInterface] 🔄 Restoring interimUser after reconnect:', savedUser.content?.substring(0, 50));
+            pendingInterimUserRef.current = savedUser;
+            setInterimUser(savedUser);
+          }
+          if (savedAssistant) {
+            devLog('[PremiumVoiceInterface] 🔄 Restoring interimAssistant after reconnect:', savedAssistant.content?.substring(0, 50));
+            pendingInterimAssistantRef.current = savedAssistant;
+            setInterimAssistant(savedAssistant);
+          }
+          // Clear saved partials after restoring
+          savedPartialsRef.current = null;
+        }
       } catch (err) {
         devError('[PremiumVoiceInterface] ❌ Auto-reconnect failed:', err);
         setIsReconnecting(false);
