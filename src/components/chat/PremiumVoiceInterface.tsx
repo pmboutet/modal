@@ -265,6 +265,20 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // État de détection d'in-app browser (Gmail, Facebook, etc.)
   const [inAppBrowserInfo, setInAppBrowserInfo] = useState<{ isInApp: boolean; appName: string | null } | null>(null);
 
+  // ===== AUTO-RECONNECT STATE =====
+  // Track if we're attempting to auto-reconnect after unexpected disconnect
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  // Flag to trigger auto-reconnect from useEffect (avoids circular deps)
+  const [shouldAutoReconnect, setShouldAutoReconnect] = useState(false);
+  // Track consecutive reconnect failures to implement backoff
+  const reconnectAttemptsRef = useRef<number>(0);
+  // Timestamp of last disconnect to prevent rapid reconnect loops
+  const lastUnexpectedDisconnectRef = useRef<number>(0);
+  // Maximum consecutive reconnect attempts before giving up
+  const MAX_RECONNECT_ATTEMPTS = 3;
+  // Minimum delay between reconnect attempts (doubles each attempt)
+  const BASE_RECONNECT_DELAY_MS = 2000;
+
   // ===== ÉTATS D'ÉDITION DE MESSAGE =====
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -1682,11 +1696,23 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
 
     setIsConnected(connected);
+
+    // On successful connection, reset reconnect attempts
+    if (connected) {
+      if (reconnectAttemptsRef.current > 0) {
+        devLog('[PremiumVoiceInterface] ✅ Reconnection successful after', reconnectAttemptsRef.current, 'attempts');
+      }
+      reconnectAttemptsRef.current = 0;
+      setIsReconnecting(false);
+      return;
+    }
+
     // Si déconnecté de façon inattendue, nettoyer toutes les ressources
     // MAIS seulement si on n'est pas déjà en train de se déconnecter
     // (pour éviter le double nettoyage)
     if (!connected && agentRef.current && !isDisconnectingRef.current) {
       debugLog('connectionChange_cleanup', { reason: 'unexpected_disconnect' });
+      lastUnexpectedDisconnectRef.current = Date.now();
 
       // CRASH FIX: On unexpected disconnect (e.g., WebSocket 1006), we must properly
       // call agent.disconnect() to reset the state machine. Without this, the state
@@ -1705,6 +1731,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setIsSpeaking(false);
       setSemanticTelemetry(null);
       cleanupAudioAnalysis(true); // Fermer l'AudioContext lors de la déconnexion
+
+      // AUTO-RECONNECT: Trigger reconnect if we haven't exceeded max attempts
+      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        devLog('[PremiumVoiceInterface] 🔄 Scheduling auto-reconnect, attempt', reconnectAttemptsRef.current + 1, 'of', MAX_RECONNECT_ATTEMPTS);
+        setShouldAutoReconnect(true);
+      } else {
+        devWarn('[PremiumVoiceInterface] ⚠️ Max reconnect attempts reached, not auto-reconnecting');
+        setIsReconnecting(false);
+      }
     }
   }, [cleanupAudioAnalysis]);
 
@@ -2261,6 +2296,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       return;
     }
 
+    // Reset auto-reconnect state on intentional disconnect
+    reconnectAttemptsRef.current = 0;
+    setIsReconnecting(false);
+    setShouldAutoReconnect(false);
+
     isDisconnectingRef.current = true;
     devLog('[PremiumVoiceInterface] 🔌 Disconnecting completely...');
     
@@ -2343,6 +2383,43 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       isDisconnectingRef.current = false;
     }
   }, [cleanupAudioAnalysis, releaseWakeLock]);
+
+  // ===== AUTO-RECONNECT EFFECT =====
+  // Triggered by shouldAutoReconnect flag from handleConnectionChange
+  useEffect(() => {
+    if (!shouldAutoReconnect) return;
+
+    // Reset the flag immediately
+    setShouldAutoReconnect(false);
+
+    // Calculate delay with exponential backoff
+    const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttemptsRef.current);
+    reconnectAttemptsRef.current += 1;
+
+    devLog('[PremiumVoiceInterface] 🔄 Auto-reconnect scheduled in', delay, 'ms (attempt', reconnectAttemptsRef.current, ')');
+    setIsReconnecting(true);
+
+    const timeoutId = setTimeout(async () => {
+      devLog('[PremiumVoiceInterface] 🔄 Attempting auto-reconnect...');
+
+      try {
+        // Clear the old agent reference to allow fresh connection
+        agentRef.current = null;
+
+        // Call connect - it will rebuild conversation history from messages prop
+        await connect();
+        devLog('[PremiumVoiceInterface] ✅ Auto-reconnect succeeded');
+      } catch (err) {
+        devError('[PremiumVoiceInterface] ❌ Auto-reconnect failed:', err);
+        setIsReconnecting(false);
+
+        // If we still have attempts left, the next failure in handleConnectionChange
+        // will trigger another reconnect attempt
+      }
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [shouldAutoReconnect, connect]);
 
   // ===== HANDLERS D'ÉDITION DE MESSAGE =====
   const handleStartEdit = useCallback((messageId: string, currentContent: string) => {
@@ -3817,10 +3894,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             <div className="bg-white/10 backdrop-blur-md rounded-2xl px-4 py-3 border border-white/10">
               {/* Mic state label */}
               <p className="text-white/60 text-xs mb-1">
-                {isConnecting && "Connexion..."}
+                {isReconnecting && "Reconnexion..."}
+                {isConnecting && !isReconnecting && "Connexion..."}
                 {isConnected && !isMuted && "Ecoute en cours..."}
                 {isMuted && "Micro en pause"}
-                {!isConnected && !isConnecting && !isMuted && "Non connecte"}
+                {!isConnected && !isConnecting && !isReconnecting && !isMuted && "Non connecte"}
               </p>
 
               {/* Partial transcript or placeholder */}
