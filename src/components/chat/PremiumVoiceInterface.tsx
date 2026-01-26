@@ -320,6 +320,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Track steps being completed to prevent duplicate API calls
   const completingStepsRef = useRef<Set<string>>(new Set());
 
+  // ===== INTERIM MESSAGE THROTTLING =====
+  // PERF FIX: Throttle interim updates to 150ms to reduce re-renders (was ~50ms)
+  // Store latest content in refs, only update state periodically
+  const INTERIM_THROTTLE_MS = 150;
+  const lastInterimUserUpdateRef = useRef<number>(0);
+  const lastInterimAssistantUpdateRef = useRef<number>(0);
+  const pendingInterimUserRef = useRef<VoiceMessage | null>(null);
+  const pendingInterimAssistantRef = useRef<VoiceMessage | null>(null);
+  const interimUserThrottleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const interimAssistantThrottleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // ===== WAKE LOCK & VISIBILITY =====
   // Wake Lock to prevent screen from sleeping during voice sessions
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -1340,7 +1351,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
 
     // Cas INTERIM → mise à jour du buffer local uniquement
+    // PERF FIX: Throttle interim updates to reduce re-renders from ~20/sec to ~7/sec
     if (isInterim) {
+      const now = Date.now();
+
       if (role === 'assistant') {
         // Track when streaming started (for intelligent nudge)
         if (lastAssistantStreamTimestampRef.current === 0) {
@@ -1350,27 +1364,73 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // Agent is now streaming - no longer "thinking"
         setIsAgentThinking(false);
 
-        setInterimAssistant(prev => ({
-          ...(prev || baseMessage),
-          content: mergeStreamingContent(prev?.content, baseMessage.content),
+        // Build the new interim message (always merge content)
+        const newInterimAssistant: VoiceMessage = {
+          ...(pendingInterimAssistantRef.current || baseMessage),
+          content: mergeStreamingContent(pendingInterimAssistantRef.current?.content, baseMessage.content),
           isInterim: true,
-        }));
+        };
+        pendingInterimAssistantRef.current = newInterimAssistant;
+
+        // Throttle: only update state if enough time has passed
+        const timeSinceLastUpdate = now - lastInterimAssistantUpdateRef.current;
+        if (timeSinceLastUpdate >= INTERIM_THROTTLE_MS) {
+          // Enough time passed - update immediately
+          lastInterimAssistantUpdateRef.current = now;
+          setInterimAssistant(newInterimAssistant);
+        } else if (!interimAssistantThrottleTimerRef.current) {
+          // Schedule an update for later
+          interimAssistantThrottleTimerRef.current = setTimeout(() => {
+            interimAssistantThrottleTimerRef.current = null;
+            lastInterimAssistantUpdateRef.current = Date.now();
+            if (pendingInterimAssistantRef.current) {
+              setInterimAssistant(pendingInterimAssistantRef.current);
+            }
+          }, INTERIM_THROTTLE_MS - timeSinceLastUpdate);
+        }
+        // Else: timer already scheduled, it will pick up the latest content
       } else {
         // Pour les messages user, le SegmentStore a déjà fait la déduplication
         // par timestamps - on remplace simplement le contenu sans fusionner
-        setInterimUser(prev => ({
-          ...(prev || baseMessage),
+        const newInterimUser: VoiceMessage = {
+          ...(pendingInterimUserRef.current || baseMessage),
           content: baseMessage.content,
           isInterim: true,
-        }));
+        };
+        pendingInterimUserRef.current = newInterimUser;
+
+        // Throttle: only update state if enough time has passed
+        const timeSinceLastUpdate = now - lastInterimUserUpdateRef.current;
+        if (timeSinceLastUpdate >= INTERIM_THROTTLE_MS) {
+          // Enough time passed - update immediately
+          lastInterimUserUpdateRef.current = now;
+          setInterimUser(newInterimUser);
+        } else if (!interimUserThrottleTimerRef.current) {
+          // Schedule an update for later
+          interimUserThrottleTimerRef.current = setTimeout(() => {
+            interimUserThrottleTimerRef.current = null;
+            lastInterimUserUpdateRef.current = Date.now();
+            if (pendingInterimUserRef.current) {
+              setInterimUser(pendingInterimUserRef.current);
+            }
+          }, INTERIM_THROTTLE_MS - timeSinceLastUpdate);
+        }
+        // Else: timer already scheduled, it will pick up the latest content
+
         // Track when we received this partial (for nudge mechanism)
-        lastUserPartialTimestampRef.current = Date.now();
+        lastUserPartialTimestampRef.current = now;
       }
       return;
     }
 
     // Cas FINAL → flush des buffers locaux
     if (role === 'assistant') {
+      // PERF FIX: Clear throttle timer and pending ref on final message
+      if (interimAssistantThrottleTimerRef.current) {
+        clearTimeout(interimAssistantThrottleTimerRef.current);
+        interimAssistantThrottleTimerRef.current = null;
+      }
+      pendingInterimAssistantRef.current = null;
       setInterimAssistant(null);
 
       // Agent responded - clear awaiting response state and reset streaming tracker
@@ -1478,6 +1538,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     } else {
       // Clear interim and store as pending final to avoid "blanc" gap
       // The message will stay visible until it appears in props.messages
+      // PERF FIX: Clear throttle timer and pending ref on final message
+      if (interimUserThrottleTimerRef.current) {
+        clearTimeout(interimUserThrottleTimerRef.current);
+        interimUserThrottleTimerRef.current = null;
+      }
+      pendingInterimUserRef.current = null;
       setInterimUser(null);
       // Generate ID once and reuse for both pendingFinalUser and onMessage
       // to ensure proper deduplication (fixes visual jump bug)
@@ -2183,6 +2249,17 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setError(null);
 
       // Étape 6: Réinitialiser les buffers de streaming
+      // PERF FIX: Clear throttle timers on disconnect
+      if (interimUserThrottleTimerRef.current) {
+        clearTimeout(interimUserThrottleTimerRef.current);
+        interimUserThrottleTimerRef.current = null;
+      }
+      if (interimAssistantThrottleTimerRef.current) {
+        clearTimeout(interimAssistantThrottleTimerRef.current);
+        interimAssistantThrottleTimerRef.current = null;
+      }
+      pendingInterimUserRef.current = null;
+      pendingInterimAssistantRef.current = null;
       setInterimUser(null);
       setInterimAssistant(null);
       setPendingFinalUser(null);
@@ -2566,6 +2643,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       }
       if (filteredSpeakerTimeoutRef.current) {
         clearTimeout(filteredSpeakerTimeoutRef.current);
+      }
+      // PERF FIX: Clear throttle timers on unmount
+      if (interimUserThrottleTimerRef.current) {
+        clearTimeout(interimUserThrottleTimerRef.current);
+      }
+      if (interimAssistantThrottleTimerRef.current) {
+        clearTimeout(interimAssistantThrottleTimerRef.current);
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
