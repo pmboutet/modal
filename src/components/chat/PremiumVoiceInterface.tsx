@@ -1724,6 +1724,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       // machine keeps old conversation history and state, causing inconsistencies
       // on reconnect that can lead to loops and crashes.
       const agent = agentRef.current;
+      // IMPORTANT: Clear agentRef BEFORE calling disconnect to prevent double-handling
+      // agent.disconnect() itself emits connectionChange(false) which would re-trigger this block
+      agentRef.current = null;
       if (agent && agent instanceof SpeechmaticsVoiceAgent) {
         devLog('[PremiumVoiceInterface] 🔴 Unexpected disconnect - calling agent.disconnect() for proper cleanup');
         // Call disconnect in background - don't await to avoid blocking
