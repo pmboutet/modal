@@ -7,9 +7,10 @@ import {
   ensureClientMembership,
   ensureProjectMembership,
 } from "@/app/api/admin/profiles/helpers";
+import { getAskSessionByKey } from "@/lib/asks";
 import type { ApiResponse } from "@/types";
 import { randomBytes } from "crypto";
-import { sanitizeText, sanitizeOptional } from "@/lib/sanitize";
+import { sanitizeOptional } from "@/lib/sanitize";
 
 // Schema for email-only step
 const emailOnlySchema = z.object({
@@ -25,6 +26,13 @@ interface RegisterResponse {
   status: "email_sent" | "needs_completion" | "not_invited";
   missingFields?: string[];
   message?: string;
+}
+
+interface AskSessionRow {
+  id: string;
+  ask_key: string;
+  allow_auto_registration: boolean | null;
+  project_id: string | null;
 }
 
 /**
@@ -43,12 +51,12 @@ export async function POST(request: NextRequest) {
 
     const supabase = getAdminSupabaseClient();
 
-    // 1. Fetch ASK session by key
-    const { data: askSession, error: askError } = await supabase
-      .from("ask_sessions")
-      .select("id, ask_key, allow_auto_registration, project_id, projects(client_id)")
-      .eq("ask_key", payload.askKey)
-      .maybeSingle();
+    // 1. Fetch ASK session by key using the same RPC as public-info (bypasses RLS reliably)
+    const { row: askSession, error: askError } = await getAskSessionByKey<AskSessionRow>(
+      supabase,
+      payload.askKey,
+      "id, ask_key, allow_auto_registration, project_id"
+    );
 
     if (askError) {
       console.error("[register] Error fetching ASK session:", askError);
@@ -64,9 +72,17 @@ export async function POST(request: NextRequest) {
 
     const allowAutoRegistration = askSession.allow_auto_registration === true;
     const projectId = askSession.project_id;
-    const projectsData = askSession.projects;
-    const projectRecord = Array.isArray(projectsData) ? projectsData[0] : projectsData;
-    const clientId = (projectRecord as { client_id: string | null } | null)?.client_id;
+
+    // Fetch client_id from project if project_id exists
+    let clientId: string | null = null;
+    if (projectId) {
+      const { data: projectData } = await supabase
+        .from("projects")
+        .select("client_id")
+        .eq("id", projectId)
+        .maybeSingle();
+      clientId = projectData?.client_id ?? null;
+    }
 
     // 2. Check if email exists in profiles
     const { data: existingProfile, error: profileError } = await supabase
@@ -340,7 +356,10 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const message = error instanceof Error ? error.message : "Erreur interne du serveur";
+    // Handle both Error instances and PostgrestError objects (which have a 'message' property but aren't Error instances)
+    const message = (error instanceof Error || (error && typeof error === "object" && "message" in error))
+      ? (error as { message: string }).message
+      : "Erreur interne du serveur";
 
     // Handle duplicate email error
     if (message.includes("existe déjà")) {
