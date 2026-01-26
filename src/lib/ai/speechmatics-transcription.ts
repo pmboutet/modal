@@ -576,6 +576,7 @@ export class TranscriptionManager {
     this.clearState();
     this.lastProcessedContent = null;
     this.contentBeingProcessed = null;
+    this.processingLock = false; // Reset the processing lock on cleanup
     this.lastPartialUpdateTimestamp = 0;
     this.currentSpeaker = undefined;
     this.resetSpeakerFiltering();
