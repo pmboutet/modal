@@ -1732,6 +1732,23 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setSemanticTelemetry(null);
       cleanupAudioAnalysis(true); // Fermer l'AudioContext lors de la déconnexion
 
+      // RECONNECT FIX: Clear unpersisted partials - they're lost and will never be finalized
+      // This prevents stale/orphaned interim messages from showing after reconnect
+      setInterimUser(null);
+      setInterimAssistant(null);
+      setPendingFinalUser(null);
+      pendingInterimUserRef.current = null;
+      pendingInterimAssistantRef.current = null;
+      // Also clear throttle timers
+      if (interimUserThrottleTimerRef.current) {
+        clearTimeout(interimUserThrottleTimerRef.current);
+        interimUserThrottleTimerRef.current = null;
+      }
+      if (interimAssistantThrottleTimerRef.current) {
+        clearTimeout(interimAssistantThrottleTimerRef.current);
+        interimAssistantThrottleTimerRef.current = null;
+      }
+
       // AUTO-RECONNECT: Trigger reconnect if we haven't exceeded max attempts
       if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
         devLog('[PremiumVoiceInterface] 🔄 Scheduling auto-reconnect, attempt', reconnectAttemptsRef.current + 1, 'of', MAX_RECONNECT_ATTEMPTS);
@@ -2958,12 +2975,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
   }, [displayMessages, scrollToBottomProgrammatically]);
 
-  // Auto-scroll when agent thinking indicator or step summary generation appears
+  // Auto-scroll when agent thinking indicator, step summary generation, or reconnection appears
   useEffect(() => {
-    if (isAgentThinking || isGeneratingStepSummary) {
+    if (isAgentThinking || isGeneratingStepSummary || isReconnecting) {
       scrollToBottomProgrammatically();
     }
-  }, [isAgentThinking, isGeneratingStepSummary, scrollToBottomProgrammatically]);
+  }, [isAgentThinking, isGeneratingStepSummary, isReconnecting, scrollToBottomProgrammatically]);
 
   /**
    * NEW PURE REACT TEXT COMPONENT
@@ -3619,6 +3636,27 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                 </div>
                 <span className="text-sm text-white/70">
                   L&apos;agent réfléchit...
+                </span>
+              </div>
+            </motion.div>
+          )}
+          {/* Reconnection indicator - shown when auto-reconnecting after unexpected disconnect */}
+          {isReconnecting && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-start gap-3 py-2 px-4"
+            >
+              <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-900/20 backdrop-blur-sm px-4 py-2">
+                {/* Animated reconnection spinner */}
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="h-4 w-4 border-2 border-amber-400/30 border-t-amber-400 rounded-full"
+                />
+                <span className="text-sm text-amber-300">
+                  Reconnexion en cours...
                 </span>
               </div>
             </motion.div>
