@@ -2186,7 +2186,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         // If no messages exist, generate and speak initial welcome message (DRY with text mode)
         // Also speak existing initial message if it's the only one (created by text mode but never spoken)
         // Skip if isInitializing=true because the /init endpoint will handle initial message generation
-        if (!consultantMode && askKey && !isInitializing) {
+        // BUG-044 FIX: Skip on reconnect (reconnectAttemptsRef.current > 0) to prevent duplicate initial messages
+        // When WebSocket disconnects unexpectedly (code 1006) and auto-reconnects, messages prop may be stale
+        // causing this check to pass again and generate another "Bonjour" greeting
+        if (!consultantMode && askKey && !isInitializing && reconnectAttemptsRef.current === 0) {
           if (messages.length === 0) {
             // No messages at all - generate and speak initial message via /respond endpoint
             devLog('[PremiumVoiceInterface] 🎤 No messages - generating initial welcome message');
