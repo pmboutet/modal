@@ -42,6 +42,43 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 
+// ===== DEBUG LOGGING (survit au reload) =====
+const DEBUG_LOG_KEY = 'voice_debug_logs';
+const MAX_DEBUG_LOGS = 50;
+
+function debugLog(event: string, data?: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  try {
+    const logs = JSON.parse(localStorage.getItem(DEBUG_LOG_KEY) || '[]');
+    logs.push({
+      time: new Date().toISOString(),
+      event,
+      data: data || {},
+    });
+    // Keep only last N logs
+    while (logs.length > MAX_DEBUG_LOGS) logs.shift();
+    localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(logs));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+// Call this after reload to see what happened
+function getDebugLogs(): Array<{ time: string; event: string; data: Record<string, unknown> }> {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem(DEBUG_LOG_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+// Expose globally for easy console access
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).getVoiceDebugLogs = getDebugLogs;
+  (window as unknown as Record<string, unknown>).clearVoiceDebugLogs = () => localStorage.removeItem(DEBUG_LOG_KEY);
+}
+
 /**
  * Props du composant PremiumVoiceInterface
  * 
@@ -389,6 +426,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // ===== SCROLL HIDE/SHOW FOR MOBILE HEADER =====
   // Track last scroll position for delta calculation
   const lastScrollTopRef = useRef(0);
+  // Track programmatic scrolls to avoid triggering header hide/show
+  const isProgrammaticScrollRef = useRef(false);
 
   // Hook for hiding/showing header on scroll
   const { isHidden: isHeaderHidden, handleScroll: handleScrollHideShow } = useScrollHideShow({
@@ -399,8 +438,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   });
 
   // Handle messages scroll for header hide/show
+  // Only notify hook for user-initiated scrolls, not programmatic ones
   const handleMessagesScroll = useCallback(() => {
     if (!messagesContainerRef.current) return;
+
+    // Skip notifying hook for programmatic scrolls
+    if (isProgrammaticScrollRef.current) return;
 
     const currentScrollTop = messagesContainerRef.current.scrollTop;
     const scrollDelta = currentScrollTop - lastScrollTopRef.current;
@@ -2642,17 +2685,29 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Helper to scroll programmatically without triggering header hide/show
+  const scrollToBottomProgrammatically = useCallback(() => {
+    if (!messagesContainerRef.current) return;
+    isProgrammaticScrollRef.current = true;
+    // Use scrollTop instead of scrollIntoView to avoid iOS Safari viewport lifting bug
+    messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    // Reset flag after a short delay
+    setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+      // Update lastScrollTopRef to avoid delta jump on next user scroll
+      if (messagesContainerRef.current) {
+        lastScrollTopRef.current = messagesContainerRef.current.scrollTop;
+      }
+    }, 100);
+  }, []);
+
   // Scroll to bottom when component mounts (voice mode activated)
   useEffect(() => {
     // Small delay to ensure DOM is ready
     setTimeout(() => {
-      // Use scrollTop instead of scrollIntoView to avoid iOS Safari viewport lifting bug
-      // scrollIntoView can affect the window scroll position when inside a fixed container
-      if (messagesContainerRef.current) {
-        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-      }
+      scrollToBottomProgrammatically();
     }, 100);
-  }, []);
+  }, [scrollToBottomProgrammatically]);
 
   /**
    * Affichage des messages : timeline finale + bulle de streaming
@@ -2766,35 +2821,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     previousLengthRef.current = displayMessages.length;
     previousLastContentRef.current = lastContent;
 
-    if ((hasNewMessages || lastMessageChanged) && messagesContainerRef.current) {
-      // Use scrollTop directly instead of scrollIntoView to avoid iOS Safari viewport lifting bug
-      // scrollIntoView can affect the window scroll position when inside a fixed container
-      const previousScrollTop = messagesContainerRef.current.scrollTop;
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-
-      // Get the new scroll position and notify hide/show hook
-      // Use requestAnimationFrame to ensure the scroll has completed
-      requestAnimationFrame(() => {
-        if (messagesContainerRef.current) {
-          const newScrollTop = messagesContainerRef.current.scrollTop;
-          // Programmatic scroll doesn't trigger DOM scroll events, so manually notify
-          // the hide/show hook that we scrolled down (positive delta = hide header)
-          if (newScrollTop > previousScrollTop) {
-            handleScrollHideShow(newScrollTop, newScrollTop - previousScrollTop);
-            // Update lastScrollTopRef so manual scrolls calculate correct delta
-            lastScrollTopRef.current = newScrollTop;
-          }
-        }
-      });
+    if (hasNewMessages || lastMessageChanged) {
+      // Use helper function to scroll without triggering header hide/show
+      scrollToBottomProgrammatically();
     }
-  }, [displayMessages, handleScrollHideShow]);
+  }, [displayMessages, scrollToBottomProgrammatically]);
 
   // Auto-scroll when agent thinking indicator or step summary generation appears
   useEffect(() => {
-    if ((isAgentThinking || isGeneratingStepSummary) && messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    if (isAgentThinking || isGeneratingStepSummary) {
+      scrollToBottomProgrammatically();
     }
-  }, [isAgentThinking, isGeneratingStepSummary]);
+  }, [isAgentThinking, isGeneratingStepSummary, scrollToBottomProgrammatically]);
 
   /**
    * NEW PURE REACT TEXT COMPONENT

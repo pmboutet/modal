@@ -98,12 +98,18 @@ export function ChatComponent({
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const previousVoiceModeRef = useRef(false);
+  // Track programmatic scrolls to avoid triggering header hide/show
+  const isProgrammaticScrollRef = useRef(false);
   // BUG-042: Track if close button was clicked (window.close() doesn't work for direct navigation)
   const [closeAttempted, setCloseAttempted] = useState(false);
 
   // Handle scroll events for mobile header hide/show
+  // Only notify parent for user-initiated scrolls, not programmatic ones
   const handleMessagesScroll = useCallback(() => {
     if (!onChatScroll || !messagesContainerRef.current) return;
+
+    // Skip notifying parent for programmatic scrolls
+    if (isProgrammaticScrollRef.current) return;
 
     const currentScrollTop = messagesContainerRef.current.scrollTop;
     const scrollDelta = currentScrollTop - lastScrollTopRef.current;
@@ -133,28 +139,43 @@ export function ChatComponent({
     ? conversationPlan.plan_data.steps.every(step => step.status === 'completed')
     : false;
 
+  // Helper to scroll programmatically without triggering header hide/show
+  const scrollToBottomProgrammatically = useCallback((behavior: ScrollBehavior = "smooth") => {
+    isProgrammaticScrollRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior });
+    // Reset flag after scroll animation completes (smooth scroll takes ~300-500ms)
+    const resetDelay = behavior === "smooth" ? 500 : 100;
+    setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+      // Update lastScrollTopRef to current position to avoid delta jump on next user scroll
+      if (messagesContainerRef.current) {
+        lastScrollTopRef.current = messagesContainerRef.current.scrollTop;
+      }
+    }, resetDelay);
+  }, []);
+
   // Auto-scroll to bottom when new messages arrive (smooth for normal chat)
   useEffect(() => {
     if (!isVoiceMode) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottomProgrammatically("smooth");
     }
-  }, [messages, isVoiceMode]);
+  }, [messages, isVoiceMode, scrollToBottomProgrammatically]);
 
   // Auto-scroll when agent typing indicator or initialization indicator appears
   useEffect(() => {
     if (!isVoiceMode && (showAgentTyping || isInitializing)) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottomProgrammatically("smooth");
     }
-  }, [showAgentTyping, isInitializing, isVoiceMode]);
+  }, [showAgentTyping, isInitializing, isVoiceMode, scrollToBottomProgrammatically]);
 
   // Scroll to bottom instantly when entering voice mode (no animation)
   useEffect(() => {
     if (isVoiceMode && !previousVoiceModeRef.current) {
       // Just entered voice mode - scroll instantly to bottom
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      scrollToBottomProgrammatically("auto");
     }
     previousVoiceModeRef.current = isVoiceMode;
-  }, [isVoiceMode]);
+  }, [isVoiceMode, scrollToBottomProgrammatically]);
 
   useEffect(() => {
     return () => {
