@@ -119,17 +119,47 @@ async function loadTokenDataWithAdmin(token: string): Promise<TokenDataBundle | 
       return null;
     }
 
+    // BUG FIX: For individual_parallel mode, we need to filter messages by thread
+    // to prevent context pollution between participants
+    let threadId: string | null = null;
+    if (askRow.conversation_mode === 'individual_parallel' && participantInfoRow.user_id) {
+      const { data: threadData } = await admin
+        .from("conversation_threads")
+        .select("id")
+        .eq("ask_session_id", askRow.ask_session_id)
+        .eq("user_id", participantInfoRow.user_id)
+        .maybeSingle();
+      threadId = threadData?.id ?? null;
+    }
+
     const [participantsResult, messagesResult, insightsResult, projectResult, challengeResult] = await Promise.all([
       admin
         .from("ask_participants")
         .select("id, user_id, participant_name, participant_email, role, is_spokesperson, joined_at")
         .eq("ask_session_id", askRow.ask_session_id)
         .order("joined_at", { ascending: true }),
-      admin
-        .from("messages")
-        .select("id, content, message_type, sender_type, user_id, created_at, metadata")
-        .eq("ask_session_id", askRow.ask_session_id)
-        .order("created_at", { ascending: true }),
+      // BUG FIX: Filter messages by thread in individual_parallel mode
+      (async () => {
+        if (askRow.conversation_mode === 'individual_parallel') {
+          if (!threadId) {
+            // No thread yet for this user - return empty to prevent context pollution
+            return { data: [], error: null };
+          }
+          // Filter to only this user's thread
+          return admin
+            .from("messages")
+            .select("id, content, message_type, sender_type, user_id, created_at, metadata")
+            .eq("ask_session_id", askRow.ask_session_id)
+            .eq("conversation_thread_id", threadId)
+            .order("created_at", { ascending: true });
+        }
+        // For other modes (shared, consultant), return all messages
+        return admin
+          .from("messages")
+          .select("id, content, message_type, sender_type, user_id, created_at, metadata")
+          .eq("ask_session_id", askRow.ask_session_id)
+          .order("created_at", { ascending: true });
+      })(),
       admin
         .from("insights")
         .select("id, ask_session_id, challenge_id, content, summary, status, category, insight_type_id, created_at, updated_at, insight_types(name)")
