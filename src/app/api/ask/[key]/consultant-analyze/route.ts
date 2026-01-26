@@ -523,12 +523,14 @@ export async function POST(
 
     // Fetch elapsed times using centralized helper (DRY - same as stream route)
     // IMPORTANT: Pass participantRows to use fallback when profileId doesn't match
+    // BUG FIX: Pass adminClient to bypass RLS for step timer reading
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
       supabase,
       askSessionId: askRow.id,
       profileId: currentUserId,
       conversationPlan,
       participantRows: participantRows ?? [],
+      adminClient: getAdminSupabaseClient(),
     });
 
     // Build variables for the consultant helper agent

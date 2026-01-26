@@ -1757,12 +1757,15 @@ export async function POST(
     const insightAuthorFallbackId: string | null = currentUserId;
 
     // Fetch elapsed times using centralized helper (DRY)
+    // BUG FIX: Pass adminClient to bypass RLS for step timer reading
+    // Without this, participants can't read step elapsed_active_seconds
     const { elapsedActiveSeconds, stepElapsedActiveSeconds } = await fetchElapsedTime({
       supabase,
       askSessionId: askRow.id,
       profileId: currentUserId,
       conversationPlan,
       participantRows: participantRows ?? [],
+      adminClient: getAdminSupabaseClient(),
     });
 
     if (detectInsightsOnly) {

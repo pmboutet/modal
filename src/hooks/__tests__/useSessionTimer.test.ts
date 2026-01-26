@@ -434,10 +434,10 @@ describe('useSessionTimer', () => {
       expect(stored).toBe('5');
     });
 
-    it('should load from localStorage after server fetch when askKey is provided', async () => {
+    it('should trust server value over localStorage when askKey is provided', async () => {
       localStorage.setItem('session_timer_test-ask-456', '120');
 
-      // Server returns lower value than localStorage
+      // Server returns lower value than localStorage - server is the source of truth
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -459,9 +459,9 @@ describe('useSessionTimer', () => {
         await Promise.resolve();
       });
 
-      // After server fetch, uses max of localStorage (120) and server (100)
+      // After server fetch, trusts server value (100) even if localStorage is higher (120)
       expect(result.current.isLoading).toBe(false);
-      expect(result.current.elapsedSeconds).toBe(120);
+      expect(result.current.elapsedSeconds).toBe(100);
     });
 
     it('should use max of localStorage and initialElapsedSeconds', () => {
@@ -703,7 +703,7 @@ describe('useSessionTimer', () => {
       );
     });
 
-    it('should use max of localStorage and server value', async () => {
+    it('should trust server value as source of truth', async () => {
       localStorage.setItem('session_timer_test-max', '50');
 
       mockFetch.mockResolvedValueOnce({
@@ -727,7 +727,7 @@ describe('useSessionTimer', () => {
         await Promise.resolve();
       });
 
-      // After server fetch, should use max of localStorage (50) and server (100) = 100
+      // After server fetch, trusts server value (100), ignoring localStorage (50)
       expect(result.current.isLoading).toBe(false);
       expect(result.current.elapsedSeconds).toBe(100);
     });

@@ -19,6 +19,7 @@ export interface ConversationPlanStep {
   created_at: string;
   activated_at: string | null; // When status changed to 'active'
   completed_at: string | null; // When status changed to 'completed'
+  elapsed_active_seconds: number; // Active time spent on this step (tracked by UI timer)
   /**
    * Dynamic subtopics discovered during conversation
    * @see DiscoveredSubtopic in conversation-signals.ts for the structure

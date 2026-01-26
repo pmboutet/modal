@@ -792,11 +792,10 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
             setElapsedSeconds(serverData.elapsedActiveSeconds);
             setStepElapsedSeconds(0);
           } else {
-            // No reset - use max of localStorage and server (localStorage may have more recent ticks)
-            const localValue = loadFromLocalStorage(askKey);
-            const maxValue = Math.max(localValue, serverData.elapsedActiveSeconds);
-            setElapsedSeconds(maxValue);
-            saveToLocalStorage(askKey, maxValue);
+            // Trust server value as the source of truth for initial load
+            // This ensures consistency when user opens a new tab/browser
+            setElapsedSeconds(serverData.elapsedActiveSeconds);
+            saveToLocalStorage(askKey, serverData.elapsedActiveSeconds);
 
             // Save the server's reset timestamp if we don't have one locally
             if (serverResetAt && !localResetAt) {
@@ -808,18 +807,15 @@ export function useSessionTimer(config: SessionTimerConfig = {}): SessionTimerSt
             }
 
             // Update step elapsed time if server returned it and matches current step
+            // Trust server value as the source of truth
             if (
               typeof serverData.stepElapsedSeconds === 'number' &&
               serverData.currentStepId &&
               serverData.currentStepId === currentStepIdRef.current
             ) {
-              const localStepValue = currentStepIdRef.current
-                ? loadStepFromLocalStorage(askKey, currentStepIdRef.current)
-                : 0;
-              const maxStepValue = Math.max(localStepValue, serverData.stepElapsedSeconds);
-              setStepElapsedSeconds(maxStepValue);
+              setStepElapsedSeconds(serverData.stepElapsedSeconds);
               if (currentStepIdRef.current) {
-                saveStepToLocalStorage(askKey, currentStepIdRef.current, maxStepValue);
+                saveStepToLocalStorage(askKey, currentStepIdRef.current, serverData.stepElapsedSeconds);
               }
             }
           }

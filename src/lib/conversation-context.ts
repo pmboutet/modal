@@ -1085,44 +1085,43 @@ export async function fetchElapsedTime(options: FetchElapsedTimeOptions): Promis
       const currentStep = planWithSteps.steps.find(
         (s) => s.step_identifier === conversationPlan.current_step_id
       );
-      console.log('[fetchElapsedTime] Found step:', !!currentStep, '| step.id:', currentStep?.id ?? 'N/A');
-      if (currentStep?.id) {
-        const dataClient = adminClient ?? supabase;
-        const { data: stepTimer, error: stepError } = await dataClient
-          .from('ask_conversation_plan_steps')
-          .select('elapsed_active_seconds')
-          .eq('id', currentStep.id)
-          .maybeSingle();
+      console.log('[fetchElapsedTime] Found step:', !!currentStep, '| step.id:', currentStep?.id ?? 'N/A', '| elapsed_active_seconds:', currentStep?.elapsed_active_seconds ?? 'N/A');
 
-        console.log('[fetchElapsedTime] DB result:', stepTimer, '| error:', stepError?.message);
-        stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
+      if (currentStep) {
+        // Use elapsed_active_seconds from the step object (already loaded from DB via RPC)
+        // This avoids an extra DB query and RLS permission issues
+        stepElapsedActiveSeconds = currentStep.elapsed_active_seconds ?? 0;
       }
     } else {
       // Fallback: No steps array, but we have current_step_id (step_identifier)
-      // We need to find the plan_id first, then query by step_identifier
+      // We need to query the DB to get elapsed_active_seconds
       // Check if current_step_id looks like a UUID
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationPlan.current_step_id);
       const dataClient = adminClient ?? supabase;
 
+      console.log('[fetchElapsedTime] Fallback path: isUuid:', isUuid);
+
       if (isUuid) {
         // current_step_id is a UUID - query directly
-        const { data: stepTimer } = await dataClient
+        const { data: stepTimer, error: stepError } = await dataClient
           .from('ask_conversation_plan_steps')
           .select('elapsed_active_seconds')
           .eq('id', conversationPlan.current_step_id)
           .maybeSingle();
+        console.log('[fetchElapsedTime] Fallback UUID query result:', stepTimer, '| error:', stepError?.message);
         stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
       } else {
         // current_step_id is a step_identifier - need plan_id to query
         // The plan should have an id we can use
         const planId = 'id' in conversationPlan ? (conversationPlan as { id: string }).id : null;
         if (planId) {
-          const { data: stepTimer } = await dataClient
+          const { data: stepTimer, error: stepError } = await dataClient
             .from('ask_conversation_plan_steps')
             .select('elapsed_active_seconds')
             .eq('plan_id', planId)
             .eq('step_identifier', conversationPlan.current_step_id)
             .maybeSingle();
+          console.log('[fetchElapsedTime] Fallback step_identifier query result:', stepTimer, '| error:', stepError?.message);
           stepElapsedActiveSeconds = stepTimer?.elapsed_active_seconds ?? 0;
         }
       }
