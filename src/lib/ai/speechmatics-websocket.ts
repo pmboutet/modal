@@ -187,6 +187,7 @@ export class SpeechmaticsWebSocket {
         const ws = new WebSocket(wsUrl);
         const currentWs = ws;
         this.ws = ws;
+        const startTime = Date.now(); // Track session start for crash diagnostics
 
         ws.onopen = () => {
           clearTimeout(timeout);
@@ -431,15 +432,73 @@ export class SpeechmaticsWebSocket {
               return;
             }
             
+            // Gather crash context for debugging
+            const crashContext = {
+              // WebSocket info
+              closeCode: event.code,
+              closeReason: event.reason || 'none',
+              wasClean: event.wasClean,
+              // Browser state
+              visibilityState: typeof document !== 'undefined' ? document.visibilityState : 'unknown',
+              isOnline: typeof navigator !== 'undefined' ? navigator.onLine : 'unknown',
+              // Memory info (Chrome only)
+              memoryUsage: typeof performance !== 'undefined' && (performance as any).memory
+                ? {
+                    usedJSHeapSize: Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024) + 'MB',
+                    totalJSHeapSize: Math.round((performance as any).memory.totalJSHeapSize / 1024 / 1024) + 'MB',
+                    jsHeapSizeLimit: Math.round((performance as any).memory.jsHeapSizeLimit / 1024 / 1024) + 'MB',
+                  }
+                : 'not available',
+              // Connection info
+              connectionType: typeof navigator !== 'undefined' && (navigator as any).connection
+                ? {
+                    effectiveType: (navigator as any).connection.effectiveType,
+                    downlink: (navigator as any).connection.downlink,
+                    rtt: (navigator as any).connection.rtt,
+                  }
+                : 'not available',
+              // Session info
+              region,
+              language,
+              sessionDuration: startTime ? Date.now() - startTime : 'unknown',
+              timestamp: new Date().toISOString(),
+            };
+
+            devError('[Speechmatics] 🔴 UNEXPECTED DISCONNECT - Crash context:', crashContext);
+
+            // Determine likely cause based on context
+            let likelyCause = 'unknown';
+            if (crashContext.visibilityState === 'hidden') {
+              likelyCause = 'tab_backgrounded';
+            } else if (crashContext.isOnline === false) {
+              likelyCause = 'network_offline';
+            } else if (event.code === 1006) {
+              likelyCause = 'abnormal_closure_server_or_network';
+            }
+
+            const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''} (likely: ${likelyCause})`);
+
+            // Send to Sentry with full context
+            Sentry.captureException(error, {
+              tags: {
+                component: 'speechmatics-websocket',
+                error_type: 'unexpected_disconnect',
+                close_code: String(event.code),
+                likely_cause: likelyCause,
+                visibility_state: String(crashContext.visibilityState),
+                is_online: String(crashContext.isOnline),
+              },
+              extra: crashContext,
+              level: 'warning',
+            });
+
             if (!resolved) {
               clearTimeout(timeout);
               resolved = true;
-              const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''}`);
               this.safeErrorCallback(error);
               reject(error);
             } else if (event.code !== 1000 && event.code !== 1005) {
               // Only report unexpected closes after connection was established (excluding normal closure codes)
-              const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''}`);
               this.safeErrorCallback(error);
             }
           }
