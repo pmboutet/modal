@@ -1974,32 +1974,35 @@ export default function HomePage() {
   }, [pendingModeSelection, sessionData.isInitializing, sessionData.askKey]);
 
   // Restore saved input mode for returning users (skip mode selection screen)
+  // This runs BEFORE showing mode selection to provide instant redirect after page reload
   useEffect(() => {
     // Only run when:
     // - Session is loaded (has askKey)
     // - Voice config finished loading
     // - No mode selected yet
-    // - Voice mode IS available
-    // - Conversation has already started (has messages)
     if (
       sessionData.askKey &&
       sessionData.ask &&
       !isVoiceConfigLoading &&
-      selectedInputMode === null &&
-      voiceModeConfig?.systemPrompt && // Voice mode is available
-      sessionData.messages.length > 0 // Conversation has started
+      selectedInputMode === null
     ) {
-      // Check localStorage for saved mode
+      // Check localStorage for saved mode - if saved, user already started conversation
       const savedMode = localStorage.getItem(`ask_inputMode_${sessionData.askKey}`);
       if (savedMode === 'voice' || savedMode === 'text') {
-        console.log('[HomePage] Restoring saved input mode:', savedMode);
-        setSelectedInputMode(savedMode);
-        if (savedMode === 'voice') {
-          setIsVoiceModeActive(true);
+        // Validate voice mode is still available if that was the saved choice
+        if (savedMode === 'voice' && !voiceModeConfig?.systemPrompt) {
+          console.log('[HomePage] Saved mode was voice but voice is no longer available, falling back to text');
+          setSelectedInputMode('text');
+        } else {
+          console.log('[HomePage] Restoring saved input mode (skip mode selection):', savedMode);
+          setSelectedInputMode(savedMode);
+          if (savedMode === 'voice') {
+            setIsVoiceModeActive(true);
+          }
         }
       }
     }
-  }, [sessionData.askKey, sessionData.ask, sessionData.messages.length, isVoiceConfigLoading, selectedInputMode, voiceModeConfig?.systemPrompt]);
+  }, [sessionData.askKey, sessionData.ask, isVoiceConfigLoading, selectedInputMode, voiceModeConfig?.systemPrompt]);
 
   // Handle streaming AI response
   const handleStreamingResponse = useCallback(async (latestUserMessageContent?: string): Promise<boolean> => {
