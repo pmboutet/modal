@@ -624,14 +624,16 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
   }, [allChallenges]);
 
   // Collect unique participants from all ASKs for the purge filter dropdown
+  // Only include participants with a user_id (those who actually registered and have conversation threads)
   const allParticipantsForPurge = useMemo(() => {
     if (!boardData?.asks) return [];
-    const participantMap = new Map<string, { id: string; userId: string | null; name: string }>();
+    const participantMap = new Map<string, { id: string; userId: string; name: string }>();
     boardData.asks.forEach(ask => {
       ask.participants.forEach(p => {
-        // Use participant id as key, but we need userId for filtering
-        if (!participantMap.has(p.id)) {
-          participantMap.set(p.id, { id: p.id, userId: p.userId ?? null, name: p.name });
+        // Only include participants with a user_id - those without one never registered
+        // and have no conversation data to delete
+        if (p.userId && !participantMap.has(p.id)) {
+          participantMap.set(p.id, { id: p.id, userId: p.userId, name: p.name });
         }
       });
     });

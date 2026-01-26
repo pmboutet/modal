@@ -1636,6 +1636,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
    * @param error - Erreur à gérer
    */
   const handleError = useCallback((error: Error) => {
+    // DEBUG: Log errors to localStorage
+    debugLog('error', { message: error.message, stack: error.stack?.slice(0, 500) });
     setError(error.message);
     onError(error);
   }, [onError]);
@@ -1652,6 +1654,13 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
    * @param connected - État de connexion (true = connecté, false = déconnecté)
    */
   const handleConnectionChange = useCallback((connected: boolean) => {
+    // DEBUG: Log to localStorage (survives reload)
+    debugLog('connectionChange', {
+      connected,
+      hasAgent: !!agentRef.current,
+      isDisconnecting: isDisconnectingRef.current,
+    });
+
     devLog('[PremiumVoiceInterface] 🔌 handleConnectionChange:', {
       connected,
       hasAgent: !!agentRef.current,
@@ -1662,6 +1671,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // IMPORTANT: Ignorer les callbacks de connexion si l'agent n'existe plus
     // Cela arrive quand l'agent se connecte en arrière-plan après un unmount
     if (connected && !agentRef.current) {
+      debugLog('connectionChange_ignored', { reason: 'agent_null' });
       devLog('[PremiumVoiceInterface] ⚠️ Received connection callback but agent is null - ignoring (likely from unmounted component)');
       return;
     }
@@ -1671,6 +1681,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // MAIS seulement si on n'est pas déjà en train de se déconnecter
     // (pour éviter le double nettoyage)
     if (!connected && agentRef.current && !isDisconnectingRef.current) {
+      debugLog('connectionChange_cleanup', { reason: 'unexpected_disconnect' });
       setIsMicrophoneActive(false);
       setIsSpeaking(false);
       setSemanticTelemetry(null);
@@ -2652,6 +2663,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       };
     }
 
+    // DEBUG: Log mount to localStorage
+    debugLog('component_mounted', { isConnected, hasAgent: !!agentRef.current });
+
     devLog('[PremiumVoiceInterface] 🚀 Component mounted (second mount from StrictMode), auto-connecting...', {
       hasAgent: !!agentRef.current,
       isConnected,
@@ -2663,6 +2677,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
     return () => {
       isMounted = false;
+      // DEBUG: Log unmount to localStorage (CRITICAL - this is what we want to catch)
+      debugLog('component_unmounting', { hadAgent: !!agentRef.current, wasConnected: isConnected });
+
       devLog('[PremiumVoiceInterface] 🧹 Component unmounting, cleaning up all streams...', {
         hadAgent: !!agentRef.current,
         wasConnected: isConnected
@@ -2902,6 +2919,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
 
   return (
     <div className="fixed inset-0 z-[60] overflow-hidden">
+      {/* DEBUG: Invisible button to show logs (tap top-right corner) */}
+      <div
+        className="absolute top-0 right-0 w-16 h-16 z-[200]"
+        onClick={() => {
+          const logs = getDebugLogs();
+          const logText = logs.map(l => `${l.time.slice(11, 19)} ${l.event}: ${JSON.stringify(l.data)}`).join('\n');
+          alert(`Voice Debug Logs (${logs.length}):\n\n${logText || 'No logs yet'}`);
+        }}
+      />
       {/* In-app browser warning overlay */}
       {inAppBrowserInfo?.isInApp && (
         <div className="absolute inset-0 z-[100] bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center p-6">

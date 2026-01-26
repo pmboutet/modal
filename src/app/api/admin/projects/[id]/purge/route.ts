@@ -137,18 +137,26 @@ export async function POST(
 
     if (participantId) {
       // Get the participant's user_id
-      const { data: participant } = await adminSupabase
+      const { data: participant, error: participantError } = await adminSupabase
         .from("ask_participants")
-        .select("user_id")
+        .select("user_id, participant_name")
         .eq("id", participantId)
         .in("ask_session_id", askSessionIds)
         .single();
 
-      if (!participant?.user_id) {
+      // Distinguish between "not found in this project" and "no user_id"
+      if (participantError || !participant) {
         return NextResponse.json<ApiResponse>({
           success: false,
-          error: "Participant non trouvé ou sans user_id associé"
+          error: "Ce participant n'appartient pas à ce projet ou n'existe pas."
         }, { status: 404 });
+      }
+
+      if (!participant.user_id) {
+        return NextResponse.json<ApiResponse>({
+          success: false,
+          error: `Le participant "${participant.participant_name || 'inconnu'}" n'a jamais créé de compte. Seuls les participants enregistrés peuvent être purgés individuellement.`
+        }, { status: 400 });
       }
 
       participantUserId = participant.user_id;
