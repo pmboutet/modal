@@ -1622,6 +1622,8 @@ export async function POST(
         askKey: askRow.ask_key,
         askSessionId: row.ask_session_id,
         conversationThreadId: (row as any).conversation_thread_id ?? null,
+        // BUG-043 FIX: Include planStepId for step-based message filtering in AI context
+        planStepId: (row as any).plan_step_id ?? null,
         content: row.content,
         type: (row.message_type as Message['type']) ?? 'text',
         senderType: (row.sender_type as Message['senderType']) ?? 'user',
@@ -1778,6 +1780,8 @@ export async function POST(
           senderName: m.senderName ?? 'Participant',
           content: m.content,
           timestamp: m.timestamp,
+          // BUG-043 FIX: Include planStepId for step-based message filtering
+          planStepId: m.planStepId ?? null,
         }));
 
         // BUG-028 FIX: In consultant mode, set latestAiResponse to empty string since
@@ -1988,6 +1992,8 @@ export async function POST(
           senderName: m.senderName ?? 'Participant',
           content: m.content,
           timestamp: m.timestamp,
+          // BUG-043 FIX: Include planStepId for step-based message filtering
+          planStepId: m.planStepId ?? null,
         }));
 
         const agentVariables = buildConversationAgentVariables({
@@ -2167,6 +2173,8 @@ export async function POST(
       senderName: m.senderName ?? 'Participant',
       content: m.content,
       timestamp: m.timestamp,
+      // BUG-043 FIX: Include planStepId for step-based message filtering
+      planStepId: m.planStepId ?? null,
     }));
 
     const detectionVariables = buildConversationAgentVariables({

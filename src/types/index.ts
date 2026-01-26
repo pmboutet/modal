@@ -52,6 +52,11 @@ export interface Message {
   askKey: string;
   askSessionId?: string;
   conversationThreadId?: string | null;
+  /**
+   * Link to the conversation plan step this message belongs to.
+   * Used for filtering messages by step in AI context (step_messages_json).
+   */
+  planStepId?: string | null;
   content: string;
   type: 'text' | 'audio' | 'image' | 'document';
   senderType: MessageSenderType;
