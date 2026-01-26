@@ -250,6 +250,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   // Track when step summary generation is in progress
   const [isGeneratingStepSummary, setIsGeneratingStepSummary] = useState(false);
 
+  // Track when agent is thinking (waiting for first streaming token)
+  const [isAgentThinking, setIsAgentThinking] = useState(false);
+
   // ===== ÉTATS DES CONTRÔLES MICROPHONE =====
   // ID du microphone sélectionné (null = microphone par défaut)
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string | null>(null);
@@ -334,10 +337,12 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const hasNudgedForCurrentMessageRef = useRef<boolean>(false);
   // Tracks when the last user partial was received (to detect if user is still speaking)
   const lastUserPartialTimestampRef = useRef<number>(0);
-  // Timeout for agent response nudge check (15 seconds)
-  const AGENT_RESPONSE_TIMEOUT_MS = 15000;
-  // Time window to consider user as "still speaking" after last partial (5 seconds)
-  const USER_SPEAKING_WINDOW_MS = 5000;
+  // Tracks when the first assistant streaming token was received (for intelligent nudge)
+  const lastAssistantStreamTimestampRef = useRef<number>(0);
+  // Timeout for agent response nudge - only triggers if NO streaming has started (5 seconds)
+  const AGENT_RESPONSE_TIMEOUT_MS = 5000;
+  // Time window to consider user as "still speaking" after last partial (3 seconds)
+  const USER_SPEAKING_WINDOW_MS = 3000;
 
   // ===== INACTIVITY MONITOR =====
   const inactivityMonitor = useInactivityMonitor({
@@ -759,27 +764,34 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, [elapsedMinutes, isTimerPaused, updatePromptsFromApi]);
 
   // ===== AGENT RESPONSE NUDGE - Detect stuck agent and force response =====
-  // If 15 seconds pass without agent response after a user message, nudge the agent
+  // INTELLIGENT NUDGE: Only triggers if NO streaming has started within 5 seconds
+  // If streaming has started (agent is responding), we don't nudge
   useEffect(() => {
     // Skip in consultant mode (no AI responses expected)
     if (consultantMode) {
       return;
     }
 
-    // Check every 5 seconds if we need to nudge
+    // Check every 1 second for faster detection
     const checkInterval = setInterval(() => {
       const now = Date.now();
       const elapsed = now - lastUserMessageTimestampRef.current;
       const timeSinceLastPartial = now - lastUserPartialTimestampRef.current;
+      const streamingStarted = lastAssistantStreamTimestampRef.current > 0;
 
       // Skip if not awaiting response or already nudged
       if (!awaitingAgentResponseRef.current || hasNudgedForCurrentMessageRef.current) {
         return;
       }
 
+      // Skip if streaming has started - agent IS responding, no nudge needed
+      if (streamingStarted) {
+        devLog('[PremiumVoiceInterface] 🔍 Nudge check: streaming active, no nudge needed');
+        return;
+      }
+
       // Skip if not connected
       if (!isConnected || !agentRef.current) {
-        devLog('[PremiumVoiceInterface] 🔍 Nudge check: skipped (not connected)');
         return;
       }
 
@@ -791,17 +803,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         return;
       }
 
-      // Log the check status
-      devLog('[PremiumVoiceInterface] 🔍 Nudge check:', {
-        elapsedSinceUserMessage: Math.round(elapsed / 1000) + 's',
-        timeSinceLastPartial: Math.round(timeSinceLastPartial / 1000) + 's',
-        threshold: Math.round(AGENT_RESPONSE_TIMEOUT_MS / 1000) + 's',
-        willNudge: elapsed >= AGENT_RESPONSE_TIMEOUT_MS,
-      });
+      // Log the check status (only when approaching timeout to reduce noise)
+      if (elapsed >= AGENT_RESPONSE_TIMEOUT_MS - 1000) {
+        devLog('[PremiumVoiceInterface] 🔍 Nudge check:', {
+          elapsedSinceUserMessage: Math.round(elapsed / 1000) + 's',
+          streamingStarted,
+          threshold: Math.round(AGENT_RESPONSE_TIMEOUT_MS / 1000) + 's',
+          willNudge: elapsed >= AGENT_RESPONSE_TIMEOUT_MS,
+        });
+      }
 
-      // Check if timeout has passed
+      // Check if timeout has passed AND no streaming started
       if (elapsed >= AGENT_RESPONSE_TIMEOUT_MS) {
-        devLog('[PremiumVoiceInterface] ⚠️ Agent response timeout - nudging after', Math.round(elapsed / 1000), 'seconds');
+        devLog('[PremiumVoiceInterface] ⚠️ No streaming received - nudging after', Math.round(elapsed / 1000), 'seconds');
 
         // Mark as nudged to prevent duplicate attempts
         hasNudgedForCurrentMessageRef.current = true;
@@ -852,29 +866,33 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
                   await agent.speakInitialMessage(aiResponseContent);
                 }
 
-                // Clear awaiting state
+                // Clear awaiting state and thinking indicator
                 awaitingAgentResponseRef.current = false;
+                setIsAgentThinking(false);
                 // Note: Timer will resume via onPlaybackEnd when TTS finishes
               } else {
                 devWarn('[PremiumVoiceInterface] ⚠️ Nudge returned no AI response:', result);
                 // Resume timer on failure - no TTS will play
+                setIsAgentThinking(false);
                 inactivityMonitor.resumeTimerAfterDelay(0);
               }
             } else {
               devError('[PremiumVoiceInterface] ❌ Nudge failed:', response.status, await response.text());
               // Resume timer on failure - no TTS will play
+              setIsAgentThinking(false);
               inactivityMonitor.resumeTimerAfterDelay(0);
             }
           } catch (error) {
             devError('[PremiumVoiceInterface] ❌ Error nudging agent:', error);
             // Resume timer on error - no TTS will play
+            setIsAgentThinking(false);
             inactivityMonitor.resumeTimerAfterDelay(0);
           }
         };
 
         nudgeAgent();
       }
-    }, 5000);
+    }, 1000); // Check every second for faster detection
 
     return () => {
       clearInterval(checkInterval);
@@ -1324,6 +1342,14 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     // Cas INTERIM → mise à jour du buffer local uniquement
     if (isInterim) {
       if (role === 'assistant') {
+        // Track when streaming started (for intelligent nudge)
+        if (lastAssistantStreamTimestampRef.current === 0) {
+          lastAssistantStreamTimestampRef.current = Date.now();
+          devLog('[PremiumVoiceInterface] 🎯 Agent streaming started');
+        }
+        // Agent is now streaming - no longer "thinking"
+        setIsAgentThinking(false);
+
         setInterimAssistant(prev => ({
           ...(prev || baseMessage),
           content: mergeStreamingContent(prev?.content, baseMessage.content),
@@ -1347,9 +1373,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     if (role === 'assistant') {
       setInterimAssistant(null);
 
-      // Agent responded - clear awaiting response state
+      // Agent responded - clear awaiting response state and reset streaming tracker
       awaitingAgentResponseRef.current = false;
       hasNudgedForCurrentMessageRef.current = false;
+      lastAssistantStreamTimestampRef.current = 0; // Reset for next message
+      setIsAgentThinking(false);
 
       // Detect STEP_COMPLETE in assistant messages and call API to complete the step
       const { hasMarker, stepId: detectedStepId } = detectStepComplete(rawMessage.content);
@@ -1470,6 +1498,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
         lastUserMessageContentRef.current = rawMessage.content.trim();
         awaitingAgentResponseRef.current = true;
         hasNudgedForCurrentMessageRef.current = false;
+        lastAssistantStreamTimestampRef.current = 0; // Reset streaming tracker
+        setIsAgentThinking(true); // Show "agent is thinking" indicator
         devLog('[PremiumVoiceInterface] 👂 User message awaiting response:', rawMessage.content.substring(0, 50) + '...');
       }
 
@@ -3289,6 +3319,40 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               );
             })}
           </AnimatePresence>
+          {/* Agent thinking indicator - shown when awaiting first streaming token */}
+          {isAgentThinking && !consultantMode && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-start gap-3 py-2 px-4"
+            >
+              <div className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 backdrop-blur-sm px-4 py-2">
+                {/* Animated thinking dots */}
+                <div className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="h-1.5 w-1.5 rounded-full bg-white/70"
+                      animate={{
+                        scale: [1, 1.4, 1],
+                        opacity: [0.4, 1, 0.4],
+                      }}
+                      transition={{
+                        duration: 0.8,
+                        repeat: Infinity,
+                        delay: i * 0.15,
+                        ease: "easeInOut",
+                      }}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm text-white/70">
+                  L&apos;agent réfléchit...
+                </span>
+              </div>
+            </motion.div>
+          )}
           {/* Step summary generation loading indicator */}
           {isGeneratingStepSummary && (
             <motion.div
