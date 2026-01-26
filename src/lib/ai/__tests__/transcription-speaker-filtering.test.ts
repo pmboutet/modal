@@ -162,36 +162,48 @@ describe('TranscriptionManager speaker filtering', () => {
     const onMessage = jest.fn();
     const processUserMessage = jest.fn().mockResolvedValue(undefined);
 
-    // No filtering config = filtering disabled
-    const manager = new TranscriptionManager(
-      onMessage,
-      processUserMessage,
-      [],
-      true,
-      undefined,
-      undefined // No filtering config
-    );
+    // Mock Date.now to avoid rate limiting (100ms between calls)
+    let mockTime = 1000;
+    const originalDateNow = Date.now;
+    Date.now = jest.fn(() => {
+      mockTime += 150; // Advance by 150ms each call to bypass rate limiting
+      return mockTime;
+    });
 
-    // All speakers should be processed and trigger messages
-    // Note: speaker change detection causes previous speaker's message to be finalized
-    manager.handlePartialTranscript('Speaker one talking', 0, 0.5, 'S1');
-    expect(onMessage).toHaveBeenCalled();
-    const callsAfterS1 = onMessage.mock.calls.length;
+    try {
+      // No filtering config = filtering disabled
+      const manager = new TranscriptionManager(
+        onMessage,
+        processUserMessage,
+        [],
+        true,
+        undefined,
+        undefined // No filtering config
+      );
 
-    manager.handlePartialTranscript('Speaker two talking', 1, 1.5, 'S2');
-    // Speaker change should have triggered processing + new interim
-    expect(onMessage.mock.calls.length).toBeGreaterThan(callsAfterS1);
-    const callsAfterS2 = onMessage.mock.calls.length;
+      // All speakers should be processed and trigger messages
+      // Note: speaker change detection causes previous speaker's message to be finalized
+      manager.handlePartialTranscript('Speaker one talking', 0, 0.5, 'S1');
+      expect(onMessage).toHaveBeenCalled();
+      const callsAfterS1 = onMessage.mock.calls.length;
 
-    manager.handlePartialTranscript('Speaker three talking', 2, 2.5, 'S3');
-    // Another speaker change + new interim
-    expect(onMessage.mock.calls.length).toBeGreaterThan(callsAfterS2);
+      manager.handlePartialTranscript('Speaker two talking', 1, 1.5, 'S2');
+      // Speaker change should have triggered processing + new interim
+      expect(onMessage.mock.calls.length).toBeGreaterThan(callsAfterS1);
+      const callsAfterS2 = onMessage.mock.calls.length;
 
-    // Key assertion: without filtering, all speakers trigger messages
-    // (filtering would have blocked S2 and S3 after S1 was established)
-    expect(onMessage.mock.calls.length).toBeGreaterThanOrEqual(3);
+      manager.handlePartialTranscript('Speaker three talking', 2, 2.5, 'S3');
+      // Another speaker change + new interim
+      expect(onMessage.mock.calls.length).toBeGreaterThan(callsAfterS2);
 
-    manager.cleanup();
+      // Key assertion: without filtering, all speakers trigger messages
+      // (filtering would have blocked S2 and S3 after S1 was established)
+      expect(onMessage.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      manager.cleanup();
+    } finally {
+      Date.now = originalDateNow;
+    }
   });
 
   test('handleFinalTranscript also filters non-primary speakers', async () => {
