@@ -2,6 +2,8 @@
  * LLM integration for Speechmatics Voice Agent
  */
 
+import * as Sentry from '@sentry/nextjs';
+
 export class SpeechmaticsLLM {
   async getLLMApiKey(provider: "anthropic" | "openai"): Promise<string> {
     const response = await fetch('/api/llm-token', {
@@ -12,7 +14,23 @@ export class SpeechmaticsLLM {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Failed to get LLM API key: ${errorText}`);
+      const error = new Error(`Failed to get LLM API key: ${errorText}`);
+
+      // Capture LLM API key retrieval errors to Sentry
+      Sentry.captureException(error, {
+        tags: {
+          component: 'speechmatics-llm',
+          error_type: 'llm_api_key_error',
+          llm_provider: provider,
+        },
+        extra: {
+          statusCode: response.status,
+          errorText,
+        },
+        level: 'error',
+      });
+
+      throw error;
     }
 
     const data = await response.json();
@@ -56,8 +74,29 @@ export class SpeechmaticsLLM {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(`LLM API error: ${(error as any).error || response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = `LLM API error: ${(errorData as any).error || response.statusText}`;
+      const error = new Error(errorMessage);
+
+      // Capture LLM API errors to Sentry
+      Sentry.captureException(error, {
+        tags: {
+          component: 'speechmatics-llm',
+          error_type: 'llm_api_error',
+          llm_provider: provider,
+        },
+        extra: {
+          statusCode: response.status,
+          statusText: response.statusText,
+          model,
+          errorData,
+          messageCount: messages.length,
+          enableThinking: options?.enableThinking,
+        },
+        level: 'error',
+      });
+
+      throw error;
     }
 
     const data = await response.json();

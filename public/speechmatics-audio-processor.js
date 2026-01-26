@@ -77,9 +77,14 @@ class SpeechmaticsAudioProcessor extends AudioWorkletProcessor {
     const clampedTargetGain = Math.max(this.minGain, Math.min(this.maxGain, targetGain));
     
     // Smooth gain changes (attack/release)
+    // FIX: AGC coefficients must account for buffer-based processing
+    // AudioWorklet processes 128-sample buffers, not individual samples
+    // So we need to calculate coefficients per-buffer, not per-sample
     const gainDiff = clampedTargetGain - this.currentGain;
-    const attackCoeff = Math.exp(-1 / (this.gainAttackTime * this.sampleRate));
-    const releaseCoeff = Math.exp(-1 / (this.gainReleaseTime * this.sampleRate));
+    const bufferSize = 128; // AudioWorklet quantum
+    const buffersPerSecond = this.sampleRate / bufferSize;
+    const attackCoeff = Math.exp(-1 / (this.gainAttackTime * buffersPerSecond));
+    const releaseCoeff = Math.exp(-1 / (this.gainReleaseTime * buffersPerSecond));
     
     // Use attack for increasing gain, release for decreasing
     const coeff = gainDiff > 0 ? attackCoeff : releaseCoeff;

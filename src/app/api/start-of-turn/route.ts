@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 /**
  * API endpoint for start-of-turn detection (AI-powered barge-in validation)
@@ -10,6 +12,35 @@ import { NextRequest, NextResponse } from 'next/server';
  */
 export async function POST(request: NextRequest) {
   try {
+    // Authentication check
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          },
+        },
+      }
+    );
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      console.warn('[API /start-of-turn] ⚠️ Unauthorized access attempt');
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const {
       userTranscript,
@@ -165,7 +196,20 @@ Is this detected speech a valid start of user turn, or is it an echo of the assi
     );
   }
 
-  const result = JSON.parse(jsonMatch[0]);
+  // FIX: Wrap JSON.parse in try-catch to handle malformed AI responses
+  let result;
+  try {
+    result = JSON.parse(jsonMatch[0]);
+  } catch (parseError) {
+    console.error('[StartOfTurn] Failed to parse JSON from Anthropic response:', jsonMatch[0]);
+    // Return safe default on parse error
+    return NextResponse.json({
+      isValidStart: true,
+      isEcho: false,
+      confidence: 0.5,
+      reason: 'JSON parse error - assuming valid',
+    });
+  }
   console.log('[StartOfTurn] 📥 Anthropic validation result:', result);
 
   return NextResponse.json(result);
@@ -252,7 +296,20 @@ Is this a valid user interruption or an echo?`;
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content || '{}';
 
-  const result = JSON.parse(content);
+  // FIX: Wrap JSON.parse in try-catch to handle malformed AI responses
+  let result;
+  try {
+    result = JSON.parse(content);
+  } catch (parseError) {
+    console.error('[StartOfTurn] Failed to parse JSON from OpenAI response:', content);
+    // Return safe default on parse error
+    return NextResponse.json({
+      isValidStart: true,
+      isEcho: false,
+      confidence: 0.5,
+      reason: 'JSON parse error - assuming valid',
+    });
+  }
   console.log('[StartOfTurn] 📥 OpenAI validation result:', result);
 
   return NextResponse.json(result);

@@ -2,6 +2,7 @@
  * Authentication utilities for Speechmatics Voice Agent
  */
 
+import * as Sentry from '@sentry/nextjs';
 import { devError } from '@/lib/utils';
 
 export class SpeechmaticsAuth {
@@ -51,6 +52,20 @@ export class SpeechmaticsAuth {
       return this.speechmaticsApiKey;
     } catch (error) {
       devError('[Speechmatics] ❌ Authentication error:', error);
+
+      // Capture authentication errors to Sentry
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        tags: {
+          component: 'speechmatics-auth',
+          error_type: 'authentication_error',
+        },
+        extra: {
+          hasExistingJWT: Boolean(this.speechmaticsJWT),
+          jwtExpired: this.jwtExpiry > 0 && Date.now() >= this.jwtExpiry,
+        },
+        level: 'error',
+      });
+
       throw error;
     }
   }
@@ -75,6 +90,16 @@ export class SpeechmaticsAuth {
       return apiKey;
     } catch (error) {
       devError('[Speechmatics] ❌ Error getting ElevenLabs API key:', error);
+
+      // Capture ElevenLabs auth errors to Sentry
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        tags: {
+          component: 'speechmatics-auth',
+          error_type: 'elevenlabs_auth_error',
+        },
+        level: 'error',
+      });
+
       throw error;
     }
   }

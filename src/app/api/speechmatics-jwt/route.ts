@@ -1,18 +1,49 @@
 import { NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 /**
  * API endpoint to generate a temporary JWT token for Speechmatics Real-Time API
  * This allows the client to connect directly to Speechmatics without a proxy
- * 
+ *
  * Uses @speechmatics/auth package as per official documentation:
  * https://docs.speechmatics.com/speech-to-text/realtime/quickstart
- * 
+ *
  * The JWT is valid for a short period (default: 60 seconds) and can be used
  * in the WebSocket URL: wss://eu2.rt.speechmatics.com/v2?jwt=TOKEN
  */
 export async function GET() {
   console.log('[API /speechmatics-jwt] 🔐 JWT token request received');
-  
+
+  // Authentication check
+  const cookieStore = await cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    console.warn('[API /speechmatics-jwt] ⚠️ Unauthorized access attempt');
+    return NextResponse.json(
+      { error: 'Authentication required' },
+      { status: 401 }
+    );
+  }
+
   const apiKey = process.env.SPEECHMATICS_API_KEY;
   if (!apiKey) {
     console.error('[API /speechmatics-jwt] ❌ SPEECHMATICS_API_KEY not set');

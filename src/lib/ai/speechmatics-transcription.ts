@@ -14,7 +14,8 @@
  * de logique temporelle déterministe.
  */
 
-import { devLog, devError } from '@/lib/utils';
+import * as Sentry from '@sentry/nextjs';
+import { devLog, devError, devWarn } from '@/lib/utils';
 import type { SpeechmaticsMessageCallback } from './speechmatics-types';
 import { SegmentStore } from './speechmatics-segment-store';
 import type {
@@ -79,6 +80,10 @@ export class TranscriptionManager {
   private readonly SILENCE_DETECTION_TIMEOUT = 2000; // 2s fallback (reduced from 3s)
   private readonly SILENCE_DETECTION_TIMEOUT_NO_PARTIALS = 2000; // 2s fallback (reduced from 5s)
   private readonly UTTERANCE_FINALIZATION_DELAY = 300; // 300ms debounce after EndOfUtterance (reduced from 800ms)
+  private readonly ABSOLUTE_FALLBACK_TIMEOUT_MS = 15000; // 15 seconds max - forces processing if EndOfUtterance never received
+  private readonly SPEAKER_CONFIRMATION_TIMEOUT_MS = 30000; // 30 seconds - auto-reject if user doesn't confirm
+  private absoluteFallbackTimeout: NodeJS.Timeout | null = null;
+  private speakerConfirmationTimeout: NodeJS.Timeout | null = null;
   private readonly MIN_PARTIAL_UPDATE_INTERVAL_MS = 100; // 100ms rate limit
   private readonly MIN_UTTERANCE_CHAR_LENGTH = 20;
   private readonly MIN_UTTERANCE_WORDS = 3;
@@ -190,33 +195,9 @@ export class TranscriptionManager {
       // Continue to process and buffer the transcript
     }
 
-    // Establishment phase: need 2 consecutive transcripts from same speaker
-    if (this.speakerFilteringEnabled && speaker && !this.primarySpeaker && !this.awaitingSpeakerConfirmation) {
-      if (speaker === this.candidateSpeaker) {
-        // Same speaker twice in a row
-        this.candidateConfirmationCount++;
-
-        if (this.requireSpeakerConfirmation) {
-          // Require user confirmation before establishing
-          if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
-            this.awaitingSpeakerConfirmation = true;
-            console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
-            this.onSpeakerPendingConfirmation?.(speaker, trimmedTranscript);
-            // Continue processing - transcripts will be buffered
-          }
-        } else {
-          // Auto-establish after 2 consecutive (original behavior)
-          if (this.candidateConfirmationCount >= 2) {
-            this.primarySpeaker = speaker;
-            console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
-            this.onSpeakerEstablished?.(this.primarySpeaker);
-          }
-        }
-      } else {
-        // Different speaker → reset candidate
-        this.candidateSpeaker = speaker;
-        this.candidateConfirmationCount = 1;
-      }
+    // Speaker establishment phase (handles consecutive speaker tracking)
+    if (speaker) {
+      this.handleSpeakerEstablishment(speaker, trimmedTranscript);
     }
 
     // Track timestamp for allowed speaker (used by filtered speaker safety net)
@@ -328,33 +309,9 @@ export class TranscriptionManager {
       // Continue to process and buffer the transcript
     }
 
-    // Establishment phase: need 2 consecutive transcripts from same speaker
-    if (this.speakerFilteringEnabled && speaker && !this.primarySpeaker && !this.awaitingSpeakerConfirmation) {
-      if (speaker === this.candidateSpeaker) {
-        // Same speaker twice in a row
-        this.candidateConfirmationCount++;
-
-        if (this.requireSpeakerConfirmation) {
-          // Require user confirmation before establishing
-          if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
-            this.awaitingSpeakerConfirmation = true;
-            console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
-            this.onSpeakerPendingConfirmation?.(speaker, trimmedTranscript);
-            // Continue processing - transcripts will be buffered
-          }
-        } else {
-          // Auto-establish after 2 consecutive (original behavior)
-          if (this.candidateConfirmationCount >= 2) {
-            this.primarySpeaker = speaker;
-            console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
-            this.onSpeakerEstablished?.(this.primarySpeaker);
-          }
-        }
-      } else {
-        // Different speaker → reset candidate
-        this.candidateSpeaker = speaker;
-        this.candidateConfirmationCount = 1;
-      }
+    // Speaker establishment phase (handles consecutive speaker tracking)
+    if (speaker) {
+      this.handleSpeakerEstablishment(speaker, trimmedTranscript);
     }
 
     // Track timestamp for allowed speaker (used by filtered speaker safety net)
@@ -403,6 +360,12 @@ export class TranscriptionManager {
       this.silenceTimeout = null;
     }
 
+    // Clear existing absolute timeout
+    if (this.absoluteFallbackTimeout) {
+      clearTimeout(this.absoluteFallbackTimeout);
+      this.absoluteFallbackTimeout = null;
+    }
+
     if (this.pendingFinalTranscript && this.pendingFinalTranscript.trim()) {
       const timeoutDuration = this.enablePartials
         ? this.SILENCE_DETECTION_TIMEOUT
@@ -411,6 +374,12 @@ export class TranscriptionManager {
       this.silenceTimeout = setTimeout(() => {
         this.handleSilenceTimeout();
       }, timeoutDuration);
+
+      // Set new absolute timeout that forces processing regardless of VAD state
+      this.absoluteFallbackTimeout = setTimeout(() => {
+        devWarn('[Transcription] Absolute fallback timeout triggered - forcing transcript processing');
+        void this.processPendingTranscript(true, true);
+      }, this.ABSOLUTE_FALLBACK_TIMEOUT_MS);
     }
   }
 
@@ -524,6 +493,18 @@ export class TranscriptionManager {
           // Clear the "being processed" flag so it can be retried
           this.contentBeingProcessed = null;
 
+          Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+            tags: {
+              module: 'speechmatics-transcription',
+              operation: 'process_user_message',
+            },
+            extra: {
+              contentLength: fullContent.length,
+              speaker: speakerSnapshot,
+              messageId,
+            },
+            level: 'error',
+          });
           devError('[Transcription] Error processing user message, transcript preserved for retry:', error);
           // Re-throw so the caller knows it failed
           throw error;
@@ -578,6 +559,14 @@ export class TranscriptionManager {
       clearTimeout(this.utteranceDebounceTimeout);
       this.utteranceDebounceTimeout = null;
     }
+    if (this.absoluteFallbackTimeout) {
+      clearTimeout(this.absoluteFallbackTimeout);
+      this.absoluteFallbackTimeout = null;
+    }
+    if (this.speakerConfirmationTimeout) {
+      clearTimeout(this.speakerConfirmationTimeout);
+      this.speakerConfirmationTimeout = null;
+    }
     this.clearSemanticHold();
     this.clearState();
     this.lastProcessedContent = null;
@@ -592,6 +581,10 @@ export class TranscriptionManager {
    * Reset speaker filtering state (for new session)
    */
   resetSpeakerFiltering(): void {
+    if (this.speakerConfirmationTimeout) {
+      clearTimeout(this.speakerConfirmationTimeout);
+      this.speakerConfirmationTimeout = null;
+    }
     this.candidateSpeaker = undefined;
     this.candidateConfirmationCount = 0;
     this.awaitingSpeakerConfirmation = false;
@@ -632,6 +625,12 @@ export class TranscriptionManager {
       return;
     }
 
+    // Clear the confirmation timeout
+    if (this.speakerConfirmationTimeout) {
+      clearTimeout(this.speakerConfirmationTimeout);
+      this.speakerConfirmationTimeout = null;
+    }
+
     this.primarySpeaker = this.candidateSpeaker;
     this.awaitingSpeakerConfirmation = false;
     console.log(`[Transcription] User confirmed primary speaker: ${this.primarySpeaker}`);
@@ -647,6 +646,12 @@ export class TranscriptionManager {
     if (!this.candidateSpeaker) {
       console.warn('[Transcription] rejectCandidateSpeaker called but no candidate speaker');
       return;
+    }
+
+    // Clear the confirmation timeout
+    if (this.speakerConfirmationTimeout) {
+      clearTimeout(this.speakerConfirmationTimeout);
+      this.speakerConfirmationTimeout = null;
     }
 
     const rejectedSpeaker = this.candidateSpeaker;
@@ -712,6 +717,53 @@ export class TranscriptionManager {
     if (!this.pendingFinalTranscript?.trim()) return false;
     if (this.lastAllowedSpeakerPartialAt <= 0) return false;
     return Date.now() - this.lastAllowedSpeakerPartialAt >= this.SILENCE_DETECTION_TIMEOUT;
+  }
+
+  /**
+   * Handle speaker establishment phase logic
+   * Used to track consecutive transcripts from the same speaker to establish primary speaker.
+   * Supports both auto-establishment (2 consecutive) and manual confirmation modes.
+   *
+   * @param speaker - Speaker identifier from diarization
+   * @param transcript - Transcript text (used for confirmation UI)
+   */
+  private handleSpeakerEstablishment(speaker: string, transcript: string): void {
+    // Skip if speaker filtering disabled, no speaker, or already established
+    if (!this.speakerFilteringEnabled || !speaker || this.primarySpeaker || this.awaitingSpeakerConfirmation) {
+      return;
+    }
+
+    if (speaker === this.candidateSpeaker) {
+      // Same speaker twice in a row
+      this.candidateConfirmationCount++;
+
+      if (this.requireSpeakerConfirmation) {
+        // Require user confirmation before establishing
+        if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
+          this.awaitingSpeakerConfirmation = true;
+          console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
+          this.onSpeakerPendingConfirmation?.(speaker, transcript);
+          // Set timeout to auto-reject if user doesn't confirm in time
+          this.speakerConfirmationTimeout = setTimeout(() => {
+            if (this.awaitingSpeakerConfirmation) {
+              devWarn('[Transcription] Speaker confirmation timeout - auto-rejecting');
+              this.rejectCandidateSpeaker();
+            }
+          }, this.SPEAKER_CONFIRMATION_TIMEOUT_MS);
+        }
+      } else {
+        // Auto-establish after 2 consecutive (original behavior)
+        if (this.candidateConfirmationCount >= 2) {
+          this.primarySpeaker = speaker;
+          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+          this.onSpeakerEstablished?.(this.primarySpeaker);
+        }
+      }
+    } else {
+      // Different speaker -> reset candidate
+      this.candidateSpeaker = speaker;
+      this.candidateConfirmationCount = 1;
+    }
   }
 
   /**
@@ -944,6 +996,17 @@ export class TranscriptionManager {
       this.clearSemanticHold();
       this.resetSilenceTimeout();
     } catch (error) {
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        tags: {
+          module: 'speechmatics-transcription',
+          operation: 'semantic_evaluation',
+        },
+        extra: {
+          trigger,
+          hasPendingContent: Boolean(this.pendingFinalTranscript),
+        },
+        level: 'warning',
+      });
       devError('[Transcription] Semantic detector error', error);
       this.emitSemanticTelemetry('fallback', trigger, null, 'detector-error');
       this.clearSemanticHold();

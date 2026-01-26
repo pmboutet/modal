@@ -2,6 +2,7 @@
  * WebSocket management for Speechmatics Voice Agent
  */
 
+import * as Sentry from '@sentry/nextjs';
 import { devLog, devWarn, devError } from '@/lib/utils';
 import type { SpeechmaticsConfig, SpeechmaticsConnectionCallback, SpeechmaticsErrorCallback } from './speechmatics-types';
 import { SpeechmaticsAuth } from './speechmatics-auth';
@@ -148,12 +149,35 @@ export class SpeechmaticsWebSocket {
       devWarn('[Speechmatics] ⚠️ No JWT or proxy, trying direct connection (may fail)');
     }
 
+    // Add Sentry breadcrumb for connection attempt
+    Sentry.addBreadcrumb({
+      category: 'voice.websocket',
+      message: 'Connecting to Speechmatics',
+      level: 'info',
+      data: { language, region, useProxy },
+    });
+
     return new Promise<void>((resolve, reject) => {
       let resolved = false;
       const timeout = setTimeout(() => {
         if (!resolved) {
           const error = new Error('Connection timeout: Did not receive RecognitionStarted event within 10 seconds');
           devError('[Speechmatics] ❌', error.message);
+
+          // Capture connection timeout to Sentry
+          Sentry.captureException(error, {
+            tags: {
+              component: 'speechmatics-websocket',
+              error_type: 'connection_timeout',
+            },
+            extra: {
+              region,
+              language,
+              useProxy,
+            },
+            level: 'error',
+          });
+
           resolved = true;
           reject(error);
         }
@@ -296,6 +320,17 @@ export class SpeechmaticsWebSocket {
             }
           } catch (error) {
             if (!(event.data instanceof Blob || event.data instanceof ArrayBuffer)) {
+              Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+                tags: {
+                  module: 'speechmatics-websocket',
+                  operation: 'parse_message',
+                },
+                extra: {
+                  dataType: typeof event.data,
+                  dataLength: typeof event.data === 'string' ? event.data.length : 'unknown',
+                },
+                level: 'warning',
+              });
               devError('[Speechmatics] ❌ Error parsing WebSocket message:', error);
             }
           }
@@ -307,6 +342,22 @@ export class SpeechmaticsWebSocket {
             clearTimeout(timeout);
             resolved = true;
             const err = new Error(`Speechmatics WebSocket error: ${error}`);
+
+            // Capture WebSocket connection errors to Sentry
+            Sentry.captureException(err, {
+              tags: {
+                component: 'speechmatics-websocket',
+                error_type: 'connection_error',
+              },
+              extra: {
+                wsState: ws.readyState,
+                region,
+                language,
+                useProxy,
+              },
+              level: 'error',
+            });
+
             this.safeErrorCallback(err);
             reject(err);
           }
@@ -339,6 +390,25 @@ export class SpeechmaticsWebSocket {
               SpeechmaticsWebSocket.lastQuotaErrorTimestamp = Date.now();
               const error = new Error(`Speechmatics quota exceeded. Please wait 10 seconds before trying again, or check your account limits. If you have multiple tabs open, close them to free up concurrent sessions.`);
               devError('[Speechmatics] ⏳ Quota error - preventing reconnection for 10 seconds');
+
+              // CRITICAL: Capture quota errors to Sentry for business metrics
+              // This helps track concurrent session usage and billing issues
+              Sentry.captureException(error, {
+                tags: {
+                  component: 'speechmatics-websocket',
+                  error_type: 'quota_exceeded',
+                  close_code: String(event.code),
+                },
+                extra: {
+                  closeCode: event.code,
+                  closeReason: event.reason,
+                  region,
+                  language,
+                  timestamp: new Date().toISOString(),
+                },
+                level: 'warning', // Warning since it's a usage limit, not a bug
+              });
+
               if (!resolved) {
                 clearTimeout(timeout);
                 resolved = true;
@@ -378,6 +448,18 @@ export class SpeechmaticsWebSocket {
         if (!resolved) {
           clearTimeout(timeout);
           resolved = true;
+          Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+            tags: {
+              module: 'speechmatics-websocket',
+              operation: 'create_websocket',
+            },
+            extra: {
+              region,
+              language,
+              useProxy,
+            },
+            level: 'error',
+          });
           devError('[Speechmatics] ❌ Error creating WebSocket:', error);
           reject(error);
         }
@@ -447,6 +529,20 @@ export class SpeechmaticsWebSocket {
         });
       } catch (error) {
         devError('[Speechmatics] ❌ Error sending EndOfStream:', error);
+
+        // Capture EndOfStream errors to Sentry
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+          tags: {
+            component: 'speechmatics-websocket',
+            error_type: 'end_of_stream_error',
+          },
+          extra: {
+            wsState: ws.readyState,
+            timestamp: new Date().toISOString(),
+          },
+          level: 'warning',
+        });
+
         // Continue with closure even if EndOfStream fails, but wait anyway
         // This ensures any pending session on server side has time to timeout/release
         devLog('[Speechmatics] ⏳ Waiting 1.5s after EndOfStream error...');
@@ -491,6 +587,16 @@ export class SpeechmaticsWebSocket {
         return;
       }
     } catch (error) {
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        tags: {
+          module: 'speechmatics-websocket',
+          operation: 'close_websocket',
+        },
+        extra: {
+          wsState: ws.readyState,
+        },
+        level: 'warning',
+      });
       devError('[Speechmatics] ❌ Error closing WebSocket:', error);
       // Force close if normal close failed
       try {
