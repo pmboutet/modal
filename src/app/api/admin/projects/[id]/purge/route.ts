@@ -13,6 +13,7 @@ const CONFIRMATION_WORD = "SUPPRIMER-TOUT";
 
 const purgeSchema = z.object({
   confirmationWord: z.string().trim(),
+  participantId: z.string().uuid().optional().nullable(),
 });
 
 interface PurgeResult {
@@ -28,7 +29,14 @@ interface PurgeResult {
 /**
  * POST /api/admin/projects/[id]/purge
  *
- * Purges conversation data from a project while preserving ASK sessions and participants:
+ * Purges conversation data from a project while preserving ASK sessions and participants.
+ *
+ * If `participantId` is provided, only purges data for that specific participant:
+ * - Messages from that participant's conversation threads
+ * - Insights from that participant's conversation threads
+ * - Resets only that participant's timer
+ *
+ * If `participantId` is NOT provided (or null), purges ALL project data:
  * - Messages (all conversation content)
  * - Insights (cascades to: insight_keywords, challenge_insights)
  * - Conversation threads (will be recreated when users start new conversations)
@@ -61,7 +69,7 @@ export async function POST(
 
     // Parse and validate request body
     const body = await request.json();
-    const { confirmationWord } = purgeSchema.parse(body);
+    const { confirmationWord, participantId } = purgeSchema.parse(body);
 
     // Verify confirmation word
     if (confirmationWord !== CONFIRMATION_WORD) {
@@ -108,12 +116,14 @@ export async function POST(
     const askSessionIds = askSessions?.map(s => s.id) ?? [];
 
     if (askSessionIds.length === 0) {
-      // No sessions to purge, just clear AI builder results
-      const { error: clearError } = await adminSupabase
-        .from("projects")
-        .update({ ai_challenge_builder_results: null })
-        .eq("id", projectId);
-      result.aiBuilderResultsCleared = !clearError;
+      // No sessions to purge, just clear AI builder results if not filtering by participant
+      if (!participantId) {
+        const { error: clearError } = await adminSupabase
+          .from("projects")
+          .update({ ai_challenge_builder_results: null })
+          .eq("id", projectId);
+        result.aiBuilderResultsCleared = !clearError;
+      }
 
       return NextResponse.json<ApiResponse<PurgeResult>>({
         success: true,
@@ -121,77 +131,168 @@ export async function POST(
       });
     }
 
-    // Step 2: Get all insight IDs from these ask sessions (for graph edge cleanup)
-    const { data: insights } = await adminSupabase
-      .from("insights")
-      .select("id")
-      .in("ask_session_id", askSessionIds);
-    const projectInsightIds = insights?.map(i => i.id) ?? [];
+    // If filtering by participant, get their user_id and find their threads
+    let participantUserId: string | null = null;
+    let participantThreadIds: string[] = [];
 
-    // Step 3: Delete knowledge_graph_edges that reference project insights
-    // These don't cascade automatically since they use generic source_id/target_id
-    if (projectInsightIds.length > 0) {
-      const { count: edgesDeleted } = await adminSupabase
-        .from("knowledge_graph_edges")
-        .delete({ count: "exact" })
-        .or(
-          `and(source_type.eq.insight,source_id.in.(${projectInsightIds.join(",")})),` +
-          `and(target_type.eq.insight,target_id.in.(${projectInsightIds.join(",")}))`
-        );
-      result.deletedGraphEdges = edgesDeleted ?? 0;
+    if (participantId) {
+      // Get the participant's user_id
+      const { data: participant } = await adminSupabase
+        .from("ask_participants")
+        .select("user_id")
+        .eq("id", participantId)
+        .in("ask_session_id", askSessionIds)
+        .single();
+
+      if (!participant?.user_id) {
+        return NextResponse.json<ApiResponse>({
+          success: false,
+          error: "Participant non trouvé ou sans user_id associé"
+        }, { status: 404 });
+      }
+
+      participantUserId = participant.user_id;
+
+      // Get conversation threads for this user
+      const { data: threads } = await adminSupabase
+        .from("conversation_threads")
+        .select("id")
+        .eq("user_id", participantUserId)
+        .in("ask_session_id", askSessionIds);
+
+      participantThreadIds = threads?.map(t => t.id) ?? [];
+
+      if (participantThreadIds.length === 0) {
+        // No threads found for this participant
+        return NextResponse.json<ApiResponse<PurgeResult>>({
+          success: true,
+          data: result
+        });
+      }
     }
 
-    // Step 4: Delete insight_syntheses for this project
-    const { count: synthesesDeleted } = await adminSupabase
-      .from("insight_syntheses")
-      .delete({ count: "exact" })
-      .eq("project_id", projectId);
-    result.deletedInsightSyntheses = synthesesDeleted ?? 0;
+    // PARTICIPANT-SPECIFIC PURGE: Only delete data from participant's threads
+    if (participantId && participantUserId && participantThreadIds.length > 0) {
+      // Delete messages from participant's threads
+      const { count: messagesDeleted } = await adminSupabase
+        .from("messages")
+        .delete({ count: "exact" })
+        .in("conversation_thread_id", participantThreadIds);
+      result.deletedMessages = messagesDeleted ?? 0;
 
-    // Step 5: Delete all messages for the project's ask sessions
-    const { count: messagesDeleted } = await adminSupabase
-      .from("messages")
-      .delete({ count: "exact" })
-      .in("ask_session_id", askSessionIds);
-    result.deletedMessages = messagesDeleted ?? 0;
+      // Get insight IDs from participant's threads (for potential graph edge cleanup)
+      const { data: participantInsights } = await adminSupabase
+        .from("insights")
+        .select("id")
+        .in("conversation_thread_id", participantThreadIds);
+      const participantInsightIds = participantInsights?.map(i => i.id) ?? [];
 
-    // Step 6: Delete all insights for the project's ask sessions
-    // This cascades to: insight_keywords, challenge_insights
-    const { count: insightsDeleted } = await adminSupabase
-      .from("insights")
-      .delete({ count: "exact" })
-      .in("ask_session_id", askSessionIds);
-    result.deletedInsights = insightsDeleted ?? 0;
+      // Delete graph edges for participant's insights
+      if (participantInsightIds.length > 0) {
+        const { count: edgesDeleted } = await adminSupabase
+          .from("knowledge_graph_edges")
+          .delete({ count: "exact" })
+          .or(
+            `and(source_type.eq.insight,source_id.in.(${participantInsightIds.join(",")})),` +
+            `and(target_type.eq.insight,target_id.in.(${participantInsightIds.join(",")}))`
+          );
+        result.deletedGraphEdges = edgesDeleted ?? 0;
+      }
 
-    // Step 7: Delete all conversation_threads for the project's ask sessions
-    // These will be recreated when users start new conversations
-    const { count: threadsDeleted } = await adminSupabase
-      .from("conversation_threads")
-      .delete({ count: "exact" })
-      .in("ask_session_id", askSessionIds);
-    result.deletedConversationThreads = threadsDeleted ?? 0;
+      // Delete insights from participant's threads
+      const { count: insightsDeleted } = await adminSupabase
+        .from("insights")
+        .delete({ count: "exact" })
+        .in("conversation_thread_id", participantThreadIds);
+      result.deletedInsights = insightsDeleted ?? 0;
 
-    // Step 8: Reset session timers for all participants
-    // Set timer_reset_at timestamp so client-side can detect the reset and clear localStorage
-    // We update ALL participants (not just those with elapsed > 0) to ensure the reset signal
-    // reaches everyone who might have localStorage data
-    const { count: timersReset } = await adminSupabase
-      .from("ask_participants")
-      .update({
-        elapsed_active_seconds: 0,
-        timer_reset_at: new Date().toISOString()
-      }, { count: "exact" })
-      .in("ask_session_id", askSessionIds);
-    result.timersReset = timersReset ?? 0;
+      // Delete participant's conversation threads
+      const { count: threadsDeleted } = await adminSupabase
+        .from("conversation_threads")
+        .delete({ count: "exact" })
+        .in("id", participantThreadIds);
+      result.deletedConversationThreads = threadsDeleted ?? 0;
 
-    // Step 9: Clear AI challenge builder results from project
-    const { error: clearError } = await adminSupabase
-      .from("projects")
-      .update({ ai_challenge_builder_results: null })
-      .eq("id", projectId);
-    result.aiBuilderResultsCleared = !clearError;
+      // Reset timer only for this participant
+      const { count: timersReset } = await adminSupabase
+        .from("ask_participants")
+        .update({
+          elapsed_active_seconds: 0,
+          timer_reset_at: new Date().toISOString()
+        }, { count: "exact" })
+        .eq("id", participantId);
+      result.timersReset = timersReset ?? 0;
 
-    console.log(`[Purge] Project ${project.name} (${projectId}) purged by full_admin:`, result);
+      console.log(`[Purge] Participant ${participantId} data purged from project ${project.name} (${projectId}) by full_admin:`, result);
+    } else {
+      // FULL PROJECT PURGE: Delete all data
+
+      // Step 2: Get all insight IDs from these ask sessions (for graph edge cleanup)
+      const { data: insights } = await adminSupabase
+        .from("insights")
+        .select("id")
+        .in("ask_session_id", askSessionIds);
+      const projectInsightIds = insights?.map(i => i.id) ?? [];
+
+      // Step 3: Delete knowledge_graph_edges that reference project insights
+      if (projectInsightIds.length > 0) {
+        const { count: edgesDeleted } = await adminSupabase
+          .from("knowledge_graph_edges")
+          .delete({ count: "exact" })
+          .or(
+            `and(source_type.eq.insight,source_id.in.(${projectInsightIds.join(",")})),` +
+            `and(target_type.eq.insight,target_id.in.(${projectInsightIds.join(",")}))`
+          );
+        result.deletedGraphEdges = edgesDeleted ?? 0;
+      }
+
+      // Step 4: Delete insight_syntheses for this project
+      const { count: synthesesDeleted } = await adminSupabase
+        .from("insight_syntheses")
+        .delete({ count: "exact" })
+        .eq("project_id", projectId);
+      result.deletedInsightSyntheses = synthesesDeleted ?? 0;
+
+      // Step 5: Delete all messages for the project's ask sessions
+      const { count: messagesDeleted } = await adminSupabase
+        .from("messages")
+        .delete({ count: "exact" })
+        .in("ask_session_id", askSessionIds);
+      result.deletedMessages = messagesDeleted ?? 0;
+
+      // Step 6: Delete all insights for the project's ask sessions
+      const { count: insightsDeleted } = await adminSupabase
+        .from("insights")
+        .delete({ count: "exact" })
+        .in("ask_session_id", askSessionIds);
+      result.deletedInsights = insightsDeleted ?? 0;
+
+      // Step 7: Delete all conversation_threads for the project's ask sessions
+      const { count: threadsDeleted } = await adminSupabase
+        .from("conversation_threads")
+        .delete({ count: "exact" })
+        .in("ask_session_id", askSessionIds);
+      result.deletedConversationThreads = threadsDeleted ?? 0;
+
+      // Step 8: Reset session timers for all participants
+      const { count: timersReset } = await adminSupabase
+        .from("ask_participants")
+        .update({
+          elapsed_active_seconds: 0,
+          timer_reset_at: new Date().toISOString()
+        }, { count: "exact" })
+        .in("ask_session_id", askSessionIds);
+      result.timersReset = timersReset ?? 0;
+
+      // Step 9: Clear AI challenge builder results from project
+      const { error: clearError } = await adminSupabase
+        .from("projects")
+        .update({ ai_challenge_builder_results: null })
+        .eq("id", projectId);
+      result.aiBuilderResultsCleared = !clearError;
+
+      console.log(`[Purge] Project ${project.name} (${projectId}) purged by full_admin:`, result);
+    }
 
     return NextResponse.json<ApiResponse<PurgeResult>>({
       success: true,

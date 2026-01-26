@@ -188,6 +188,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
   const [purgeConfirmationWord, setPurgeConfirmationWord] = useState("");
   const [isPurging, setIsPurging] = useState(false);
   const [purgeFeedback, setPurgeFeedback] = useState<FeedbackState | null>(null);
+  const [selectedPurgeParticipantId, setSelectedPurgeParticipantId] = useState<string | null>(null);
   const { profile, isFullAdmin, isAdmin } = useAuth();
   const currentProfileId = profile?.id ?? null;
 
@@ -621,6 +622,21 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
     });
     return map;
   }, [allChallenges]);
+
+  // Collect unique participants from all ASKs for the purge filter dropdown
+  const allParticipantsForPurge = useMemo(() => {
+    if (!boardData?.asks) return [];
+    const participantMap = new Map<string, { id: string; userId: string | null; name: string }>();
+    boardData.asks.forEach(ask => {
+      ask.participants.forEach(p => {
+        // Use participant id as key, but we need userId for filtering
+        if (!participantMap.has(p.id)) {
+          participantMap.set(p.id, { id: p.id, userId: p.userId ?? null, name: p.name });
+        }
+      });
+    });
+    return Array.from(participantMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [boardData?.asks]);
 
   const resolveOwnerId = useCallback(
     (owners?: ProjectParticipantSummary[] | null) => {
@@ -3143,7 +3159,8 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
   };
 
   /**
-   * Handles purging all conversation data from the project.
+   * Handles purging conversation data from the project.
+   * Can purge all data or filter by specific participant.
    * This is a dangerous, irreversible operation restricted to full_admin only.
    */
   const handleProjectPurge = async () => {
@@ -3159,7 +3176,10 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
       const response = await fetch(`/api/admin/projects/${projectId}/purge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmationWord: purgeConfirmationWord }),
+        body: JSON.stringify({
+          confirmationWord: purgeConfirmationWord,
+          participantId: selectedPurgeParticipantId,
+        }),
       });
 
       const result = await response.json();
@@ -3178,27 +3198,36 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         timersReset: number;
       };
 
+      const participantName = selectedPurgeParticipantId
+        ? allParticipantsForPurge.find(p => p.id === selectedPurgeParticipantId)?.name
+        : null;
+
       setPurgeFeedback({
         type: "success",
-        message: `Données purgées : ${data.deletedMessages} message(s), ${data.deletedInsights} insight(s), ${data.deletedInsightSyntheses} synthèse(s), ${data.deletedGraphEdges} lien(s) de graphe, ${data.timersReset} timer(s) remis à zéro.`,
+        message: participantName
+          ? `Données de ${participantName} purgées : ${data.deletedMessages} message(s), ${data.deletedInsights} insight(s), ${data.deletedGraphEdges} lien(s) de graphe.`
+          : `Données purgées : ${data.deletedMessages} message(s), ${data.deletedInsights} insight(s), ${data.deletedInsightSyntheses} synthèse(s), ${data.deletedGraphEdges} lien(s) de graphe, ${data.timersReset} timer(s) remis à zéro.`,
       });
 
-      // Reset confirmation word and close dialog
+      // Reset confirmation word, participant filter and close dialog
       setPurgeConfirmationWord("");
+      setSelectedPurgeParticipantId(null);
       setIsPurgeDialogOpen(false);
 
       // Reload project data to reflect changes
       await loadJourneyData();
 
-      // Clear AI builder results state
-      setAiSuggestions([]);
-      setAiNewChallenges([]);
-      setAiBuilderErrors(null);
-      setAiBuilderLastRunAt(null);
-      setHasAiBuilderResults(false);
+      // Clear AI builder results state only if purging all data (not participant-specific)
+      if (!selectedPurgeParticipantId) {
+        setAiSuggestions([]);
+        setAiNewChallenges([]);
+        setAiBuilderErrors(null);
+        setAiBuilderLastRunAt(null);
+        setHasAiBuilderResults(false);
 
-      // Clear all timer data from localStorage to prevent stale values
-      clearAllTimersFromLocalStorage();
+        // Clear all timer data from localStorage to prevent stale values
+        clearAllTimersFromLocalStorage();
+      }
 
     } catch (err) {
       console.error("Failed to purge project data", err);
@@ -3709,6 +3738,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
         if (!open) {
           setPurgeConfirmationWord("");
           setPurgeFeedback(null);
+          setSelectedPurgeParticipantId(null);
         }
       }}>
         <Dialog.Portal>
@@ -3735,27 +3765,53 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="space-y-4">
+                {/* Participant filter dropdown */}
+                <div className="space-y-2">
+                  <Label htmlFor="purge-participant-filter" className="text-sm text-slate-200">
+                    Filtrer par répondant
+                  </Label>
+                  <select
+                    id="purge-participant-filter"
+                    value={selectedPurgeParticipantId ?? ""}
+                    onChange={(e) => setSelectedPurgeParticipantId(e.target.value || null)}
+                    className="w-full rounded-md border border-slate-600 bg-slate-800/80 px-3 py-2 text-sm text-white focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+                  >
+                    <option value="">Tous les répondants</option>
+                    {allParticipantsForPurge.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="rounded-lg border border-red-500/20 bg-red-950/20 p-4">
                   <p className="text-sm text-red-200 leading-relaxed">
-                    Vous êtes sur le point de <strong>supprimer définitivement</strong> toutes les données de conversation de ce projet :
+                    {selectedPurgeParticipantId ? (
+                      <>Vous êtes sur le point de <strong>supprimer définitivement</strong> les données de conversation du répondant <strong>{allParticipantsForPurge.find(p => p.id === selectedPurgeParticipantId)?.name}</strong> :</>
+                    ) : (
+                      <>Vous êtes sur le point de <strong>supprimer définitivement</strong> toutes les données de conversation de ce projet :</>
+                    )}
                   </p>
                   <ul className="mt-3 space-y-1.5 text-sm text-red-200/80">
                     <li className="flex items-center gap-2">
                       <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      Tous les messages de conversation
+                      {selectedPurgeParticipantId ? "Les messages de conversation du répondant" : "Tous les messages de conversation"}
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      Tous les insights collectés
+                      {selectedPurgeParticipantId ? "Les insights collectés du répondant" : "Tous les insights collectés"}
                     </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      Toutes les synthèses et données du graphe de connaissances
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      Les résultats de l&apos;AI Challenge Builder
-                    </li>
+                    {!selectedPurgeParticipantId && (
+                      <>
+                        <li className="flex items-center gap-2">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                          Toutes les synthèses et données du graphe de connaissances
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                          Les résultats de l&apos;AI Challenge Builder
+                        </li>
+                      </>
+                    )}
                   </ul>
                   <p className="mt-3 text-xs text-emerald-300/80">
                     Les sessions ASK et leurs participants seront conservés.
@@ -3795,6 +3851,7 @@ export function ProjectJourneyBoard({ projectId, onClose }: ProjectJourneyBoardP
                   setIsPurgeDialogOpen(false);
                   setPurgeConfirmationWord("");
                   setPurgeFeedback(null);
+                  setSelectedPurgeParticipantId(null);
                 }}
                 disabled={isPurging}
                 className="gap-2"
