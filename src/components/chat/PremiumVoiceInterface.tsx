@@ -1682,11 +1682,25 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     }
 
     setIsConnected(connected);
-    // Si déconnecté, nettoyer toutes les ressources
+    // Si déconnecté de façon inattendue, nettoyer toutes les ressources
     // MAIS seulement si on n'est pas déjà en train de se déconnecter
     // (pour éviter le double nettoyage)
     if (!connected && agentRef.current && !isDisconnectingRef.current) {
       debugLog('connectionChange_cleanup', { reason: 'unexpected_disconnect' });
+
+      // CRASH FIX: On unexpected disconnect (e.g., WebSocket 1006), we must properly
+      // call agent.disconnect() to reset the state machine. Without this, the state
+      // machine keeps old conversation history and state, causing inconsistencies
+      // on reconnect that can lead to loops and crashes.
+      const agent = agentRef.current;
+      if (agent && agent instanceof SpeechmaticsVoiceAgent) {
+        devLog('[PremiumVoiceInterface] 🔴 Unexpected disconnect - calling agent.disconnect() for proper cleanup');
+        // Call disconnect in background - don't await to avoid blocking
+        agent.disconnect().catch((err) => {
+          devWarn('[PremiumVoiceInterface] ⚠️ Error during unexpected disconnect cleanup:', err);
+        });
+      }
+
       setIsMicrophoneActive(false);
       setIsSpeaking(false);
       setSemanticTelemetry(null);
