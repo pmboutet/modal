@@ -33,6 +33,20 @@ export class SpeechmaticsWebSocket {
   }
 
   /**
+   * CRASH FIX: Safely call error callback without crashing if it throws
+   * Prevents cascading errors from killing the connection
+   */
+  private safeErrorCallback(error: Error): void {
+    if (this.onErrorCallback) {
+      try {
+        this.onErrorCallback(error);
+      } catch (callbackError) {
+        devError('[Speechmatics] ❌ Error in error callback (suppressed):', callbackError);
+      }
+    }
+  }
+
+  /**
    * Update the message handler - called when reconnecting to restore the handler
    * BUG-006 FIX: Provides a way to reinitialize the handler after disconnect
    * BUG-018 FIX: Also tracks the handler in currentMessageHandler to preserve
@@ -272,8 +286,13 @@ export class SpeechmaticsWebSocket {
             }
             
             // Call the message handler if it exists
+            // CRASH FIX: Wrap in try-catch to prevent handler errors from killing the connection
             if (this.messageHandler) {
-              this.messageHandler(data);
+              try {
+                this.messageHandler(data);
+              } catch (handlerError) {
+                devError('[Speechmatics] ❌ Error in message handler (connection preserved):', handlerError);
+              }
             }
           } catch (error) {
             if (!(event.data instanceof Blob || event.data instanceof ArrayBuffer)) {
@@ -288,7 +307,7 @@ export class SpeechmaticsWebSocket {
             clearTimeout(timeout);
             resolved = true;
             const err = new Error(`Speechmatics WebSocket error: ${error}`);
-            this.onErrorCallback?.(err);
+            this.safeErrorCallback(err);
             reject(err);
           }
         };
@@ -323,10 +342,10 @@ export class SpeechmaticsWebSocket {
               if (!resolved) {
                 clearTimeout(timeout);
                 resolved = true;
-                this.onErrorCallback?.(error);
+                this.safeErrorCallback(error);
                 reject(error);
               } else {
-                this.onErrorCallback?.(error);
+                this.safeErrorCallback(error);
               }
               return;
             }
@@ -346,12 +365,12 @@ export class SpeechmaticsWebSocket {
               clearTimeout(timeout);
               resolved = true;
               const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''}`);
-              this.onErrorCallback?.(error);
+              this.safeErrorCallback(error);
               reject(error);
             } else if (event.code !== 1000 && event.code !== 1005) {
               // Only report unexpected closes after connection was established (excluding normal closure codes)
               const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''}`);
-              this.onErrorCallback?.(error);
+              this.safeErrorCallback(error);
             }
           }
         };

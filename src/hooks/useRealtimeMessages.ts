@@ -148,7 +148,12 @@ export function useRealtimeMessages({
     }
 
     const message = formatDatabaseMessage(row, askKey);
-    onNewMessageRef.current(message);
+    // CRASH FIX: Wrap callback in try-catch to prevent errors from killing realtime sync
+    try {
+      onNewMessageRef.current(message);
+    } catch (callbackError) {
+      console.error('[Realtime] Error in message callback (realtime sync preserved):', callbackError);
+    }
   }, [askKey]);
 
   useEffect(() => {
@@ -299,7 +304,12 @@ export function useRealtimeMessages({
         for (const message of messages) {
           if (!processedIdsRef.current.has(message.id)) {
             processedIdsRef.current.add(message.id);
-            onNewMessageRef.current(message);
+            // CRASH FIX: Wrap callback in try-catch to prevent errors from killing polling
+            try {
+              onNewMessageRef.current(message);
+            } catch (callbackError) {
+              console.error('[Polling] Error in message callback (polling preserved):', callbackError);
+            }
 
             // Update last poll timestamp
             if (message.timestamp && (!lastPollTimestampRef.current || message.timestamp > lastPollTimestampRef.current)) {

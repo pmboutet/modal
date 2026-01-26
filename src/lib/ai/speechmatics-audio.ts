@@ -22,6 +22,8 @@ export class SpeechmaticsAudio {
   private currentAudioSource: AudioBufferSourceNode | null = null;
   private currentGainNode: GainNode | null = null;
   private audioPlaybackQueue: AudioBuffer[] = [];
+  // MEMORY FIX: Limit queue size to prevent unbounded memory growth on mobile
+  private readonly MAX_AUDIO_QUEUE_SIZE = 10; // ~10 TTS chunks max (~30 seconds of audio)
   private isPlayingAudio: boolean = false;
   private nextStartTime: number = 0;
   private isMicrophoneActive: boolean = false;
@@ -97,6 +99,9 @@ export class SpeechmaticsAudio {
     detectedAt: number;
   } | null = null;
 
+  // iOS detection for special audio handling
+  private isIOS: boolean;
+
   constructor(
     private audioDedupe: AudioChunkDedupe,
     private onAudioChunk: (chunk: Int16Array) => void,
@@ -108,6 +113,8 @@ export class SpeechmaticsAudio {
   ) {
     this.instanceId = ++SpeechmaticsAudio.instanceCounter;
     this.isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox');
+    // iOS detection: Safari on iOS or any browser on iOS (all use WebKit)
+    this.isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
     // Initialize start-of-turn detector
     const startOfTurnConfig = resolveStartOfTurnDetectorConfig();
@@ -128,13 +135,24 @@ export class SpeechmaticsAudio {
     }
 
     // Configure audio constraints
+    // iOS Safari and Firefox have limited constraint support
     let audioConstraints: MediaTrackConstraints;
-    
+
     if (this.isFirefox) {
       audioConstraints = {
         deviceId: deviceId ? { exact: deviceId } : undefined,
         echoCancellation: voiceIsolation,
         noiseSuppression: false, // Firefox doesn't support noiseSuppression well
+      };
+    } else if (this.isIOS) {
+      // iOS FIX: Safari doesn't support sampleRate and channelCount constraints
+      // These cause getUserMedia() to fail silently or throw errors
+      audioConstraints = {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        echoCancellation: voiceIsolation,
+        noiseSuppression: voiceIsolation,
+        autoGainControl: voiceIsolation,
+        // DO NOT specify sampleRate or channelCount on iOS - not supported
       };
     } else {
       audioConstraints = {
@@ -164,8 +182,9 @@ export class SpeechmaticsAudio {
     this.mediaStream = stream;
 
     // Create audio context
+    // iOS FIX: Safari doesn't support sampleRate option in AudioContext constructor
     let audioContext: AudioContext;
-    if (this.isFirefox) {
+    if (this.isFirefox || this.isIOS) {
       audioContext = new AudioContext();
       if (audioContext.state === 'suspended') {
         await audioContext.resume();
@@ -316,6 +335,14 @@ export class SpeechmaticsAudio {
     this.isMicrophoneActive = false;
     this.isMuted = false;
     this.stopAgentSpeech(false);
+
+    // MEMORY FIX: Clear all memory-accumulating arrays to prevent leaks
+    this.audioPlaybackQueue = [];
+    this.recentVoiceActivity = [];
+    this.noiseFloorHistory = [];
+    this.spectralEnergyHistory = [];
+    this.conversationHistory = [];
+    this.hasRecentVoiceActivity = false;
 
     // Clear barge-in validation state
     this.cancelBargeInValidation();
@@ -505,6 +532,14 @@ export class SpeechmaticsAudio {
 
     try {
       const buffer = await this.audioDataToBuffer(audioData);
+
+      // MEMORY FIX: Enforce queue size limit to prevent memory exhaustion on mobile
+      // Drop oldest buffers if queue is full (prefer newer audio over older)
+      if (this.audioPlaybackQueue.length >= this.MAX_AUDIO_QUEUE_SIZE) {
+        devWarn('[Speechmatics] ⚠️ Audio queue full, dropping oldest buffer to prevent memory overflow');
+        this.audioPlaybackQueue.shift(); // Remove oldest
+      }
+
       this.audioPlaybackQueue.push(buffer);
       if (!this.isPlayingAudio) {
         this.playAudioBuffer();

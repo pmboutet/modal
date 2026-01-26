@@ -1946,6 +1946,10 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             });
 
             // Auto-dismiss after 10 seconds
+            // MEMORY LEAK FIX: Clear existing timeout before setting new one
+            if (filteredSpeakerTimeoutRef.current) {
+              clearTimeout(filteredSpeakerTimeoutRef.current);
+            }
             filteredSpeakerTimeoutRef.current = setTimeout(() => {
               setFilteredSpeakerNotification(null);
             }, 10000);
@@ -2182,6 +2186,15 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
       setInterimUser(null);
       setInterimAssistant(null);
       setPendingFinalUser(null);
+
+      // Étape 7: MEMORY LEAK FIX - Clear unbounded refs to prevent memory accumulation
+      // These refs grow during the session and must be cleared on disconnect
+      knownSpeakersRef.current.clear();
+      speakerOrderRef.current.clear();
+      completingStepsRef.current.clear();
+      ignoredSpeakersRef.current.clear();
+      // Reset consultant speaker ref for fresh detection on next connect
+      consultantSpeakerRef.current = null;
 
       devLog('[PremiumVoiceInterface] ✅ Complete disconnection finished - websocket and microphone are OFF');
     } finally {
