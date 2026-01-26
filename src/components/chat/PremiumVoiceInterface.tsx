@@ -313,8 +313,6 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   // Référence à l'élément invisible en bas de la liste des messages (pour auto-scroll)
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  // Flag pour éviter les rechargements multiples de la page
-  const reloadRequestedRef = useRef(false);
   // StrictMode detection: track if this is the first mount (skip it) or second mount (use it)
   const strictModeFirstMountRef = useRef(true);
   // Track steps being completed to prevent duplicate API calls
@@ -2165,19 +2163,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   /**
    * Recharge la page après une déconnexion complète
    * 
-   * Utilisé pour forcer le navigateur à libérer toutes les ressources
-   * (microphone, WebSocket, AudioContext) qui pourraient rester "fantômes".
-   * 
-   * Le flag reloadRequestedRef empêche les rechargements multiples.
+   * NOTE: window.location.reload() a été supprimé car le cleanup propre est maintenant suffisant.
+   * Le reload causait des problèmes quand la connexion WebSocket se fermait de manière inattendue.
    */
-  const reloadPage = useCallback(() => {
-    if (typeof window === 'undefined' || reloadRequestedRef.current) {
-      return;
-    }
-    reloadRequestedRef.current = true;
-    devLog('[PremiumVoiceInterface] 🔁 Reloading page after full disconnect');
-    window.location.reload();
-  }, []);
 
   // ===== GESTION DE LA DÉCONNEXION =====
   /**
@@ -2400,9 +2388,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
     } catch (error) {
       devWarn('[PremiumVoiceInterface] ⚠️ Close disconnect failed, forcing close anyway:', error);
     }
+    // NOTE: No more window.location.reload() - proper cleanup is sufficient
     onClose();
-    reloadPage();
-  }, [disconnect, onClose, reloadPage]);
+  }, [disconnect, onClose]);
 
   const toggleMute = useCallback(async () => {
     devLog('[PremiumVoiceInterface] 🎤 toggleMute called', {
