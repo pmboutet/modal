@@ -476,7 +476,8 @@ export class SpeechmaticsWebSocket {
               likelyCause = 'abnormal_closure_server_or_network';
             }
 
-            const error = new Error(`WebSocket closed unexpectedly: ${event.code} ${event.reason || ''} (likely: ${likelyCause})`);
+            const reasonPart = event.reason ? ` - ${event.reason}` : '';
+            const error = new Error(`WebSocket closed unexpectedly: ${event.code}${reasonPart} (likely: ${likelyCause})`);
 
             // Send to Sentry with full context
             Sentry.captureException(error, {
