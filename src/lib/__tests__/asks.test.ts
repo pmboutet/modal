@@ -1068,21 +1068,22 @@ describe('getLastUserMessageThread', () => {
  * Route Integration Tests
  *
  * These tests verify that routes correctly use the thread resolution functions.
- * - AI response routes (stream, respond) use getLastUserMessageThread to respond in the same thread
+ * - AI response routes (stream, respond) use getOrCreateConversationThread for proper thread isolation
+ *   (BUG-042 fix: getLastUserMessageThread was returning wrong thread in individual_parallel mode)
  * - Non-AI routes (GET, POST, voice-agent/init) use resolveThreadUserId for thread creation
  */
 describe('Route thread assignment consistency', () => {
   const fs = require('fs');
   const path = require('path');
 
-  describe('AI response routes using getLastUserMessageThread', () => {
+  describe('AI response routes using getOrCreateConversationThread (BUG-042 fix)', () => {
     const aiResponseRoutes = [
       'src/app/api/ask/[key]/stream/route.ts',
       'src/app/api/ask/[key]/respond/route.ts',
     ];
 
     aiResponseRoutes.forEach((routePath) => {
-      it(`${routePath} should use getLastUserMessageThread for thread assignment`, () => {
+      it(`${routePath} should use getOrCreateConversationThread for thread assignment`, () => {
         const absolutePath = path.resolve(process.cwd(), routePath);
 
         if (!fs.existsSync(absolutePath)) {
@@ -1092,11 +1093,12 @@ describe('Route thread assignment consistency', () => {
 
         const content = fs.readFileSync(absolutePath, 'utf-8');
 
-        // Check import
-        expect(content).toMatch(/getLastUserMessageThread/);
+        // BUG-042 FIX: Now uses getOrCreateConversationThread instead of getLastUserMessageThread
+        // The comment explaining the fix should still be present
+        expect(content).toMatch(/BUG-042 FIX/);
 
-        // Check usage pattern
-        expect(content).toMatch(/getLastUserMessageThread\s*\(/);
+        // Check usage of new function
+        expect(content).toMatch(/getOrCreateConversationThread\s*\(/);
       });
     });
   });
