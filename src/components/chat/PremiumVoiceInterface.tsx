@@ -36,6 +36,7 @@ import { useInactivityMonitor } from '@/hooks/useInactivityMonitor';
 import { useScrollHideShow } from '@/hooks/useScrollHideShow';
 import { SpeakerAssignmentOverlay, type ParticipantOption, type SpeakerAssignmentDecision, type SpeakerMessage } from './SpeakerAssignmentOverlay';
 import { SpeakerConfirmationOverlay } from './SpeakerConfirmationOverlay';
+import { BargeInSpeakerOverlay } from './BargeInSpeakerOverlay';
 import { VoiceModeTutorial } from './VoiceModeTutorial';
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -160,6 +161,8 @@ interface PremiumVoiceInterfaceProps {
   // If true, session initialization is in progress - skip initial message generation
   // (the init endpoint will handle it)
   isInitializing?: boolean;
+  // Callback when microphone mute state changes (for pausing session timer)
+  onMuteChange?: (isMuted: boolean) => void;
 }
 
 /**
@@ -217,6 +220,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   currentUserId,
   onConversationPlanUpdate,
   isInitializing = false,
+  onMuteChange,
 }: PremiumVoiceInterfaceProps) {
   // Récupération de l'utilisateur connecté pour l'affichage du profil
   const { user } = useAuth();
@@ -238,6 +242,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const [pendingSpeakers, setPendingSpeakers] = useState<string[]>([]);
   // Speaker confirmation state for individual mode (not consultant mode)
   const [speakerPendingConfirmation, setSpeakerPendingConfirmation] = useState<{
+    speaker: string;
+    transcript: string;
+  } | null>(null);
+  // Barge-in speaker confirmation state (when unknown speaker interrupts during TTS)
+  const [bargeInSpeakerPending, setBargeInSpeakerPending] = useState<{
     speaker: string;
     transcript: string;
   } | null>(null);
@@ -672,6 +681,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  // Notify parent when mute state changes (for pausing session timer)
+  useEffect(() => {
+    onMuteChange?.(isMuted);
+  }, [isMuted, onMuteChange]);
 
   // ===== PAGE VISIBILITY HANDLING =====
   // Auto-mute le microphone quand la page devient cachée (switch onglet/app)
@@ -1914,6 +1928,32 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, []);
 
   /**
+   * Handle barge-in speaker confirmation (user confirms they are interrupting)
+   * Accepts the barge-in, stops TTS, and processes the user's message
+   */
+  const handleBargeInSpeakerConfirm = useCallback(() => {
+    devLog('[PremiumVoiceInterface] 🎤 User confirmed barge-in speaker');
+    const agent = agentRef.current;
+    if (agent && 'confirmBargeInSpeaker' in agent) {
+      (agent as SpeechmaticsVoiceAgent).confirmBargeInSpeaker();
+    }
+    setBargeInSpeakerPending(null);
+  }, []);
+
+  /**
+   * Handle barge-in speaker rejection (user says it's not them)
+   * Resumes TTS playback and ignores the interruption
+   */
+  const handleBargeInSpeakerReject = useCallback(() => {
+    devLog('[PremiumVoiceInterface] 🔇 User rejected barge-in speaker - resuming TTS');
+    const agent = agentRef.current;
+    if (agent && 'rejectBargeInSpeaker' in agent) {
+      (agent as SpeechmaticsVoiceAgent).rejectBargeInSpeaker();
+    }
+    setBargeInSpeakerPending(null);
+  }, []);
+
+  /**
    * Handle speaker reassignment from the inline edit dropdown
    * Updates the mapping for the specified speaker to a new participant
    * If no mapping exists for this speaker, creates a new one
@@ -2076,6 +2116,11 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
             devLog(`[${timestamp}] [PremiumVoiceInterface] 🔊 TTS audio playback ended - resuming inactivity timer`);
             inactivityMonitor.resumeTimerAfterDelay(0);
+          },
+          // Speaker-aware barge-in: Show overlay when unknown speaker tries to interrupt
+          onBargeInSpeakerPending: (speaker: string, transcript: string) => {
+            devLog('[PremiumVoiceInterface] ⏸️ Unknown speaker detected during barge-in:', speaker);
+            setBargeInSpeakerPending({ speaker, transcript });
           },
         });
 
@@ -3640,7 +3685,8 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               );
             })}
           </AnimatePresence>
-          {/* Agent thinking indicator - shown when awaiting first streaming token */}
+          {/* Agent thinking/listening indicator - shown when awaiting first streaming token */}
+          {/* Shows "Ah ! Je t'écoute..." when user speaks (barge-in), "L'agent réfléchit..." otherwise */}
           {isAgentThinking && !consultantMode && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -3648,28 +3694,39 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
               exit={{ opacity: 0, y: -10 }}
               className="flex items-start gap-3 py-2 px-4"
             >
-              <div className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 backdrop-blur-sm px-4 py-2">
-                {/* Animated thinking dots */}
+              <div className={cn(
+                "flex items-center gap-2 rounded-xl border backdrop-blur-sm px-4 py-2",
+                interimUser
+                  ? "border-emerald-500/30 bg-emerald-900/20"
+                  : "border-white/20 bg-white/5"
+              )}>
+                {/* Animated dots - faster pulse when listening */}
                 <div className="flex gap-1">
                   {[0, 1, 2].map((i) => (
                     <motion.div
                       key={i}
-                      className="h-1.5 w-1.5 rounded-full bg-white/70"
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        interimUser ? "bg-emerald-400" : "bg-white/70"
+                      )}
                       animate={{
                         scale: [1, 1.4, 1],
                         opacity: [0.4, 1, 0.4],
                       }}
                       transition={{
-                        duration: 0.8,
+                        duration: interimUser ? 0.4 : 0.8,
                         repeat: Infinity,
-                        delay: i * 0.15,
+                        delay: i * (interimUser ? 0.08 : 0.15),
                         ease: "easeInOut",
                       }}
                     />
                   ))}
                 </div>
-                <span className="text-sm text-white/70">
-                  L&apos;agent réfléchit...
+                <span className={cn(
+                  "text-sm",
+                  interimUser ? "text-emerald-300" : "text-white/70"
+                )}>
+                  {interimUser ? "Ah ! Je t'écoute..." : "L'agent réfléchit..."}
                 </span>
               </div>
             </motion.div>
@@ -4203,6 +4260,19 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             recentTranscript={speakerPendingConfirmation.transcript}
             onConfirm={handleSpeakerConfirm}
             onReject={handleSpeakerReject}
+          />
+        </div>
+      )}
+
+      {/* Barge-In Speaker Confirmation Overlay - Appears when unknown speaker interrupts during TTS */}
+      {bargeInSpeakerPending && (
+        <div className="absolute inset-0 z-50 backdrop-blur-md bg-black/40 flex items-center justify-center p-4">
+          <BargeInSpeakerOverlay
+            isOpen={true}
+            speaker={bargeInSpeakerPending.speaker}
+            transcript={bargeInSpeakerPending.transcript}
+            onConfirm={handleBargeInSpeakerConfirm}
+            onReject={handleBargeInSpeakerReject}
           />
         </div>
       )}
