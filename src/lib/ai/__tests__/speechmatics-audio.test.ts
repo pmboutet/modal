@@ -23,20 +23,6 @@ jest.mock('@/lib/utils', () => ({
   devError: jest.fn(),
 }));
 
-// Mock start-of-turn-detection
-const mockValidateStartOfTurn = jest.fn();
-jest.mock('../start-of-turn-detection', () => ({
-  createStartOfTurnDetector: jest.fn(() => ({
-    validateStartOfTurn: mockValidateStartOfTurn,
-  })),
-  resolveStartOfTurnDetectorConfig: jest.fn(() => ({
-    enabled: true,
-    provider: 'anthropic',
-    model: 'claude-3-5-haiku-latest',
-    requestTimeoutMs: 800,
-  })),
-}));
-
 // Mock AudioContext and related Web Audio API
 class MockAudioContext {
   state: AudioContextState = 'running';
@@ -146,7 +132,6 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
   jest.clearAllMocks();
-  mockValidateStartOfTurn.mockReset();
 });
 
 afterEach(() => {
@@ -162,7 +147,7 @@ function createSpeechmaticsAudio(options: {
   ws?: WebSocket | null;
   onBargeIn?: () => void;
   onAudioPlaybackEnd?: () => void;
-  onEchoDetected?: (details?: { transcript: string; matchType: string; similarity: number }) => void;
+  onEchoDetected?: (details?: { transcript: string; speaker?: string; detectedAt: number }) => void;
 } = {}) {
   const audioDedupe = new AudioChunkDedupe();
   const onAudioChunk = jest.fn();
@@ -591,58 +576,33 @@ describe('SpeechmaticsAudio', () => {
     });
   });
 
-  describe('Conversation History', () => {
-    describe('updateConversationHistory', () => {
-      test('should accept conversation history', () => {
-        const audio = createSpeechmaticsAudio();
+  describe('setCurrentAssistantSpeech', () => {
+    test('should set current assistant speech', () => {
+      const audio = createSpeechmaticsAudio();
 
-        audio.updateConversationHistory([
-          { role: 'user', content: 'Hello' },
-          { role: 'assistant', content: 'Hi there!' },
-        ]);
+      audio.setCurrentAssistantSpeech('Hello, I am your assistant.');
 
-        // No error thrown
-        expect(true).toBe(true);
-      });
-
-      test('should accept empty history', () => {
-        const audio = createSpeechmaticsAudio();
-
-        audio.updateConversationHistory([]);
-
-        // No error thrown
-        expect(true).toBe(true);
-      });
+      // No error thrown
+      expect(true).toBe(true);
     });
 
-    describe('setCurrentAssistantSpeech', () => {
-      test('should set current assistant speech', () => {
-        const audio = createSpeechmaticsAudio();
+    test('should accept empty string', () => {
+      const audio = createSpeechmaticsAudio();
 
-        audio.setCurrentAssistantSpeech('Hello, I am your assistant.');
+      audio.setCurrentAssistantSpeech('');
 
-        // No error thrown
-        expect(true).toBe(true);
-      });
+      // No error thrown
+      expect(true).toBe(true);
+    });
 
-      test('should accept empty string', () => {
-        const audio = createSpeechmaticsAudio();
+    test('should clear previous speech and set new', () => {
+      const audio = createSpeechmaticsAudio();
 
-        audio.setCurrentAssistantSpeech('');
+      audio.setCurrentAssistantSpeech('First speech');
+      audio.setCurrentAssistantSpeech('Second speech');
 
-        // No error thrown
-        expect(true).toBe(true);
-      });
-
-      test('should clear previous speech and set new', () => {
-        const audio = createSpeechmaticsAudio();
-
-        audio.setCurrentAssistantSpeech('First speech');
-        audio.setCurrentAssistantSpeech('Second speech');
-
-        // No error thrown
-        expect(true).toBe(true);
-      });
+      // No error thrown
+      expect(true).toBe(true);
     });
   });
 
@@ -808,19 +768,11 @@ describe('SpeechmaticsAudio', () => {
   });
 
   describe('Integration: Barge-in Flow', () => {
-    test('should handle full barge-in flow when AI validates', async () => {
+    test('should return false when no barge-in is pending', async () => {
       jest.useFakeTimers();
 
       const onBargeIn = jest.fn();
       const audio = createSpeechmaticsAudio({ onBargeIn });
-
-      // Set up AI to validate the start of turn
-      mockValidateStartOfTurn.mockResolvedValue({
-        isValidStart: true,
-        isEcho: false,
-        confidence: 0.9,
-        reason: 'Valid user input',
-      });
 
       // Without a pending barge-in, validation should return false
       const result = await audio.validateBargeInWithTranscript('Hello, I need help with something');
@@ -830,23 +782,14 @@ describe('SpeechmaticsAudio', () => {
       jest.useRealTimers();
     });
 
-    test('should handle AI detecting echo', async () => {
-      const onEchoDetected = jest.fn();
-      const audio = createSpeechmaticsAudio({ onEchoDetected });
-
-      // Set up AI to detect echo
-      mockValidateStartOfTurn.mockResolvedValue({
-        isValidStart: false,
-        isEcho: true,
-        confidence: 0.95,
-        reason: 'Echo of assistant speech',
-      });
+    test('should accept speaker parameter for speaker-based filtering', async () => {
+      const audio = createSpeechmaticsAudio();
 
       // Set assistant speech
       audio.setCurrentAssistantSpeech('Hello, how can I help you today?');
 
-      // Validate (no pending barge-in)
-      const result = await audio.validateBargeInWithTranscript('Hello how can I help');
+      // Validate with speaker - should not throw
+      const result = await audio.validateBargeInWithTranscript('Hello how can I help', undefined, 'S1');
 
       expect(result).toBe(false);
     });

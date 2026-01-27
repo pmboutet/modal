@@ -22,14 +22,9 @@ import type {
   SpeechmaticsErrorCallback,
 } from './speechmatics-types';
 
-/**
- * Details about detected echo (when microphone picks up TTS playback)
- */
-export interface EchoDetails {
-  transcript: string;
-  matchType: string;
-  similarity: number;
-}
+// Import and re-export EchoDetails from barge-in module for consistency
+import type { EchoDetails } from './speechmatics-barge-in';
+export type { EchoDetails };
 
 /**
  * Dependencies required by SpeechmaticsResponseHandler
@@ -85,8 +80,7 @@ export class SpeechmaticsResponseHandler {
     // Send a special interim message to clear any displayed user input
     if (details) {
       devLog('[Speechmatics] Echo detected:', {
-        matchType: details.matchType,
-        similarity: details.similarity.toFixed(2),
+        speaker: details.speaker,
         transcriptPreview: details.transcript.substring(0, 50) + (details.transcript.length > 50 ? '...' : ''),
       });
 

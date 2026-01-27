@@ -50,6 +50,7 @@ import {
   processUserMessage as processUserMessageFn,
   type MessageProcessorDeps,
 } from './speechmatics-message-processor';
+import { devLog } from '@/lib/utils';
 
 // Import and re-export types for backward compatibility
 import type {
@@ -107,6 +108,7 @@ export class SpeechmaticsVoiceAgent {
   private onAudioCallback: SpeechmaticsAudioCallback | null = null;
   private onSemanticTurnCallback: ((event: SemanticTurnTelemetryEvent) => void) | null = null;
   private onAudioPlaybackEndCallback: (() => void) | null = null;
+  private onBargeInSpeakerPendingCallback: ((speaker: string, transcript: string, isEchoLikely: boolean) => void) | null = null;
 
   /**
    * Constructeur - Initialise les modules core
@@ -146,6 +148,7 @@ export class SpeechmaticsVoiceAgent {
     onAudio?: SpeechmaticsAudioCallback;
     onSemanticTurn?: (event: SemanticTurnTelemetryEvent) => void;
     onAudioPlaybackEnd?: () => void;
+    onBargeInSpeakerPending?: (speaker: string, transcript: string, isEchoLikely: boolean) => void;
   }) {
     this.onMessageCallback = callbacks.onMessage || null;
     this.onErrorCallback = callbacks.onError || null;
@@ -153,6 +156,7 @@ export class SpeechmaticsVoiceAgent {
     this.onAudioCallback = callbacks.onAudio || null;
     this.onSemanticTurnCallback = callbacks.onSemanticTurn || null;
     this.onAudioPlaybackEndCallback = callbacks.onAudioPlaybackEnd || null;
+    this.onBargeInSpeakerPendingCallback = callbacks.onBargeInSpeakerPending || null;
   }
 
   /**
@@ -194,6 +198,20 @@ export class SpeechmaticsVoiceAgent {
     this.elevenLabsTTS = result.elevenLabsTTS;
     this.semanticTurnConfig = result.semanticTurnConfig;
     this.semanticTurnDetector = result.semanticTurnDetector;
+
+    // Wire up speaker-aware barge-in
+    if (this.audio && this.transcriptionManager) {
+      // Set speaker check functions from TranscriptionManager
+      this.audio.setSpeakerCheckFunctions({
+        isRejected: (s) => this.transcriptionManager?.isRejectedSpeaker(s) || false,
+        isAuthorized: (s) => this.transcriptionManager?.isAuthorizedSpeaker(s) || false,
+      });
+
+      // Set callback for unknown speaker during barge-in
+      this.audio.setOnBargeInSpeakerPending((speaker, transcript, isEchoLikely) => {
+        this.onBargeInSpeakerPendingCallback?.(speaker, transcript, isEchoLikely);
+      });
+    }
   }
 
   private handleWebSocketMessage(data: unknown): void {
@@ -339,6 +357,36 @@ export class SpeechmaticsVoiceAgent {
     this.transcriptionManager?.rejectCandidateSpeaker();
   }
 
+  // ===== BARGE-IN SPEAKER METHODS =====
+
+  /**
+   * Confirm unknown speaker during barge-in.
+   * Called by UI when user clicks "C'est moi" on the barge-in speaker popup.
+   */
+  confirmBargeInSpeaker(): void {
+    this.audio?.confirmBargeInSpeaker();
+  }
+
+  /**
+   * Reject unknown speaker during barge-in.
+   * Called by UI when user clicks "Non" on the barge-in speaker popup.
+   * This resumes playback, continues the TTS response, and adds the speaker to rejected list.
+   * @param speaker - Speaker ID to reject (will be ignored in future barge-ins)
+   */
+  rejectBargeInSpeaker(speaker?: string): void {
+    this.audio?.rejectBargeInSpeaker();
+    if (speaker) {
+      this.transcriptionManager?.addRejectedSpeaker(speaker);
+    }
+  }
+
+  /**
+   * Check if TTS is currently paused for speaker verification.
+   */
+  isPausedForSpeakerCheck(): boolean {
+    return this.audio?.isPausedForSpeakerCheck() || false;
+  }
+
   /**
    * Handle echo detection - delegates to response handler
    */
@@ -357,6 +405,12 @@ export class SpeechmaticsVoiceAgent {
    * Abort current assistant response (called when user interrupts)
    */
   abortResponse(): void {
+    devLog('[Speechmatics] 🛑 abortResponse called:', {
+      hasLlmAbortController: !!this.llmAbortController,
+      hasAudio: !!this.audio,
+      currentState: this.stateMachine.getState(),
+    });
+
     this.stateMachine.transition({ type: 'ABORT' });
 
     if (this.audio) {
@@ -364,8 +418,11 @@ export class SpeechmaticsVoiceAgent {
     }
 
     if (this.llmAbortController) {
+      devLog('[Speechmatics] 🛑 Aborting LLM call via AbortController');
       this.llmAbortController.abort();
       this.llmAbortController = null;
+    } else {
+      devLog('[Speechmatics] ⚠️ No LLM AbortController to abort - LLM might have already returned');
     }
 
     this.onMessageCallback?.({

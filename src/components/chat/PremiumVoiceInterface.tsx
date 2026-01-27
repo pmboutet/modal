@@ -249,6 +249,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   const [bargeInSpeakerPending, setBargeInSpeakerPending] = useState<{
     speaker: string;
     transcript: string;
+    isLikelyEcho: boolean;
   } | null>(null);
   // Counter for speaker detection order (1st user, 2nd user, etc.)
   const speakerOrderRef = useRef<Map<string, number>>(new Map());
@@ -1941,17 +1942,18 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
   }, []);
 
   /**
-   * Handle barge-in speaker rejection (user says it's not them)
-   * Resumes TTS playback and ignores the interruption
+   * Handle barge-in speaker rejection (user says it's not them / it's echo)
+   * Resumes TTS playback, ignores the interruption, and adds speaker to rejected list
    */
   const handleBargeInSpeakerReject = useCallback(() => {
-    devLog('[PremiumVoiceInterface] 🔇 User rejected barge-in speaker - resuming TTS');
+    const speakerToReject = bargeInSpeakerPending?.speaker;
+    devLog('[PremiumVoiceInterface] 🔇 User rejected barge-in speaker - resuming TTS, rejecting:', speakerToReject);
     const agent = agentRef.current;
     if (agent && 'rejectBargeInSpeaker' in agent) {
-      (agent as SpeechmaticsVoiceAgent).rejectBargeInSpeaker();
+      (agent as SpeechmaticsVoiceAgent).rejectBargeInSpeaker(speakerToReject);
     }
     setBargeInSpeakerPending(null);
-  }, []);
+  }, [bargeInSpeakerPending?.speaker]);
 
   /**
    * Handle speaker reassignment from the inline edit dropdown
@@ -2118,9 +2120,9 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             inactivityMonitor.resumeTimerAfterDelay(0);
           },
           // Speaker-aware barge-in: Show overlay when unknown speaker tries to interrupt
-          onBargeInSpeakerPending: (speaker: string, transcript: string) => {
-            devLog('[PremiumVoiceInterface] ⏸️ Unknown speaker detected during barge-in:', speaker);
-            setBargeInSpeakerPending({ speaker, transcript });
+          onBargeInSpeakerPending: (speaker: string, transcript: string, isEchoLikely: boolean) => {
+            devLog('[PremiumVoiceInterface] ⏸️ Unknown speaker detected during barge-in:', speaker, { isEchoLikely });
+            setBargeInSpeakerPending({ speaker, transcript, isLikelyEcho: isEchoLikely });
           },
         });
 
@@ -4271,6 +4273,7 @@ export const PremiumVoiceInterface = React.memo(function PremiumVoiceInterface({
             isOpen={true}
             speaker={bargeInSpeakerPending.speaker}
             transcript={bargeInSpeakerPending.transcript}
+            mode={bargeInSpeakerPending.isLikelyEcho ? 'echo' : 'new-participant'}
             onConfirm={handleBargeInSpeakerConfirm}
             onReject={handleBargeInSpeakerReject}
           />

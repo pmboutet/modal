@@ -28,7 +28,6 @@ import {
   MIN_RESPONSE_INTERVAL_MS,
   MAX_RAPID_RESPONSES,
   RAPID_RESPONSE_WINDOW_MS,
-  ECHO_LOOP_SIMILARITY_THRESHOLD,
   CIRCUIT_BREAKER_COOLDOWN_MS,
 } from './speechmatics-constants';
 import { normalizeForEchoDetection } from './speechmatics-echo-detection';
@@ -43,50 +42,83 @@ const recentResponseTimestamps: number[] = [];
 /** Last time the circuit breaker was triggered */
 let circuitBreakerTriggeredAt: number = 0;
 
-/** Last AI response content for echo comparison */
-let lastAIResponseContent: string = '';
+
+// =============================================================================
+// Duplicate AI Response Prevention (BUG-044)
+// =============================================================================
+
+/** Track recent AI responses to prevent duplicates from race conditions */
+interface RecentAIResponse {
+  content: string;
+  normalizedContent: string;
+  timestamp: number;
+}
+
+const recentAIResponses: RecentAIResponse[] = [];
+const MAX_RECENT_RESPONSES = 3;
+const DUPLICATE_WINDOW_MS = 10000; // 10 second window for duplicate detection
 
 /**
- * Check if a user message looks like an echo of the AI's last response
- * Uses word overlap to detect when microphone picked up TTS playback
+ * Check if an AI response is a duplicate of a recent one
+ * Returns true if this response should be skipped
  */
-function detectPotentialEchoLoop(userMessage: string, recentAgentMessages: string[]): {
-  isLikelyEcho: boolean;
-  similarity: number;
-  matchedWith: string;
-} {
-  const normalizedUser = normalizeForEchoDetection(userMessage);
-  const userWords = normalizedUser.split(/\s+/).filter(w => w.length > 2);
+function isDuplicateAIResponse(content: string): boolean {
+  const now = Date.now();
+  const normalizedContent = normalizeForEchoDetection(content);
 
-  if (userWords.length < 3) {
-    return { isLikelyEcho: false, similarity: 0, matchedWith: '' };
+  // Clean old entries
+  while (recentAIResponses.length > 0 && now - recentAIResponses[0].timestamp > DUPLICATE_WINDOW_MS) {
+    recentAIResponses.shift();
   }
 
-  for (const agentMessage of recentAgentMessages) {
-    const normalizedAgent = normalizeForEchoDetection(agentMessage);
-    const agentWords = new Set(normalizedAgent.split(/\s+/).filter(w => w.length > 2));
+  // Check for duplicates
+  for (const recent of recentAIResponses) {
+    // Check exact match
+    if (recent.normalizedContent === normalizedContent) {
+      devLog('[Speechmatics] 🔄 DUPLICATE AI response detected (exact match) - skipping');
+      return true;
+    }
 
-    if (agentWords.size === 0) continue;
+    // Check high similarity (>90% word overlap)
+    const newWords = normalizedContent.split(/\s+/).filter(w => w.length > 2);
+    const recentWords = new Set(recent.normalizedContent.split(/\s+/).filter(w => w.length > 2));
 
-    let matchedWords = 0;
-    for (const word of userWords) {
-      if (agentWords.has(word)) {
-        matchedWords++;
+    if (newWords.length > 0 && recentWords.size > 0) {
+      let matchedWords = 0;
+      for (const word of newWords) {
+        if (recentWords.has(word)) {
+          matchedWords++;
+        }
+      }
+      const similarity = matchedWords / Math.max(newWords.length, recentWords.size);
+
+      if (similarity > 0.9) {
+        devLog('[Speechmatics] 🔄 DUPLICATE AI response detected (similarity:', (similarity * 100).toFixed(0) + '%) - skipping');
+        return true;
       }
     }
-
-    const similarity = matchedWords / userWords.length;
-
-    if (similarity >= ECHO_LOOP_SIMILARITY_THRESHOLD) {
-      return {
-        isLikelyEcho: true,
-        similarity,
-        matchedWith: agentMessage.substring(0, 100) + (agentMessage.length > 100 ? '...' : ''),
-      };
-    }
   }
 
-  return { isLikelyEcho: false, similarity: 0, matchedWith: '' };
+  return false;
+}
+
+/**
+ * Record an AI response as processed
+ */
+function recordAIResponse(content: string): void {
+  const now = Date.now();
+  const normalizedContent = normalizeForEchoDetection(content);
+
+  // Clean old entries to keep only MAX_RECENT_RESPONSES
+  while (recentAIResponses.length >= MAX_RECENT_RESPONSES) {
+    recentAIResponses.shift();
+  }
+
+  recentAIResponses.push({
+    content,
+    normalizedContent,
+    timestamp: now,
+  });
 }
 
 /**
@@ -139,7 +171,8 @@ function recordResponseTimestamp(): void {
 export function resetLoopDetectionState(): void {
   recentResponseTimestamps.length = 0;
   circuitBreakerTriggeredAt = 0;
-  lastAIResponseContent = '';
+  // BUG-044: Also reset duplicate AI response tracking
+  recentAIResponses.length = 0;
   devLog('[Speechmatics] Loop detection state reset');
 }
 
@@ -217,34 +250,9 @@ export async function processUserMessage(
     return;
   }
 
-  // Check if user message looks like recent AI speech (echo detection)
-  const recentAgentMessages = deps.stateMachine.getRecentHistory(3)
-    .filter(msg => msg.role === 'agent')
-    .map(msg => msg.content);
-
-  if (recentAgentMessages.length > 0) {
-    const echoCheck = detectPotentialEchoLoop(transcript, recentAgentMessages);
-    if (echoCheck.isLikelyEcho) {
-      devError('[Speechmatics] 🔄 ECHO LOOP DETECTED - User message matches AI speech');
-      devError('[Speechmatics] Similarity:', (echoCheck.similarity * 100).toFixed(1) + '%');
-      devError('[Speechmatics] User said:', transcript.substring(0, 80) + '...');
-      devError('[Speechmatics] Matched AI:', echoCheck.matchedWith);
-
-      // Don't process this message - it's likely the microphone picking up TTS
-      Sentry.addBreadcrumb({
-        category: 'speechmatics',
-        message: 'Echo loop detected - message blocked',
-        level: 'warning',
-        data: {
-          userMessage: transcript.substring(0, 100),
-          similarity: echoCheck.similarity,
-          matchedWith: echoCheck.matchedWith,
-        },
-      });
-
-      return;
-    }
-  }
+  // NOTE: Echo detection is now handled upstream via speaker identity.
+  // If speaker == primary speaker -> process, if speaker != primary -> popup shown to user.
+  // No need for word-overlap echo detection here anymore.
 
   if (deps.stateMachine.isGenerating()) {
     // SAFETY CHECK: Auto-reset if generation has been stuck for too long
@@ -273,20 +281,14 @@ export async function processUserMessage(
   }
 
   // Emit GENERATION_START event to state machine
+  devLog('[Speechmatics] 🚀 GENERATION_START - LLM call starting for:', transcript.substring(0, 50));
   deps.stateMachine.transition({ type: 'GENERATION_START', message: transcript });
 
   // Add user message to conversation history
   deps.stateMachine.addUserMessage(transcript);
 
-  // Update audio manager with conversation history for start-of-turn detection
+  // Get audio for TTS playback later
   const audio = deps.getAudio();
-  if (audio) {
-    const historyForDetection = deps.stateMachine.getRecentHistory(RECENT_HISTORY_COUNT).map(msg => ({
-      role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
-      content: msg.content,
-    }));
-    audio.updateConversationHistory(historyForDetection);
-  }
 
   // In consultant mode (disableLLM), skip LLM response generation entirely
   if (config?.disableLLM) {
@@ -313,6 +315,29 @@ export async function processUserMessage(
       }
     }
     return;
+  }
+
+  // SAFETY GUARD: Handle case when an LLM call is already in progress
+  const existingController = deps.getLlmAbortController();
+  if (existingController) {
+    const context = deps.stateMachine.getContext();
+
+    // If this is due to user continuation (user spoke during generation and abort was triggered),
+    // DON'T process - the user is still speaking, wait for complete message
+    if (context.responseAbortedDueToUserContinuation) {
+      devLog('[Speechmatics] Ignoring message during user continuation - abort in progress');
+      return;
+    }
+
+    // A new complete message arrived while LLM is generating → abort old call and process new one
+    // This prevents "stale" responses and ensures the latest user message is addressed
+    devWarn('[Speechmatics] New message arrived while LLM in progress - aborting current call to process new message');
+    existingController.abort();
+    deps.setLlmAbortController(null);
+    // Remove the incomplete user message from history since we're abandoning that response
+    deps.stateMachine.removeLastMessage('user');
+    deps.stateMachine.transition({ type: 'ABORT' });
+    // Continue to process the new message below...
   }
 
   // Create abort controller for this LLM request
@@ -385,22 +410,24 @@ export async function processUserMessage(
       devLog('[Speechmatics] LLM response NOT dropped - partial was stale');
     }
 
+    // BUG-044 FIX: Check for duplicate AI response (race condition prevention)
+    if (isDuplicateAIResponse(llmResponse)) {
+      devLog('[Speechmatics] 🛑 Duplicate AI response detected - dropping to prevent duplicates in DB');
+      // Remove the user message we added since we're not responding
+      deps.stateMachine.removeLastMessage('user');
+      deps.stateMachine.transition({ type: 'ABORT' });
+      return;
+    }
+
+    // Record this response to detect future duplicates
+    recordAIResponse(llmResponse);
+
     // Add to conversation history
     deps.stateMachine.addAgentMessage(llmResponse);
 
     // LOOP DETECTION: Record this response for rate limiting
     recordResponseTimestamp();
-    lastAIResponseContent = llmResponse;
     devLog('[Speechmatics] ✅ Response generated, timestamp recorded for loop detection');
-
-    // Update audio manager with conversation history
-    if (audio) {
-      const historyForDetection = deps.stateMachine.getRecentHistory(RECENT_HISTORY_COUNT).map(msg => ({
-        role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
-        content: msg.content,
-      }));
-      audio.updateConversationHistory(historyForDetection);
-    }
 
     // Notify callback with FINAL agent response
     deps.onMessageCallback?.({

@@ -707,6 +707,63 @@ export class TranscriptionManager {
   }
 
   /**
+   * Check if a speaker is authorized for barge-in.
+   * Returns true if speaker is the primary speaker or in the whitelist.
+   * Used by barge-in module to decide whether to interrupt TTS.
+   *
+   * @param speaker Speaker ID to check (e.g., "S1")
+   * @returns true if this speaker is authorized (can interrupt)
+   */
+  isAuthorizedSpeaker(speaker: string | undefined): boolean {
+    // If speaker filtering is disabled, all speakers are authorized
+    if (!this.speakerFilteringEnabled) {
+      return true;
+    }
+
+    // No speaker info or unknown speaker → not authorized
+    if (!speaker || speaker === 'UU') {
+      return false;
+    }
+
+    // During establishment phase (no primary speaker yet), no one is authorized yet
+    if (!this.primarySpeaker) {
+      return false;
+    }
+
+    // Check if primary or in whitelist
+    return speaker === this.primarySpeaker || this.allowedSpeakers.has(speaker);
+  }
+
+  /**
+   * Check if a speaker has been explicitly rejected.
+   * Returns true if speaker is in the rejectedSpeakers set.
+   * Used by barge-in module for early exit (no pause needed).
+   *
+   * @param speaker Speaker ID to check (e.g., "S2")
+   * @returns true if this speaker was rejected (should be ignored)
+   */
+  isRejectedSpeaker(speaker: string | undefined): boolean {
+    if (!speaker) {
+      return false;
+    }
+    return this.rejectedSpeakers.has(speaker);
+  }
+
+  /**
+   * Add a speaker to the rejected list.
+   * Called when user rejects an unknown speaker during barge-in.
+   * Future transcripts from this speaker will be automatically filtered.
+   *
+   * @param speaker Speaker ID to reject (e.g., "S2")
+   */
+  addRejectedSpeaker(speaker: string): void {
+    if (speaker && speaker !== 'UU') {
+      this.rejectedSpeakers.add(speaker);
+      console.log(`[Transcription] Added rejected speaker: ${speaker}`);
+    }
+  }
+
+  /**
    * Check if filtered speaker safety net should trigger.
    * In noisy environments, filtered speakers (background noise) may keep sending partials
    * while the allowed speaker has stopped talking. This safety net forces processing
@@ -733,36 +790,35 @@ export class TranscriptionManager {
       return;
     }
 
+    // Track this speaker
     if (speaker === this.candidateSpeaker) {
-      // Same speaker twice in a row
       this.candidateConfirmationCount++;
-
-      if (this.requireSpeakerConfirmation) {
-        // Require user confirmation before establishing
-        if (this.candidateConfirmationCount >= 2 && !this.awaitingSpeakerConfirmation) {
-          this.awaitingSpeakerConfirmation = true;
-          console.log(`[Transcription] Speaker ${speaker} needs confirmation`);
-          this.onSpeakerPendingConfirmation?.(speaker, transcript);
-          // Set timeout to auto-reject if user doesn't confirm in time
-          this.speakerConfirmationTimeout = setTimeout(() => {
-            if (this.awaitingSpeakerConfirmation) {
-              devWarn('[Transcription] Speaker confirmation timeout - auto-rejecting');
-              this.rejectCandidateSpeaker();
-            }
-          }, this.SPEAKER_CONFIRMATION_TIMEOUT_MS);
-        }
-      } else {
-        // Auto-establish after 2 consecutive (original behavior)
-        if (this.candidateConfirmationCount >= 2) {
-          this.primarySpeaker = speaker;
-          console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
-          this.onSpeakerEstablished?.(this.primarySpeaker);
-        }
-      }
     } else {
-      // Different speaker -> reset candidate
+      // Different speaker -> set as new candidate
       this.candidateSpeaker = speaker;
       this.candidateConfirmationCount = 1;
+    }
+
+    if (this.requireSpeakerConfirmation) {
+      // Show confirmation popup immediately on first non-UU speaker detection
+      // This ensures we establish the speaker at the START of the conversation
+      this.awaitingSpeakerConfirmation = true;
+      console.log(`[Transcription] Speaker ${speaker} needs confirmation (first detection)`);
+      this.onSpeakerPendingConfirmation?.(speaker, transcript);
+      // Set timeout to auto-reject if user doesn't confirm in time
+      this.speakerConfirmationTimeout = setTimeout(() => {
+        if (this.awaitingSpeakerConfirmation) {
+          devWarn('[Transcription] Speaker confirmation timeout - auto-rejecting');
+          this.rejectCandidateSpeaker();
+        }
+      }, this.SPEAKER_CONFIRMATION_TIMEOUT_MS);
+    } else {
+      // Auto-establish after 2 consecutive (original behavior when no confirmation required)
+      if (this.candidateConfirmationCount >= 2 && speaker === this.candidateSpeaker) {
+        this.primarySpeaker = speaker;
+        console.log(`[Transcription] Primary speaker established: ${this.primarySpeaker}`);
+        this.onSpeakerEstablished?.(this.primarySpeaker);
+      }
     }
   }
 

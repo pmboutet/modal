@@ -174,23 +174,8 @@ export const AUDIO_FADE_DURATION_S = 0.1;
 export const AUDIO_CONTEXT_RESUME_DELAY_MS = 100;
 
 // =============================================================================
-// Echo Detection
+// Barge-in Validation
 // =============================================================================
-
-/** Fuzzy word match threshold for echo detection (40% overlap) */
-export const ECHO_FUZZY_THRESHOLD = 0.4;
-
-/** Lower fuzzy threshold when speaker mismatch detected via diarization (25% overlap) */
-export const ECHO_SUSPICIOUS_SPEAKER_THRESHOLD = 0.25;
-
-/** Minimum word length to consider in echo detection comparison */
-export const ECHO_MIN_WORD_LENGTH = 2;
-
-/** Maximum window size for sliding window echo detection */
-export const ECHO_SLIDING_WINDOW_MAX_SIZE = 7;
-
-/** Minimum window size for sliding window echo detection */
-export const ECHO_SLIDING_WINDOW_MIN_SIZE = 2;
 
 /** Minimum words required for barge-in validation (in grace period) */
 export const BARGE_IN_MIN_WORDS_GRACE_PERIOD = 3;
@@ -244,10 +229,10 @@ export const SIGNIFICANT_NEW_WORDS_THRESHOLD = 3;
 export const MIN_CONTENT_LENGTH = 2;
 
 // =============================================================================
-// Loop Detection (Anti-Echo Protection)
+// Loop Detection (Rate Limiting)
 // =============================================================================
 
-/** Minimum time between AI responses to prevent echo loops (2 seconds) */
+/** Minimum time between AI responses to prevent loops (2 seconds) */
 export const MIN_RESPONSE_INTERVAL_MS = 2000;
 
 /** Maximum rapid responses before triggering circuit breaker */
@@ -255,9 +240,6 @@ export const MAX_RAPID_RESPONSES = 3;
 
 /** Time window for counting rapid responses (10 seconds) */
 export const RAPID_RESPONSE_WINDOW_MS = 10000;
-
-/** Similarity threshold for detecting user message that looks like AI speech (60% word overlap) */
-export const ECHO_LOOP_SIMILARITY_THRESHOLD = 0.6;
 
 /** Circuit breaker cooldown after detecting potential loop (5 seconds) */
 export const CIRCUIT_BREAKER_COOLDOWN_MS = 5000;
